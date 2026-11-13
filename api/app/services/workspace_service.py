@@ -8,7 +8,6 @@ from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session, joinedload
 
-from app.config.default_ontology_initializer import DefaultOntologyInitializer
 from app.core.error_codes import BizCode
 from app.core.exceptions import BusinessException, PermissionDeniedException
 from app.core.logging_config import get_business_logger
@@ -1219,72 +1218,8 @@ async def create_workspace(
         db.flush()  # 使用 flush 而不是 commit，获取 ID 但不提交事务
         db.refresh(db_workspace)
 
-        # Initialize default ontology scenes for the workspace (先创建本体场景)
-        default_scene_id = None
-        default_scene_name = None
-        try:
-            initializer = DefaultOntologyInitializer(db)
-            success, error_msg = initializer.initialize_default_scenes(
-                db_workspace.id, language=language
-            )
-
-            if success:
-                business_logger.info(
-                    f"为工作空间 {db_workspace.id} 创建默认本体场景成功 (language={language})"
-                )
-
-                # 获取默认场景ID，优先使用"在线教育"场景，如果不存在则使用"情感陪伴"场景
-                from app.repositories.ontology_scene_repository import OntologySceneRepository
-                from app.config.default_ontology_config import (
-                    ONLINE_EDUCATION_SCENE,
-                    EMOTIONAL_COMPANION_SCENE,
-                    get_scene_name
-                )
-
-                scene_repo = OntologySceneRepository(db)
-
-                # 优先尝试获取教育场景
-                education_scene_name = get_scene_name(ONLINE_EDUCATION_SCENE, language)
-                education_scene = scene_repo.get_by_name(education_scene_name, db_workspace.id)
-
-                if education_scene:
-                    default_scene_id = education_scene.scene_id
-                    default_scene_name = education_scene.scene_name
-                    business_logger.info(
-                        f"获取到教育场景ID用于默认记忆配置: {default_scene_id} (scene_name={education_scene_name})"
-                    )
-                else:
-                    # 如果教育场景不存在，尝试获取情感陪伴场景
-                    companion_scene_name = get_scene_name(EMOTIONAL_COMPANION_SCENE, language)
-                    companion_scene = scene_repo.get_by_name(companion_scene_name, db_workspace.id)
-
-                    if companion_scene:
-                        default_scene_id = companion_scene.scene_id
-                        default_scene_name = companion_scene.scene_name
-                        business_logger.info(
-                            f"教育场景不存在，使用情感陪伴场景ID用于默认记忆配置: {default_scene_id} (scene_name={companion_scene_name})"
-                        )
-                    else:
-                        business_logger.warning(
-                            f"未找到任何默认场景 (education={education_scene_name}, companion={companion_scene_name})"
-                        )
-            else:
-                business_logger.warning(
-                    f"为工作空间 {db_workspace.id} 创建默认本体场景失败: {error_msg} (language={language})"
-                )
-        except Exception as ontology_error:
-            business_logger.error(
-                f"为工作空间 {db_workspace.id} 创建默认本体场景异常: {str(ontology_error)} (language={language})"
-            )
-            # Don't fail workspace creation if default ontology initialization fails
-            # The workspace can still function without default ontology scenes
-
         memory_config_service = MemoryConfigService(db)
-        config_id = memory_config_service.create_workspace_default_config(
-            db_workspace,
-            default_scene_id,
-            default_scene_name
-        )
+        config_id = memory_config_service.create_workspace_default_config(db_workspace)
         db_workspace.memory_config = config_id
         db.flush()
         db.refresh(db_workspace)

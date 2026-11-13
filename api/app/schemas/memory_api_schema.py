@@ -95,8 +95,10 @@ class ConfigCreateRequest(BaseModel):
     """Request schema for creating a new memory config."""
     config_name: str = Field(..., description="Configuration name")
     config_desc: Optional[str] = Field("", description="Configuration description")
-    scene_id: uuid.UUID = Field(..., description="Associated ontology scene ID (UUID, required)")
-    
+    # The compatibility notice does not retire create_config.scene_id. Keep accepting it,
+    # but the retired ontology is no longer queried or written by the service layer.
+    # 在v0.5.11实现这些契约变更和字段收缩。
+    scene_id: Optional[uuid.UUID] = Field(None, description="Compatibility field; no longer effective")
     llm_id: Optional[str] = Field(None, description="LLM model configuration ID")
     embedding_id: Optional[str] = Field(None, description="Embedding model configuration ID")
     rerank_id: Optional[str] = Field(None, description="Reranking model configuration ID")
@@ -117,12 +119,14 @@ class ConfigUpdateRequest(BaseModel):
         config_id: Configuration UUID to update (required)
         config_name: New configuration name
         config_desc: New configuration description
-        scene_id: New associated ontology scene ID
     """
     config_id: str = Field(..., description="Configuration ID to update")
     config_name: Optional[str] = Field(None, description="Configuration name")
     config_desc: Optional[str] = Field(None, description="Configuration description")
-    scene_id: Optional[uuid.UUID] = Field(None, description="Associated ontology scene ID")
+    # Retained for callers because update_config is not in the announced removal list.
+    # It is accepted as a no-op and never restores writes to the retired ontology tables.
+    # 在v0.5.11实现这些契约变更和字段收缩。
+    scene_id: Optional[uuid.UUID] = Field(None, description="Compatibility field; no longer effective")
 
     @field_validator("config_id")
     @classmethod
@@ -180,7 +184,6 @@ class ConfigUpdateExtractedRequest(BaseModel):
         include_dialogue_context: Optional boolean for including dialogue context in retrieval
         max_context: Optional int for maximum dialogue context length in characters
         pruning_enabled: Optional boolean to enable intelligent semantic pruning
-        pruning_scene: Optional string for semantic pruning scene
         pruning_threshold: Optional float (0-0.9) for semantic pruning threshold
         enable_self_reflexion: Optional boolean to enable self-reflexion
         iteration_period: Optional string for reflexion iteration period in hours (1, 3, 6, 12, 24)
@@ -204,7 +207,10 @@ class ConfigUpdateExtractedRequest(BaseModel):
     max_context: Optional[int] = Field(None, gt=100, description="maximum dialogue context length in characters")
      # 剪枝配置：与 runtime.json 中 pruning 段对应
     pruning_enabled: Optional[bool] = Field(None, description="whether to enable intelligent semantic pruning")
-    pruning_scene: Optional[str] = Field(None, description="semantic pruning scene")
+    # update_config_extracted is not in the announced field-removal list. Preserve
+    # the request shape, while treating this legacy ontology-derived value as a no-op.
+    # 在v0.5.11实现这些契约变更和字段收缩。
+    pruning_scene: Optional[str] = Field(None, description="Compatibility field; no longer effective")
     pruning_threshold: Optional[float] = Field(None, ge=0.0, le=0.9, description="semantic pruning threshold (0-0.9)")
     enable_self_reflexion: Optional[bool] = Field(None, description="whether to enable self-reflexion")
     iteration_period: Optional[Literal["1", "3", "6", "12", "24"]] = Field(None, description="reflexion iteration period in hours (1, 3, 6, 12, 24)")
@@ -261,15 +267,9 @@ class EmotionConfigUpdateRequest(BaseModel):
     Attributes:
         config_id: Configuration UUID to update (required)
         emotion_enabled: Whether to enable emotion extraction
-        emotion_extract_keywords: Whether to extract emotion keywords
-        emotion_min_intensity: Minimum emotion intensity threshold (0.0-1.0)
-        emotion_enable_subject: Whether to enable subject classification for emotions
     """
     config_id: str = Field(..., description="Configuration ID (UUID)")
     emotion_enabled: bool = Field(..., description="Whether to enable emotion extraction")
-    emotion_extract_keywords: bool = Field(..., description="Whether to extract emotion keywords")
-    emotion_min_intensity: float = Field(..., ge=0.0, le=1.0, description="Minimum emotion intensity threshold")
-    emotion_enable_subject: bool = Field(..., description="Whether to enable subject classification for emotions")
 
     @field_validator("config_id")
     @classmethod

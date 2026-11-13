@@ -17,6 +17,7 @@ READ_ONLY_PG_REPOSITORIES = {
     SERVICE_ROOT / "src/repositories/memory_config.py",
     SERVICE_ROOT / "src/repositories/model_config.py",
     SERVICE_ROOT / "src/repositories/workspace.py",
+    SERVICE_ROOT / "src/repositories/working_memory.py",
 }
 FORBIDDEN_SQL_BUILDERS = {"text", "insert", "update", "delete"}
 FORBIDDEN_SESSION_METHODS = {"add", "add_all", "commit", "delete", "flush", "merge"}

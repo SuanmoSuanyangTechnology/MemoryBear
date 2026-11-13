@@ -3778,7 +3778,7 @@
           "V1 - Memory API"
         ],
         "summary": "Read Memory Internal",
-        "description": "Read memory synchronously (internal).\n\nRequires API Key with 'memory' scope.\nExtended version of /read/sync that supports `include` (Neo4j node types filter)\nand `limit` (max memories to return).",
+        "description": "Read memory synchronously (internal).\n\nRequires API Key with 'memory' scope.\nExtended version of /read/sync that supports `include` (Neo4j node types filter)\nand `limit` (max memories to return).\n``include_metadata`` (default True) controls whether the user profile metadata\nis loaded at all: when False it is excluded from both the returned memories and\nthe query-splitting / summary context.",
         "operationId": "read_memory_internal_v1_memory_read_internal_post",
         "requestBody": {
           "content": {
@@ -4357,45 +4357,6 @@
         "summary": "Read All Config",
         "description": "List all memory configs with full details (enhanced version).\n\nReturns complete config fields for the authorized workspace.\nNo config_id ownership check needed — results are filtered by workspace.",
         "operationId": "read_all_config_v1_memory_config_read_all_config_get",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ApiKeyAuth"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/v1/memory_config/scenes/simple": {
-      "get": {
-        "tags": [
-          "V1 - Memory Config API"
-        ],
-        "summary": "Get Ontology Scenes",
-        "description": "Get available ontology scenes for the workspace.\n\nReturns a simple list of scene_id and scene_name for dropdown selection.\nUsed before creating a memory config to choose which ontology scene to associate.",
-        "operationId": "get_ontology_scenes_v1_memory_config_scenes_simple_get",
         "requestBody": {
           "content": {
             "application/json": {
@@ -6811,697 +6772,6 @@
         }
       }
     },
-    "/v1/memory/ontology/extract": {
-      "post": {
-        "tags": [
-          "V1 - Ontology API"
-        ],
-        "summary": "Extract Ontology",
-        "description": "Extract ontology classes from scenario description.\n\nRequires API Key with 'memory' scope.",
-        "operationId": "extract_ontology_v1_memory_ontology_extract_post",
-        "parameters": [
-          {
-            "name": "X-Language-Type",
-            "in": "header",
-            "required": false,
-            "schema": {
-              "type": "string",
-              "title": "X-Language-Type"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/Body_extract_ontology_v1_memory_ontology_extract_post"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/v1/memory/ontology/scene": {
-      "post": {
-        "tags": [
-          "V1 - Ontology API"
-        ],
-        "summary": "Create Scene",
-        "description": "Create a new ontology scene.\n\nRequires API Key with 'memory' scope.",
-        "operationId": "create_scene_v1_memory_ontology_scene_post",
-        "parameters": [
-          {
-            "name": "X-Language-Type",
-            "in": "header",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "X-Language-Type"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/Body_create_scene_v1_memory_ontology_scene_post"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/v1/memory/ontology/scene/{scene_id}": {
-      "put": {
-        "tags": [
-          "V1 - Ontology API"
-        ],
-        "summary": "Update Scene",
-        "description": "Update an ontology scene.\n\nRequires API Key with 'memory' scope.",
-        "operationId": "update_scene_v1_memory_ontology_scene__scene_id__put",
-        "parameters": [
-          {
-            "name": "scene_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Scene Id"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/Body_update_scene_v1_memory_ontology_scene__scene_id__put"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      },
-      "delete": {
-        "tags": [
-          "V1 - Ontology API"
-        ],
-        "summary": "Delete Scene",
-        "description": "Delete an ontology scene and all its classes.\n\nRequires API Key with 'memory' scope.",
-        "operationId": "delete_scene_v1_memory_ontology_scene__scene_id__delete",
-        "parameters": [
-          {
-            "name": "scene_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Scene Id"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ApiKeyAuth"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/v1/memory/ontology/scenes/simple": {
-      "get": {
-        "tags": [
-          "V1 - Ontology API"
-        ],
-        "summary": "Get Scenes Simple",
-        "description": "Get simple scene list (id + name only, for dropdown).\n\nRequires API Key with 'memory' scope.",
-        "operationId": "get_scenes_simple_v1_memory_ontology_scenes_simple_get",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ApiKeyAuth"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/v1/memory/ontology/scenes": {
-      "get": {
-        "tags": [
-          "V1 - Ontology API"
-        ],
-        "summary": "Get Scenes",
-        "description": "Get scene list with pagination and fuzzy search.\n\nRequires API Key with 'memory' scope.",
-        "operationId": "get_scenes_v1_memory_ontology_scenes_get",
-        "parameters": [
-          {
-            "name": "scene_name",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "Scene name keyword for fuzzy search",
-              "title": "Scene Name"
-            },
-            "description": "Scene name keyword for fuzzy search"
-          },
-          {
-            "name": "page",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "integer"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "Page number (from 1)",
-              "title": "Page"
-            },
-            "description": "Page number (from 1)"
-          },
-          {
-            "name": "pagesize",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "integer"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "Page size",
-              "title": "Pagesize"
-            },
-            "description": "Page size"
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ApiKeyAuth"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/v1/memory/ontology/class": {
-      "post": {
-        "tags": [
-          "V1 - Ontology API"
-        ],
-        "summary": "Create Class",
-        "description": "Create ontology class(es) in a scene (supports batch).\n\nRequires API Key with 'memory' scope.",
-        "operationId": "create_class_v1_memory_ontology_class_post",
-        "parameters": [
-          {
-            "name": "X-Language-Type",
-            "in": "header",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "X-Language-Type"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/Body_create_class_v1_memory_ontology_class_post"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/v1/memory/ontology/class/{class_id}": {
-      "put": {
-        "tags": [
-          "V1 - Ontology API"
-        ],
-        "summary": "Update Class",
-        "description": "Update an ontology class.\n\nRequires API Key with 'memory' scope.",
-        "operationId": "update_class_v1_memory_ontology_class__class_id__put",
-        "parameters": [
-          {
-            "name": "class_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Class Id"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/Body_update_class_v1_memory_ontology_class__class_id__put"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      },
-      "delete": {
-        "tags": [
-          "V1 - Ontology API"
-        ],
-        "summary": "Delete Class",
-        "description": "Delete an ontology class.\n\nRequires API Key with 'memory' scope.",
-        "operationId": "delete_class_v1_memory_ontology_class__class_id__delete",
-        "parameters": [
-          {
-            "name": "class_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Class Id"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ApiKeyAuth"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      },
-      "get": {
-        "tags": [
-          "V1 - Ontology API"
-        ],
-        "summary": "Get Class",
-        "description": "Get a single ontology class by ID.\n\nRequires API Key with 'memory' scope.",
-        "operationId": "get_class_v1_memory_ontology_class__class_id__get",
-        "parameters": [
-          {
-            "name": "class_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Class Id"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ApiKeyAuth"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/v1/memory/ontology/classes": {
-      "get": {
-        "tags": [
-          "V1 - Ontology API"
-        ],
-        "summary": "Get Classes",
-        "description": "Get class list for a scene with optional fuzzy search.\n\nRequires API Key with 'memory' scope.",
-        "operationId": "get_classes_v1_memory_ontology_classes_get",
-        "parameters": [
-          {
-            "name": "scene_id",
-            "in": "query",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "description": "Scene ID",
-              "title": "Scene Id"
-            },
-            "description": "Scene ID"
-          },
-          {
-            "name": "class_name",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "Class name keyword for fuzzy search",
-              "title": "Class Name"
-            },
-            "description": "Class name keyword for fuzzy search"
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ApiKeyAuth"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/v1/memory/ontology/import": {
-      "post": {
-        "tags": [
-          "V1 - Ontology API"
-        ],
-        "summary": "Import Owl File",
-        "description": "Import OWL/TTL file and create a new scene.\n\nRequires API Key with 'memory' scope.",
-        "operationId": "import_owl_file_v1_memory_ontology_import_post",
-        "requestBody": {
-          "content": {
-            "multipart/form-data": {
-              "schema": {
-                "$ref": "#/components/schemas/Body_import_owl_file_v1_memory_ontology_import_post"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/v1/memory/ontology/export": {
-      "post": {
-        "tags": [
-          "V1 - Ontology API"
-        ],
-        "summary": "Export Owl By Scene",
-        "description": "Export OWL/TTL file by scene.\n\nRequires API Key with 'memory' scope.",
-        "operationId": "export_owl_by_scene_v1_memory_ontology_export_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/Body_export_owl_by_scene_v1_memory_ontology_export_post"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
     "/v1/memory/preference/recall": {
       "post": {
         "tags": [
@@ -9078,20 +8348,6 @@
         ],
         "title": "Body_create_chunks_batch_v1_chunks__kb_id___document_id__chunk_batch_post"
       },
-      "Body_create_class_v1_memory_ontology_class_post": {
-        "properties": {
-          "api_key_auth": {
-            "$ref": "#/components/schemas/ApiKeyAuth"
-          },
-          "message": {
-            "type": "string",
-            "title": "Message",
-            "description": "Request body"
-          }
-        },
-        "type": "object",
-        "title": "Body_create_class_v1_memory_ontology_class_post"
-      },
       "Body_create_document_v1_documents_document_post": {
         "properties": {
           "api_key_auth": {
@@ -9187,20 +8443,6 @@
         "type": "object",
         "title": "Body_create_memory_config_v1_memory_config_create_config_post"
       },
-      "Body_create_scene_v1_memory_ontology_scene_post": {
-        "properties": {
-          "api_key_auth": {
-            "$ref": "#/components/schemas/ApiKeyAuth"
-          },
-          "message": {
-            "type": "string",
-            "title": "Message",
-            "description": "Request body"
-          }
-        },
-        "type": "object",
-        "title": "Body_create_scene_v1_memory_ontology_scene_post"
-      },
       "Body_custom_text_v1_files_customtext_post": {
         "properties": {
           "api_key_auth": {
@@ -9223,34 +8465,6 @@
           "content"
         ],
         "title": "Body_custom_text_v1_files_customtext_post"
-      },
-      "Body_export_owl_by_scene_v1_memory_ontology_export_post": {
-        "properties": {
-          "api_key_auth": {
-            "$ref": "#/components/schemas/ApiKeyAuth"
-          },
-          "message": {
-            "type": "string",
-            "title": "Message",
-            "description": "Request body"
-          }
-        },
-        "type": "object",
-        "title": "Body_export_owl_by_scene_v1_memory_ontology_export_post"
-      },
-      "Body_extract_ontology_v1_memory_ontology_extract_post": {
-        "properties": {
-          "api_key_auth": {
-            "$ref": "#/components/schemas/ApiKeyAuth"
-          },
-          "message": {
-            "type": "string",
-            "title": "Message",
-            "description": "Request body"
-          }
-        },
-        "type": "object",
-        "title": "Body_extract_ontology_v1_memory_ontology_extract_post"
       },
       "Body_file_update_api_memory_file_post": {
         "properties": {
@@ -9341,75 +8555,6 @@
           "file"
         ],
         "title": "Body_import_app_api_apps_import_post"
-      },
-      "Body_import_owl_file_api_memory_ontology_import_post": {
-        "properties": {
-          "scene_name": {
-            "type": "string",
-            "title": "Scene Name",
-            "description": "场景名称"
-          },
-          "scene_description": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Scene Description",
-            "description": "场景描述（可选）"
-          },
-          "file": {
-            "type": "string",
-            "format": "binary",
-            "title": "File",
-            "description": "OWL/TTL文件"
-          }
-        },
-        "type": "object",
-        "required": [
-          "scene_name",
-          "file"
-        ],
-        "title": "Body_import_owl_file_api_memory_ontology_import_post"
-      },
-      "Body_import_owl_file_v1_memory_ontology_import_post": {
-        "properties": {
-          "scene_name": {
-            "type": "string",
-            "title": "Scene Name",
-            "description": "Scene name"
-          },
-          "scene_description": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Scene Description",
-            "description": "Scene description"
-          },
-          "file": {
-            "type": "string",
-            "format": "binary",
-            "title": "File",
-            "description": "OWL/TTL file"
-          },
-          "api_key_auth": {
-            "$ref": "#/components/schemas/ApiKeyAuth"
-          }
-        },
-        "type": "object",
-        "required": [
-          "scene_name",
-          "file"
-        ],
-        "title": "Body_import_owl_file_v1_memory_ontology_import_post"
       },
       "Body_import_qa_chunks_api_chunks__kb_id___document_id__import_qa_post": {
         "properties": {
@@ -9610,20 +8755,6 @@
           "content"
         ],
         "title": "Body_update_chunk_v1_chunks__kb_id___document_id___doc_id__put"
-      },
-      "Body_update_class_v1_memory_ontology_class__class_id__put": {
-        "properties": {
-          "api_key_auth": {
-            "$ref": "#/components/schemas/ApiKeyAuth"
-          },
-          "message": {
-            "type": "string",
-            "title": "Message",
-            "description": "Request body"
-          }
-        },
-        "type": "object",
-        "title": "Body_update_class_v1_memory_ontology_class__class_id__put"
       },
       "Body_update_config_emotion_v1_memory_config_update_config_emotion_put": {
         "properties": {
@@ -9832,20 +8963,6 @@
         },
         "type": "object",
         "title": "Body_update_memory_config_v1_memory_config_update_config_put"
-      },
-      "Body_update_scene_v1_memory_ontology_scene__scene_id__put": {
-        "properties": {
-          "api_key_auth": {
-            "$ref": "#/components/schemas/ApiKeyAuth"
-          },
-          "message": {
-            "type": "string",
-            "title": "Message",
-            "description": "Request body"
-          }
-        },
-        "type": "object",
-        "title": "Body_update_scene_v1_memory_ontology_scene__scene_id__put"
       },
       "Body_upload_chat_file_v1_app_files_post": {
         "properties": {
@@ -10255,94 +9372,6 @@
         "title": "CitationConfig",
         "description": "引用和归属配置"
       },
-      "ClassCreateRequest": {
-        "properties": {
-          "scene_id": {
-            "type": "string",
-            "format": "uuid",
-            "title": "Scene Id",
-            "description": "所属场景ID"
-          },
-          "classes": {
-            "items": {
-              "$ref": "#/components/schemas/ClassItem"
-            },
-            "type": "array",
-            "minItems": 1,
-            "title": "Classes",
-            "description": "类型列表，至少包含 1 个元素"
-          }
-        },
-        "type": "object",
-        "required": [
-          "scene_id",
-          "classes"
-        ],
-        "title": "ClassCreateRequest",
-        "description": "类型创建请求模型（统一使用列表形式）\n\n通过列表中元素数量决定创建模式：\n- 列表包含 1 个元素：单个创建\n- 列表包含多个元素：批量创建\n\nAttributes:\n    scene_id: 所属场景ID，必填\n    classes: 类型列表，必填，至少包含 1 个元素\n\nExamples:\n    # 单个创建（列表中 1 个元素）\n    >>> request = ClassCreateRequest(\n    ...     scene_id=uuid.uuid4(),\n    ...     classes=[\n    ...         ClassItem(class_name=\"患者\", class_description=\"医院患者信息\")\n    ...     ]\n    ... )\n    \n    # 批量创建（列表中多个元素）\n    >>> request = ClassCreateRequest(\n    ...     scene_id=uuid.uuid4(),\n    ...     classes=[\n    ...         ClassItem(class_name=\"患者\", class_description=\"医院患者信息\"),\n    ...         ClassItem(class_name=\"医生\", class_description=\"医院医生信息\"),\n    ...         ClassItem(class_name=\"药品\", class_description=\"医院药品信息\")\n    ...     ]\n    ... )"
-      },
-      "ClassItem": {
-        "properties": {
-          "class_name": {
-            "type": "string",
-            "maxLength": 200,
-            "minLength": 1,
-            "title": "Class Name",
-            "description": "类型名称"
-          },
-          "class_description": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Class Description",
-            "description": "类型描述"
-          }
-        },
-        "type": "object",
-        "required": [
-          "class_name"
-        ],
-        "title": "ClassItem",
-        "description": "单个类型信息模型\n\nAttributes:\n    class_name: 类型名称，必填，1-200字符\n    class_description: 类型描述，可选\n\nExamples:\n    >>> item = ClassItem(\n    ...     class_name=\"患者\",\n    ...     class_description=\"医院患者信息\"\n    ... )"
-      },
-      "ClassUpdateRequest": {
-        "properties": {
-          "class_name": {
-            "anyOf": [
-              {
-                "type": "string",
-                "maxLength": 200,
-                "minLength": 1
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Class Name",
-            "description": "类型名称"
-          },
-          "class_description": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Class Description",
-            "description": "类型描述"
-          }
-        },
-        "type": "object",
-        "title": "ClassUpdateRequest",
-        "description": "类型更新请求模型\n\n用于更新已有本体类型信息。\n\nAttributes:\n    class_name: 类型名称，可选，1-200字符\n    class_description: 类型描述，可选\n\nExamples:\n    >>> request = ClassUpdateRequest(\n    ...     class_name=\"更新后的类型名称\",\n    ...     class_description=\"更新后的描述\"\n    ... )"
-      },
       "CommunityPreviewRequest": {
         "properties": {
           "config_id": {
@@ -10401,7 +9430,7 @@
               }
             ],
             "title": "Scene Id",
-            "description": "本体场景ID（UUID），关联ontology_scene表"
+            "description": "兼容字段；本版本不再生效"
           },
           "pruning_scene": {
             "anyOf": [
@@ -10413,7 +9442,7 @@
               }
             ],
             "title": "Pruning Scene",
-            "description": "语义剪枝场景，由 scene_id 对应的 scene_name 自动填充"
+            "description": "兼容字段；本版本不再生效"
           },
           "llm_id": {
             "anyOf": [
@@ -10512,7 +9541,6 @@
             "description": "情绪分析模型ID，默认与llm_id一致"
           }
         },
-        "additionalProperties": false,
         "type": "object",
         "title": "ConfigParamsCreate"
       },
@@ -10568,7 +9596,7 @@
               }
             ],
             "title": "Scene Id",
-            "description": "本体场景ID"
+            "description": "兼容字段；本版本不再生效"
           }
         },
         "type": "object",
@@ -10752,7 +9780,7 @@
               }
             ],
             "title": "Pruning Scene",
-            "description": "智能剪枝场景：education/online_service/outbound 或本体工程自定义场景"
+            "description": "兼容字段；本版本不再生效"
           },
           "pruning_threshold": {
             "anyOf": [
@@ -11548,32 +10576,12 @@
             "type": "boolean",
             "title": "Emotion Enabled",
             "description": "是否启用情绪提取"
-          },
-          "emotion_extract_keywords": {
-            "type": "boolean",
-            "title": "Emotion Extract Keywords",
-            "description": "是否提取情绪关键词"
-          },
-          "emotion_min_intensity": {
-            "type": "number",
-            "maximum": 1.0,
-            "minimum": 0.0,
-            "title": "Emotion Min Intensity",
-            "description": "最小情绪强度阈值（0.0-1.0）"
-          },
-          "emotion_enable_subject": {
-            "type": "boolean",
-            "title": "Emotion Enable Subject",
-            "description": "是否启用主体分类"
           }
         },
         "type": "object",
         "required": [
           "config_id",
-          "emotion_enabled",
-          "emotion_extract_keywords",
-          "emotion_min_intensity",
-          "emotion_enable_subject"
+          "emotion_enabled"
         ],
         "title": "EmotionConfigUpdate",
         "description": "情绪配置更新请求模型"
@@ -11777,18 +10785,6 @@
             "title": "End User Id",
             "description": "组ID"
           },
-          "emotion_type": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Emotion Type",
-            "description": "情绪类型过滤（neutral/joy/relief/anxiety/sadness/anger/frustration/loneliness/confusion/hope；旧值 fear/surprise 兼容）"
-          },
           "start_date": {
             "anyOf": [
               {
@@ -11835,18 +10831,6 @@
             "type": "string",
             "title": "End User Id",
             "description": "组ID"
-          },
-          "emotion_type": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Emotion Type",
-            "description": "情绪类型过滤（neutral/joy/relief/anxiety/sadness/anger/frustration/loneliness/confusion/hope；旧值 fear/surprise 兼容）"
           },
           "limit": {
             "type": "integer",
@@ -12044,18 +11028,34 @@
           "end_user_id": {
             "type": "string",
             "title": "End User Id",
-            "description": "终端用户ID"
+            "description": "终端用户 ID，UUID 字符串"
           },
-          "summary_id": {
+          "scene_community_id": {
             "type": "string",
-            "title": "Summary Id",
-            "description": "情景记忆摘要ID"
+            "minLength": 1,
+            "title": "Scene Community Id",
+            "description": "overview 返回的社区业务 ID，不是 Neo4j elementId"
+          },
+          "page": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Page",
+            "description": "情景页码，从 1 开始；下拉加载时递增",
+            "default": 1
+          },
+          "pagesize": {
+            "type": "integer",
+            "maximum": 100.0,
+            "minimum": 1.0,
+            "title": "Pagesize",
+            "description": "每页情景数量，默认 20，最大 100",
+            "default": 20
           }
         },
         "type": "object",
         "required": [
           "end_user_id",
-          "summary_id"
+          "scene_community_id"
         ],
         "title": "EpisodicMemoryDetailsRequest",
         "description": "情景记忆详情查询请求"
@@ -12065,21 +11065,22 @@
           "end_user_id": {
             "type": "string",
             "title": "End User Id",
-            "description": "终端用户ID"
+            "description": "终端用户 ID，UUID 字符串"
           },
-          "time_range": {
-            "type": "string",
-            "title": "Time Range",
-            "description": "时间范围筛选，可选值：all, today, this_week, this_month",
-            "default": "all"
+          "category_l1": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Category L1",
+            "description": "事项类型代码，不传表示全部类型"
           },
-          "episodic_type": {
-            "type": "string",
-            "title": "Episodic Type",
-            "description": "情景类型筛选，可选值：all, conversation, project_work, learning, decision, important_event",
-            "default": "all"
-          },
-          "title_keyword": {
+          "keyword": {
             "anyOf": [
               {
                 "type": "string"
@@ -12088,8 +11089,34 @@
                 "type": "null"
               }
             ],
-            "title": "Title Keyword",
-            "description": "标题关键词，用于模糊搜索（可选）"
+            "title": "Keyword",
+            "description": "搜索社区名称、摘要及所属情景正文，最多 200 字符"
+          },
+          "sort": {
+            "type": "string",
+            "enum": [
+              "scene_count_desc",
+              "created_at_desc",
+              "updated_at_desc"
+            ],
+            "title": "Sort",
+            "description": "排序：scene_count_desc 情景数优先、created_at_desc 创建时间优先、updated_at_desc 更新时间优先",
+            "default": "scene_count_desc"
+          },
+          "page": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Page",
+            "description": "页码，从 1 开始",
+            "default": 1
+          },
+          "pagesize": {
+            "type": "integer",
+            "maximum": 100.0,
+            "minimum": 1.0,
+            "title": "Pagesize",
+            "description": "每页条数，默认 20，最大 100",
+            "default": 20
           }
         },
         "type": "object",
@@ -12160,69 +11187,6 @@
         ],
         "title": "ExplicitMemoryOverviewRequest",
         "description": "显性记忆总览查询请求"
-      },
-      "ExportBySceneRequest": {
-        "properties": {
-          "scene_id": {
-            "type": "string",
-            "format": "uuid",
-            "title": "Scene Id",
-            "description": "本体场景ID"
-          },
-          "format": {
-            "type": "string",
-            "title": "Format",
-            "description": "导出格式，可选值：rdfxml（默认）、turtle",
-            "default": "rdfxml"
-          }
-        },
-        "type": "object",
-        "required": [
-          "scene_id"
-        ],
-        "title": "ExportBySceneRequest",
-        "description": "按场景导出OWL文件请求模型\n\n用于POST /api/ontology/export端点的请求体。\n根据scene_id从数据库查询该场景下的所有本体类型并导出为OWL文件。\n\nAttributes:\n    scene_id: 本体场景ID，必填，用于查询该场景下的所有类型\n    format: 导出格式，可选值：rdfxml（默认）、turtle\n\nExamples:\n    >>> request = ExportBySceneRequest(\n    ...     scene_id=UUID(\"550e8400-e29b-41d4-a716-446655440000\"),\n    ...     format=\"rdfxml\"\n    ... )"
-      },
-      "ExtractionRequest": {
-        "properties": {
-          "scenario": {
-            "type": "string",
-            "minLength": 1,
-            "title": "Scenario",
-            "description": "场景描述文本"
-          },
-          "domain": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Domain",
-            "description": "可选的领域提示"
-          },
-          "llm_id": {
-            "type": "string",
-            "title": "Llm Id",
-            "description": "LLM模型ID"
-          },
-          "scene_id": {
-            "type": "string",
-            "format": "uuid",
-            "title": "Scene Id",
-            "description": "场景ID,用于将提取的类保存到指定场景"
-          }
-        },
-        "type": "object",
-        "required": [
-          "scenario",
-          "llm_id",
-          "scene_id"
-        ],
-        "title": "ExtractionRequest",
-        "description": "本体提取请求模型\n\n用于POST /api/ontology/extract端点的请求体。\n\nAttributes:\n    scenario: 场景描述文本,不能为空\n    domain: 可选的领域提示(如Healthcare, Education等)\n    llm_id: LLM模型ID,必须提供\n    scene_id: 场景ID,必须提供,用于将提取的类保存到指定场景\n\nExamples:\n    >>> request = ExtractionRequest(\n    ...     scenario=\"医院管理患者记录...\",\n    ...     domain=\"Healthcare\",\n    ...     llm_id=\"550e8400-e29b-41d4-a716-446655440000\",\n    ...     scene_id=\"660e8400-e29b-41d4-a716-446655440000\"\n    ... )"
       },
       "FAQApprove": {
         "properties": {},
@@ -13078,6 +12042,8 @@
           },
           "limit": {
             "type": "integer",
+            "maximum": 100.0,
+            "exclusiveMinimum": 0.0,
             "title": "Limit",
             "description": "参与生成的chunk数量上限",
             "default": 15
@@ -15575,7 +14541,31 @@
         ],
         "title": "PermanentMemoryItem"
       },
-      "PermanentMemoryList": {
+      "PermanentMemoryList-Input": {
+        "properties": {
+          "page": {
+            "$ref": "#/components/schemas/PageMeta"
+          },
+          "quota": {
+            "$ref": "#/components/schemas/PermanentMemoryQuota"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/PermanentMemoryItem"
+            },
+            "type": "array",
+            "title": "Items"
+          }
+        },
+        "type": "object",
+        "required": [
+          "page",
+          "quota",
+          "items"
+        ],
+        "title": "PermanentMemoryList"
+      },
+      "PermanentMemoryList-Output": {
         "properties": {
           "page": {
             "$ref": "#/components/schemas/PageMeta"
@@ -15614,7 +14604,7 @@
             "default": "OK"
           },
           "data": {
-            "$ref": "#/components/schemas/PermanentMemoryList"
+            "$ref": "#/components/schemas/PermanentMemoryList-Output"
           },
           "error": {
             "type": "string",
@@ -16221,6 +15211,34 @@
             ],
             "title": "Icon",
             "description": "公开分享图标，未传则使用应用图标"
+          },
+          "usage_examples": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Usage Examples",
+            "description": "Agent/集群使用示例；3~5 条、每条 ≤500 字。"
+          },
+          "setup_steps": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Setup Steps",
+            "description": "工作流/对话工作流设置步骤；必填，最多 2000 字。"
+          },
+          "categories": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Categories",
+            "description": "功能分类，随版本冻结；取值必须是主库 app_categories 里存在且启用的 code（英文短码，如 office），0~5 项。提交社区市场时才要求 ≥1 项"
           }
         },
         "type": "object",
@@ -16752,35 +15770,6 @@
         ],
         "title": "SceneConfigUpdate"
       },
-      "SceneCreateRequest": {
-        "properties": {
-          "scene_name": {
-            "type": "string",
-            "maxLength": 200,
-            "minLength": 1,
-            "title": "Scene Name",
-            "description": "场景名称"
-          },
-          "scene_description": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Scene Description",
-            "description": "场景描述"
-          }
-        },
-        "type": "object",
-        "required": [
-          "scene_name"
-        ],
-        "title": "SceneCreateRequest",
-        "description": "场景创建请求模型\n\n用于创建新的本体场景。\n\nAttributes:\n    scene_name: 场景名称，必填，1-200字符\n    scene_description: 场景描述，可选\n\nExamples:\n    >>> request = SceneCreateRequest(\n    ...     scene_name=\"医疗场景\",\n    ...     scene_description=\"用于医疗领域的本体建模\"\n    ... )"
-      },
       "SceneSplitDemoRequest": {
         "properties": {
           "config_id": {
@@ -16866,39 +15855,6 @@
         ],
         "title": "SceneSplitDemoRequest",
         "description": "BERT 场景切分演示请求；未传的配置项由接口回落到 config_id 对应配置。\n\n当前场景轮次不由前端传入，由接口按「实际历史消息条数」推导（不含当前 Query，\n与 scene_history_window_size 无关），仅用于演示短路分支。"
-      },
-      "SceneUpdateRequest": {
-        "properties": {
-          "scene_name": {
-            "anyOf": [
-              {
-                "type": "string",
-                "maxLength": 200,
-                "minLength": 1
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Scene Name",
-            "description": "场景名称"
-          },
-          "scene_description": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Scene Description",
-            "description": "场景描述"
-          }
-        },
-        "type": "object",
-        "title": "SceneUpdateRequest",
-        "description": "场景更新请求模型\n\n用于更新已有本体场景信息。\n\nAttributes:\n    scene_name: 场景名称，可选，1-200字符\n    scene_description: 场景描述，可选\n\nExamples:\n    >>> request = SceneUpdateRequest(\n    ...     scene_name=\"更新后的场景名称\",\n    ...     scene_description=\"更新后的描述\"\n    ... )"
       },
       "SendEmailCodeRequest": {
         "properties": {
@@ -17084,7 +16040,31 @@
         ],
         "title": "ShortTermMemoItem"
       },
-      "ShortTermMemoList": {
+      "ShortTermMemoList-Input": {
+        "properties": {
+          "counts": {
+            "$ref": "#/components/schemas/ShortTermMemoCounts"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ShortTermMemoItem"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "page": {
+            "$ref": "#/components/schemas/PageMeta"
+          }
+        },
+        "type": "object",
+        "required": [
+          "counts",
+          "items",
+          "page"
+        ],
+        "title": "ShortTermMemoList"
+      },
+      "ShortTermMemoList-Output": {
         "properties": {
           "counts": {
             "$ref": "#/components/schemas/ShortTermMemoCounts"
@@ -17123,7 +16103,7 @@
             "default": "OK"
           },
           "data": {
-            "$ref": "#/components/schemas/ShortTermMemoList"
+            "$ref": "#/components/schemas/ShortTermMemoList-Output"
           },
           "error": {
             "type": "string",

@@ -126,6 +126,9 @@ class MemoryConfigQueryService:
             include_dialogue_context=row["include_dialogue_context"],
             max_context=row["max_context"],
             pruning_enabled=row["pruning_enabled"],
+            # Preserve the unannounced response field from the config row; do not
+            # resolve it through the retired ontology tables.
+            # 在v0.5.11实现这些契约变更和字段收缩。
             pruning_scene=row["pruning_scene"],
             pruning_threshold=row["pruning_threshold"],
             enable_self_reflexion=row["enable_self_reflexion"],
@@ -172,9 +175,6 @@ class MemoryConfigQueryService:
             emotion_enabled=row["emotion_enabled"],
             # The contract reads the workspace's LLM, not ``emotion_model_id``.
             emotion_model_id=row["llm"],
-            emotion_extract_keywords=row["emotion_extract_keywords"],
-            emotion_min_intensity=row["emotion_min_intensity"],
-            emotion_enable_subject=row["emotion_enable_subject"],
             is_default=bool(row["is_default"]),
         )
 
@@ -250,7 +250,7 @@ class MemoryConfigQueryService:
         active_id = workspace["memory_config"] if workspace and workspace["is_active"] else None
 
         data: list[dict[str, Any]] = []
-        for row, scene_name in rows:
+        for row in rows:
             # Returned as data only: the legacy id is no longer accepted as input.
             config_id_old = row["config_id_old"]  # TODO:待移除
             data.append(
@@ -262,8 +262,11 @@ class MemoryConfigQueryService:
                     "end_user_id": row["end_user_id"],
                     "config_id_old": config_id_old,  # TODO:待移除
                     "apply_id": row["apply_id"],
+                    # Preserve read_all_config's unannounced legacy keys without
+                    # joining or writing the retired ontology project.
+                    # 在v0.5.11实现这些契约变更和字段收缩。
                     "scene_id": str(row["scene_id"]) if row["scene_id"] else None,
-                    "scene_name": scene_name,
+                    "scene_name": None,
                     "is_system_default": row["is_default"],
                     "llm_id": workspace.get("llm") if workspace else None,
                     "embedding_id": workspace.get("embedding") if workspace else None,

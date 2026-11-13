@@ -3,7 +3,7 @@
 职责边界：
 - 只执行"萃取相关"链路：statement -> triplet -> graph_build -> 第一层去重消歧
 - 不负责 Neo4j 写入、聚类、摘要、缓存更新
-- 自行管理客户端初始化和本体类型加载（与 WritePipeline 对齐）
+- 自行管理客户端初始化
 
 依赖方向：Facade → Pipeline → Engine → Repository（单向，不允许反向调用）
 """
@@ -56,7 +56,7 @@ class PilotWriteResult:
 class PilotWritePipeline:
     """重构后试运行专用流水线。
 
-    构造函数只接收 memory_config，客户端初始化和本体加载在 run() 内部完成，
+    构造函数只接收 memory_config，客户端初始化在 run() 内部完成，
     与 WritePipeline 保持一致的生命周期管理模式。
     """
 
@@ -88,20 +88,18 @@ class PilotWritePipeline:
     async def run(self, dialog_data_list: List[DialogData]) -> PilotWriteResult:
         """执行试运行萃取链路。
 
-        内部完成客户端初始化 → 本体加载 → 萃取 → 图构建 → 去重。
+        内部完成客户端初始化 → 萃取 → 图构建 → 去重。
         """
         from app.core.memory.utils.config.config_utils import get_pipeline_config
 
         self._init_clients()
         pipeline_config = get_pipeline_config(self.memory_config)
-        ontology_types = self._load_ontology_types()
 
         orchestrator = NewExtractionOrchestrator(
             llm_client=self._llm_client,
             embedder_client=self._embedder_client,
             config=pipeline_config,
             embedding_id=str(self.memory_config.embedding_model_id),
-            ontology_types=ontology_types,
             language=self.language,
             is_pilot_run=True,
             progress_callback=self.progress_callback,
@@ -162,34 +160,3 @@ class PilotWritePipeline:
                 db, self.memory_config.embedding_model_id, self.memory_config.tenant_id
             )
         logger.info("Pilot pipeline: LLM and embedding clients constructed")
-
-    def _load_ontology_types(self):
-        """加载本体类型配置（如果配置了 scene_id）。"""
-        if not self.memory_config.scene_id:
-            return None
-
-        try:
-            from app.core.memory.ontology_services.ontology_type_loader import (
-                load_ontology_types_for_scene,
-            )
-            from app.db import get_db_context
-
-            with get_db_context() as db:
-                ontology_types = load_ontology_types_for_scene(
-                    scene_id=self.memory_config.scene_id,
-                    workspace_id=self.memory_config.workspace_id,
-                    db=db,
-                )
-            if ontology_types:
-                logger.info(
-                    f"Loaded {len(ontology_types.types)} ontology types "
-                    f"for scene_id: {self.memory_config.scene_id}"
-                )
-            return ontology_types
-        except Exception as e:
-            logger.warning(
-                f"Failed to load ontology types for scene_id "
-                f"{self.memory_config.scene_id}: {e}",
-                exc_info=True,
-            )
-            return None

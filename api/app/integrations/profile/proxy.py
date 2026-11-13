@@ -123,11 +123,18 @@ async def forward_memory_profile_request(
         raise MemoryProfileConfigurationError(
             "memory profile subrequest requires a workspace context"
         )
+    tenant_id = getattr(current_user, "tenant_id", None)
+    if tenant_id is None:
+        # str(None) would silently forward the literal string "None" as the
+        # tenant id; fail loudly instead.
+        raise MemoryProfileConfigurationError(
+            "memory profile subrequest requires a tenant context"
+        )
     return await get_memory_profile_client().request(
         method=method,
         path=path,
         workspace_id=str(workspace_id),
-        tenant_id=str(current_user.tenant_id),
+        tenant_id=str(tenant_id),
         actor_id=_caller_actor_id(current_user, source),
         source=source,
         trace_id=get_trace_id() or uuid4().hex,

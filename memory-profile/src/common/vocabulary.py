@@ -9,6 +9,9 @@ in ``common`` so a repository can import them without depending on
 
 from __future__ import annotations
 
+from collections.abc import Mapping
+from types import MappingProxyType
+
 #: 图谱支持的 Node_Type 集合（api ``graph_data_constants`` 同值）。
 SUPPORTED_NODE_TYPES: frozenset[str] = frozenset(
     {
@@ -112,3 +115,40 @@ COUNT_KEYS: tuple[str, ...] = (
     "direct_sources",
     "forgotten",
 )
+
+# ── 情绪归一（T10 emotion 字段）──────────────────────────────────────────────
+#: 10 类情绪 code —— 与 api ``emotion_buckets.EMOTION_CODES`` 同值同序。
+EMOTION_CODES: tuple[str, ...] = (
+    "neutral", "joy", "relief", "anxiety", "sadness",
+    "anger", "frustration", "loneliness", "confusion", "hope",
+)
+
+#: 旧 6 类中不在 10 类内的值，仅读取时映射、不回写存量 —— api ``LEGACY_EMOTION_MAP`` 同值。
+LEGACY_EMOTION_MAP: Mapping[str, str] = MappingProxyType({
+    "fear": "anxiety",
+    "surprise": "neutral",
+})
+
+_EMOTION_CODE_SET: frozenset[str] = frozenset(EMOTION_CODES)
+
+
+def normalize_emotion_type(value: object) -> str | None:
+    """与 api ``emotion_buckets.normalize_emotion_type`` 行为一致：非 str/空串/未知 → None。"""
+
+    if not isinstance(value, str):
+        return None
+    key = value.strip().lower()
+    if not key:
+        return None
+    if key in _EMOTION_CODE_SET:
+        return key
+    return LEGACY_EMOTION_MAP.get(key)
+
+
+def normalize_emotion_type_or_raw(value: object) -> object:
+    """已知值归一化为 code；None → None；未知值原样返回（api 同名函数语义）。"""
+
+    if value is None:
+        return None
+    code = normalize_emotion_type(value)
+    return code if code is not None else value

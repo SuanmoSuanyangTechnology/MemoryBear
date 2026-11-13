@@ -11,10 +11,31 @@ class Conversation(ReadOnlyBase):
 
     id = Column(UUID(as_uuid=True), primary_key=True)
     app_id = Column(UUID(as_uuid=True), nullable=False)
+    workspace_id = Column(UUID(as_uuid=True), nullable=True)
     user_id = Column(String, nullable=True)
-    updated_at = Column(DateTime, nullable=True)
+    title = Column(String(255), nullable=True)
     write_cursor = Column(Integer, nullable=False)
     is_active = Column(Boolean, nullable=False)
+    created_at = Column(DateTime, nullable=True)
+    updated_at = Column(DateTime, nullable=True)
+
+
+class Message(ReadOnlyBase):
+    """Read-only projection of the ``messages`` table (T02)."""
+
+    __tablename__ = "messages"
+
+    id = Column(UUID(as_uuid=True), primary_key=True)
+    conversation_id = Column(UUID(as_uuid=True), nullable=False)
+    role = Column(String(20), nullable=False)
+    content = Column(Text, nullable=False)
+    status = Column(String(20), nullable=False)
+    meta_data = Column(JSON, nullable=True)
+    created_at = Column(DateTime, nullable=True)
+    version = Column(Integer, nullable=True)
+    is_current = Column(Boolean, nullable=True)
+    is_deleted = Column(Boolean, nullable=True)
+    parent_message_id = Column(UUID(as_uuid=True), nullable=True)
 
 
 class MemoryMessage(ReadOnlyBase):
@@ -24,9 +45,11 @@ class MemoryMessage(ReadOnlyBase):
     conversation_id = Column(UUID(as_uuid=True), nullable=True)
     end_user_id = Column(String, nullable=False)
     source = Column(String(32), nullable=False)
-    message_seq = Column(Integer, nullable=False)
-    role = Column(String, nullable=False)
+    role = Column(String(20), nullable=False)
     content = Column(Text, nullable=False)
+    message_seq = Column(Integer, nullable=False)
+    dialog_at = Column(String(64), nullable=True)
+    created_at = Column(DateTime, nullable=True)
 
 
 class MemoryPerceptual(ReadOnlyBase):

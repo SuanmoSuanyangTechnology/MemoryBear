@@ -174,10 +174,6 @@ class DataConfigService:  # 数据配置服务类（PostgreSQL）
         if not params.emotion_model_id:
             params.emotion_model_id = params.llm_id
 
-        # 根据关联的本体场景推导 pruning_scene（语义剪枝场景与本体工程场景保持一致）
-        if params.scene_id and not getattr(params, 'pruning_scene', None):
-            params.pruning_scene = await self._resolve_pruning_scene_from_scene_id(params.scene_id)
-
         config = await MemoryConfigRepository(self.db).create_async(params)
         await self.db.commit()
         return {"affected": 1, "config_id": config.config_id}
@@ -194,23 +190,6 @@ class DataConfigService:  # 数据配置服务类（PostgreSQL）
         """Async version of _get_workspace_configs — uses self.db (AsyncSession) directly."""
         from app.repositories.workspace_repository import WorkspaceRepository
         return await WorkspaceRepository(self.db).get_workspace_models_configs_async(workspace_id)
-
-    async def _resolve_pruning_scene_from_scene_id(self, scene_id) -> Optional[str]:
-        """根据本体场景ID获取对应的 scene_name，作为语义剪枝场景值
-
-        Args:
-            scene_id: 本体场景UUID
-
-        Returns:
-            scene_name 字符串，查询失败时返回 None
-        """
-        try:
-            from app.repositories.ontology_scene_repository import OntologySceneRepository
-            scene = await OntologySceneRepository(self.db).get_by_id_async(scene_id)
-            return scene.scene_name if scene else None
-        except Exception as e:
-            logger.warning(f"_resolve_pruning_scene_from_scene_id failed for scene_id={scene_id}: {e}", exc_info=True)
-            return None
 
     # --- Delete ---
     async def delete_async(self, key: ConfigParamsDelete) -> Dict[str, Any]:  # 删除配置参数（异步版本）
@@ -247,19 +226,6 @@ class DataConfigService:  # 数据配置服务类（PostgreSQL）
     async def get_all_async(self, workspace_id) -> List[Dict[str, Any]]:  # 获取所有配置参数（异步版本）
         results = await MemoryConfigRepository(self.db).get_all_async(workspace_id)
 
-        # 检查并修正 pruning_scene 与 scene_name 不一致的记录
-        needs_commit = False
-        for config, scene_name in results:
-            if scene_name and config.pruning_scene != scene_name:
-                logger.info(
-                    f"修正 pruning_scene: config_id={config.config_id} "
-                    f"'{config.pruning_scene}' -> '{scene_name}'"
-                )
-                config.pruning_scene = scene_name
-                needs_commit = True
-        if needs_commit:
-            await self.db.commit()
-
         try:
             activate_config_id = await MemoryConfigService(self.db).get_workspace_active_config_id_async(workspace_id)
         except Exception:
@@ -284,8 +250,11 @@ class DataConfigService:  # 数据配置服务类（PostgreSQL）
                 "end_user_id": config.end_user_id,
                 "config_id_old": config_id_old,
                 "apply_id": config.apply_id,
+                # read_all_config is not in the announced removal list. Preserve the
+                # legacy response keys, but never query or write the retired ontology.
+                # 在v0.5.11实现这些契约变更和字段收缩。
                 "scene_id": str(config.scene_id) if config.scene_id else None,
-                "scene_name": scene_name,  # 新增：场景名称
+                "scene_name": None,
                 "is_system_default": config.is_default,  # 是否为系统默认配置
                 "llm_id": config.llm_id,
                 "embedding_id": config.embedding_id,
@@ -299,7 +268,9 @@ class DataConfigService:  # 数据配置服务类（PostgreSQL）
                 "state": config.state,
                 "chunker_strategy": config.chunker_strategy,
                 "pruning_enabled": config.pruning_enabled,
-                "pruning_scene": config.pruning_scene,
+                # Compatibility-only response value; do not derive it from a retired scene.
+                # 在v0.5.11实现这些契约变更和字段收缩。
+                "pruning_scene": "",
                 "pruning_threshold": config.pruning_threshold,
                 "enable_self_reflexion": config.enable_self_reflexion,
                 "iteration_period": config.iteration_period,
@@ -1034,10 +1005,7 @@ class DataConfigService:  # 数据配置服务类（PostgreSQL）
                 except ConfigurationError as e:
                     raise RuntimeError(f"Configuration loading failed: {e}")
 
-                logger.info(
-                    f"[PILOT_RUN_STREAM] messages count={len(messages)}, "
-                    f"scene_id={memory_config.scene_id}"
-                )
+                logger.info(f"[PILOT_RUN_STREAM] messages count={len(messages)}")
 
                 # 1c. 初始化 LLM 客户端（只需查一次模型配置，之后 llm_client 是独立对象）
                 try:

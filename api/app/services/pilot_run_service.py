@@ -305,10 +305,7 @@ async def _run_pruning(
 
     config = PruningConfig(
         pruning_switch=memory_config.pruning_enabled,
-        pruning_scene=memory_config.pruning_scene,
         pruning_threshold=memory_config.pruning_threshold,
-        scene_id=str(memory_config.scene_id) if memory_config.scene_id else None,
-        ontology_class_infos=memory_config.ontology_class_infos,
     )
 
     # 记录原始 user 消息用于 diff
@@ -325,7 +322,6 @@ async def _run_pruning(
             fallback_stats = {
                 "enabled": True,
                 "status": "empty_fallback",
-                "scene": config.pruning_scene,
                 "threshold": config.pruning_threshold,
                 "changed_count": 0,
             }
@@ -351,7 +347,6 @@ async def _run_pruning(
         pruning_stats = {
             "enabled": True,
             "status": "success",
-            "scene": config.pruning_scene,
             "threshold": config.pruning_threshold,
             "changed_count": len(user_message_changes),
             "sources": dict(pruner.source_counts),
@@ -369,7 +364,6 @@ async def _run_pruning(
         failed_stats = {
             "enabled": True,
             "status": "failed",
-            "scene": config.pruning_scene,
             "threshold": config.pruning_threshold,
             "changed_count": 0,
             "error": str(e),

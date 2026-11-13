@@ -62,7 +62,6 @@ async def get_emotion_tags(
             f"用户 {current_user.username} 请求获取情绪标签统计",
             extra={
                 "end_user_id": request.end_user_id,
-                "emotion_type": request.emotion_type,
                 "start_date": request.start_date,
                 "end_date": request.end_date,
                 "limit": request.limit,
@@ -73,7 +72,6 @@ async def get_emotion_tags(
         # 调用服务层
         data = await emotion_service.get_emotion_tags(
             end_user_id=request.end_user_id,
-            emotion_type=request.emotion_type,
             start_date=request.start_date,
             end_date=request.end_date,
             limit=request.limit,
@@ -119,7 +117,6 @@ async def get_emotion_wordcloud(
             f"用户 {current_user.username} 请求获取情绪词云数据",
             extra={
                 "end_user_id": request.end_user_id,
-                "emotion_type": request.emotion_type,
                 "limit": request.limit
             }
         )
@@ -127,7 +124,6 @@ async def get_emotion_wordcloud(
         # 调用服务层
         data = await emotion_service.get_emotion_wordcloud(
             end_user_id=request.end_user_id,
-            emotion_type=request.emotion_type,
             limit=request.limit
         )
 

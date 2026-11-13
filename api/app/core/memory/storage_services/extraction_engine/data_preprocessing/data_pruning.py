@@ -100,7 +100,6 @@ class SemanticPruner:
         if config is None:
             config = PruningConfig(
                 pruning_switch=False,
-                pruning_scene="education",
                 pruning_threshold=0.5,
             )
 
