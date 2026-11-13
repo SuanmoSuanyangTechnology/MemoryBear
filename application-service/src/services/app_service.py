@@ -31,6 +31,7 @@ from ..errors import (
     BusinessException,
     ResourceNotFoundException,
     SubAgentUnpublishedError,
+    WorkflowAgentUnpublishedError,
 )
 from ..memory.ontology_binding import ONTOLOGY_BINDING_PLUGIN, OntologyUpstreamError
 from ..models import (
@@ -64,7 +65,11 @@ from .agent_config_converter import AgentConfigConverter
 from .asset_release_resolver import AssetReleaseResolver
 from .category_service import CategoryService
 from .model_ref_gate import assert_refs_publishable, raise_model_unavailable, resolve_invoke_ref
-from .multi_agent_release_resolver import POLICY_PINNED, resolve_effective_release_id
+from .multi_agent_release_resolver import (
+    POLICY_CURRENT,
+    POLICY_PINNED,
+    resolve_effective_release_id,
+)
 from .tool_service import ToolService
 from .workflow_service import WorkflowService
 
@@ -2483,6 +2488,11 @@ class AppService:
                 BizCode.INVALID_PARAMETER,
             )
 
+        # Cluster save rejects unusable members up front (MultiAgentService
+        # .check_config_data); the workflow side used to learn about a draft
+        # referenced Agent only at publish time. Same standing here.
+        self._assert_workflow_agent_references_published(config_dict["nodes"])
+
         if not workflow_cfg:
             # Create a new config if none exists
             workflow_cfg = WorkflowConfig(
@@ -3084,6 +3094,79 @@ class AppService:
         logger.info(
             "多智能体配置检查通过"
         )
+
+    def _assert_workflow_agent_references_published(
+            self,
+            nodes: list[dict[str, Any]],
+    ) -> None:
+        """Reject a workflow save whose ``agent`` nodes reference unpublished apps.
+
+        A workflow copied out of the resource center takes the Agent its node points
+        at along as a **draft** (``AssetService._remap_workflow_agent_reference``
+        rewires the node to ``release_policy=current`` / ``release_id=None``), so the
+        node references an app that has no release yet. Publishing already refuses
+        that in ``_pin_workflow_agent_references``, but the user only found out after
+        finishing the whole edit — while the cluster save path has always checked its
+        members up front. This brings the workflow save to the same standard.
+
+        Scope is deliberately narrow: **only** "the reference has no usable release"
+        is enforced. A wrong app type, a cross-workspace id or a dangling reference
+        keep their current save-time behaviour and stay a publish-time error; folding
+        those in would make this a second copy of the publish gate and start rejecting
+        saves that work today.
+
+        Every offender is collected and raised once — failing on the first one would
+        force the user to retry N times to learn which Agents need publishing.
+        """
+
+        def _active_release(raw: Any) -> AppRelease | None:
+            try:
+                candidate = self.db.get(AppRelease, uuid.UUID(str(raw)))
+            except (TypeError, ValueError, AttributeError):
+                return None
+            return candidate if candidate is not None and candidate.is_active else None
+
+        unavailable: list[str] = []
+        for node in nodes or []:
+            if node.get("type") != "agent":
+                continue
+            config = node.get("config")
+            if not isinstance(config, dict) or config.get("mode", "inline") != "reference":
+                continue
+            reference = config.get("reference")
+            reference = reference if isinstance(reference, dict) else {}
+            label = node.get("name") or node.get("id") or "未命名节点"
+
+            referenced_app = None
+            try:
+                referenced_app = self.db.get(
+                    App, uuid.UUID(str(reference.get("app_id")))
+                )
+            except (TypeError, ValueError, AttributeError):
+                pass
+            if referenced_app is None:
+                unavailable.append(f"Agent 节点「{label}」引用的应用不存在")
+                continue
+            if not referenced_app.is_active:
+                unavailable.append(
+                    f"Agent 节点「{label}」引用的应用「{referenced_app.name}」已停用"
+                )
+                continue
+
+            if (reference.get("release_policy") or POLICY_PINNED) == POLICY_CURRENT:
+                if _active_release(referenced_app.current_release_id) is None:
+                    unavailable.append(
+                        f"Agent 节点「{label}」引用的应用「{referenced_app.name}」尚未发布"
+                    )
+                continue
+            if _active_release(reference.get("release_id")) is None:
+                unavailable.append(
+                    f"Agent 节点「{label}」引用的应用「{referenced_app.name}」"
+                    "钉住的发布版本不可用"
+                )
+
+        if unavailable:
+            raise WorkflowAgentUnpublishedError(details="；".join(unavailable))
 
     def _pin_workflow_agent_references(
             self,
