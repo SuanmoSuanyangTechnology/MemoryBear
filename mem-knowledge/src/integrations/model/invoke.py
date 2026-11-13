@@ -18,6 +18,7 @@ from typing import Any
 from uuid import UUID
 
 import httpx
+from error_core.codes import coerce_code
 from memorybear_grpc.client import ChannelPool, SyncChannelPool
 from redbear_model.errors import RemoteInvokeError
 from redbear_model.runtime.grpc_remote import (
@@ -31,6 +32,7 @@ from redbear_model.runtime.remote import (
     InvokeTarget,
     InvokeTimeouts,
     SyncInvokeTransport,
+    envelope_failure,
 )
 
 from ...config import KnowledgeSettings
@@ -311,16 +313,26 @@ class ModelInvokeClient:
                 headers=invoke_target(context).headers(),
                 timeout=_MODEL_AVAILABILITY_TIMEOUT_SECONDS,
             )
-            if response.status_code in (400, 404):
-                return False
-            response.raise_for_status()
-            payload = response.json()
         except httpx.HTTPError as exc:
             raise ModelInvokeUnavailableError("Model availability lookup failed") from exc
+        try:
+            payload = response.json()
         except ValueError as exc:
+            if response.status_code in (400, 404):
+                return False
+            if response.status_code in (429, 503, 504):
+                raise ModelInvokeUnavailableError("Model availability lookup failed") from exc
             raise ModelInvokeProtocolError("Invalid model availability response") from exc
+        if isinstance(payload, dict) and coerce_code(payload.get("code")):
+            remote = envelope_failure(payload, response.status_code)
+            raise to_invoke_error(remote) from remote
+        if response.status_code in (400, 404):
+            return False
+        if response.status_code in (429, 503, 504):
+            raise ModelInvokeUnavailableError("Model availability lookup failed")
         if (
-            not isinstance(payload, dict)
+            not response.is_success
+            or not isinstance(payload, dict)
             or payload.get("code") != 0
             or not isinstance(payload.get("data"), dict)
         ):

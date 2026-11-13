@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING, Literal
 
 import httpx
 import requests
-from error_core.codes import BizCode
+from error_core.codes import BizCode, coerce_code
 from mem_storage import (
     StorageConfigError,
 )
@@ -185,20 +185,31 @@ def _ark_embedding_errors() -> tuple[tuple[type[BaseException], ...], ...]:
     return (ArkAPITimeoutError,), (ArkAPIConnectionError,), (ArkAPIStatusError,)
 
 
+def _model_service_http_status(failure: ModelInvokeFailedError, code: int | None) -> int | None:
+    status = failure.http_status
+    if code in {BizCode.NO_AVAILABLE_CHANNEL, BizCode.SPEEDBEAR_CHANNEL_MISSING}:
+        return 503 if failure.retryable else 400
+    if status in {429, 503, 504} or code in {
+        BizCode.SERVICE_UNAVAILABLE, BizCode.RATE_LIMITED, BizCode.RATE_LIMIT_EXCEEDED,
+    }:
+        return 503
+    if code in {
+        BizCode.UNAUTHORIZED, BizCode.TOKEN_INVALID, BizCode.TOKEN_EXPIRED,
+        BizCode.TOKEN_BLACKLISTED,
+        BizCode.INTERNAL_ERROR, BizCode.DB_ERROR, BizCode.UPSTREAM_UNKNOWN,
+        BizCode.LLM_ERROR, BizCode.EMBEDDING_ERROR,
+    } or (status is not None and status >= 500):
+        return 500
+    if status in {401, 403} and code is None:
+        return 500  # The model service rejected the service-to-service request.
+    if status is not None and 400 <= status < 500:
+        return 400
+    return 503 if failure.retryable else None
+
+
 def _model_http_status(public: KnowledgeError, exc: BaseException) -> int | None:
     if public.http_status_override is not None:
         return public.http_status_override
-    for cause in _exception_chain(exc):
-        if isinstance(cause, ModelInvokeFailedError):
-            if _is_remote_rate_limited(cause) or cause.remote_code in {
-                BizCode.SERVICE_UNAVAILABLE, BizCode.SERVICE_UNAVAILABLE.name,
-            }:
-                return 503
-            if cause.remote_code in {
-                BizCode.INTERNAL_ERROR, BizCode.INTERNAL_ERROR.name,
-                BizCode.UPSTREAM_UNKNOWN, BizCode.UPSTREAM_UNKNOWN.name,
-            }:
-                return 500
     if public.code.endswith("_PROCESSING_FAILED"):
         # An explicit provider 4xx with an unknown cause does not prove an internal failure.
         for cause in _exception_chain(exc):
@@ -225,11 +236,6 @@ def _model_http_status(public: KnowledgeError, exc: BaseException) -> int | None
             return 503 if transient else None
         if isinstance(cause, NoAvailableChannelError):
             return None
-        if isinstance(cause, ModelInvokeFailedError) and cause.remote_code in {
-            BizCode.NO_AVAILABLE_CHANNEL, BizCode.NO_AVAILABLE_CHANNEL.name,
-            BizCode.SPEEDBEAR_CHANNEL_MISSING, BizCode.SPEEDBEAR_CHANNEL_MISSING.name,
-        }:
-            return 503 if cause.retryable else None
     return 503
 
 
@@ -237,13 +243,30 @@ def _with_public_error(
     legacy: KnowledgeError,
     public: KnowledgeError,
     cause: BaseException,
+    *,
+    role: ModelRole,
 ) -> KnowledgeError:
+    remote = next(
+        (item for item in _exception_chain(cause) if isinstance(item, ModelInvokeFailedError)),
+        None,
+    )
+    upstream_code = (coerce_code(remote.remote_code) or None) if remote else None
+    remote_status = _model_service_http_status(remote, upstream_code) if remote else None
+    http_message_code = None
+    if remote_status in {500, 503}:
+        failure = (
+            ModelFailure.TEMPORARILY_UNAVAILABLE if remote_status == 503
+            else ModelFailure.PROCESSING_FAILED
+        )
+        http_message_code = model_error(role, failure).response_code
     error = KnowledgeError.from_code(
         legacy.code,
         params=legacy.params,
         status_code=legacy.status_code,
         response_code=public.response_code,
-        http_status_override=_model_http_status(public, cause),
+        http_status_override=remote_status or _model_http_status(public, cause),
+        upstream_response_code=upstream_code,
+        http_message_code=http_message_code,
     )
     error.__cause__ = cause
     return error
@@ -259,7 +282,7 @@ def map_model_error(
     if model_role is None or isinstance(exc, KnowledgeError):
         return legacy
     public = _classify_model_error(exc, model_role=model_role, visibility_proven=visibility_proven)
-    return _with_public_error(legacy, public, exc)
+    return _with_public_error(legacy, public, exc, role=model_role)
 
 
 def map_text_embedding_error(exc: BaseException) -> KnowledgeError | None:
@@ -267,7 +290,7 @@ def map_text_embedding_error(exc: BaseException) -> KnowledgeError | None:
     if legacy is None or isinstance(exc, KnowledgeError):
         return legacy
     public = _classify_model_error(exc, model_role=ModelRole.EMBEDDING)
-    return _with_public_error(legacy, public, exc)
+    return _with_public_error(legacy, public, exc, role=ModelRole.EMBEDDING)
 
 
 def map_multimodal_error(
@@ -280,7 +303,7 @@ def map_multimodal_error(
         return legacy
     role = ModelRole.IMAGE_EMBEDDING if operation == "embedding" else ModelRole.IMAGE_RERANK
     public = _classify_model_error(exc, model_role=role)
-    return _with_public_error(legacy, public, exc)
+    return _with_public_error(legacy, public, exc, role=role)
 
 
 def map_storage_error(exc: BaseException) -> KnowledgeError:

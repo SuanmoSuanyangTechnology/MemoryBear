@@ -695,6 +695,8 @@ class KnowledgeError(Exception):
         diagnostic: str = "",
         response_code: int | None = None,
         http_status_override: int | None = None,
+        upstream_response_code: int | None = None,
+        http_message_code: int | None = None,
     ) -> None:
         # Excluded task callers still use exception text in progress messages.
         # Preserve that legacy argument; HTTP rendering only uses code and params.
@@ -711,6 +713,8 @@ class KnowledgeError(Exception):
         self._response_code = response_code
         # 仅在 HTTP 出口生效，gRPC trailer 与任务仍使用原状态。
         self.http_status_override = http_status_override
+        self.upstream_response_code = upstream_response_code
+        self.http_message_code = http_message_code
 
     @property
     def code(self) -> str:
@@ -763,6 +767,8 @@ class KnowledgeError(Exception):
         diagnostic: str = "",
         response_code: int | None = None,
         http_status_override: int | None = None,
+        upstream_response_code: int | None = None,
+        http_message_code: int | None = None,
     ) -> KnowledgeError:
         return cls(
             code=code,
@@ -772,4 +778,6 @@ class KnowledgeError(Exception):
             diagnostic=diagnostic,
             response_code=response_code,
             http_status_override=http_status_override,
+            upstream_response_code=upstream_response_code,
+            http_message_code=http_message_code,
         )

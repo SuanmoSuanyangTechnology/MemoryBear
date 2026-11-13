@@ -44,7 +44,7 @@ class ModelInvokeFailedError(ModelInvokeClientError):
     """The model service ran the invoke and reported a terminal failure.
 
     ``remote_code`` 为服务侧原样码（SSE 帧 = ``BizCode`` 名、JSON 信封 = 数值）；
-    业务层按需翻译回 ``KB_*`` 词表（``error_mapping``），本层不重编码。
+    HTTP 出口保留原码，知识库按模型用途选择提示与 HTTP 状态。
     """
 
     def __init__(
@@ -93,9 +93,11 @@ def to_invoke_error(exc: RemoteInvokeError) -> ModelInvokeClientError:
     else:
         error = ModelInvokeUnavailableError("Model service is unavailable")
     logger.warning(
-        "model_invoke_failed error=%s remote=%s detail=%s",
+        "model_invoke_failed error=%s remote=%s remote_code=%s remote_http_status=%s detail=%s",
         type(error).__name__,
         type(exc).__name__,
+        getattr(error, "remote_code", None),
+        getattr(error, "http_status", None),
         exc,
     )
     return error

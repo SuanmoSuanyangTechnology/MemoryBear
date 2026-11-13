@@ -175,12 +175,14 @@ def render_error(
     }:
         return render_legacy_business_error(request, error, exception=exception)
     status_code = _business_http_status(request, error)
+    response_code = error.upstream_response_code or error.response_code
+    message_code = error.http_message_code or error.response_code
     log_request_failure(
         request,
         status_code=status_code,
-        response_code=error.response_code,
+        response_code=response_code,
         error_code=error.code,
-        message=knowledge_message(error.response_code, "en"),
+        message=knowledge_message(message_code, "en"),
         params=dict(error.params),
         retryable=error.retryable,
         exception=exception if exception is not None else error,
@@ -189,8 +191,8 @@ def render_error(
     return _response(
         request,
         status_code=status_code,
-        response_code=error.response_code,
-        message=knowledge_message(error.response_code, request_locale(request)),
+        response_code=response_code,
+        message=knowledge_message(message_code, request_locale(request)),
         headers=headers,
         diagnostic=format_diagnostics(
             trace_id=getattr(request.state, "trace_id", get_trace_id()),

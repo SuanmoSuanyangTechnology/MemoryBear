@@ -21,11 +21,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..api.dependencies import Principal
 from ..api.schemas.chunk import ChunkCreate, ChunkType
+from ..error_mapping import map_model_error
 from ..errors import KnowledgeError
 from ..integrations.model.chat import RedBearChatModel
 from ..integrations.model.embedding import RedBearEmbeddings
+from ..integrations.model.errors import ModelInvokeClientError
 from ..integrations.model.invoke_backend import ref_from_view
 from ..integrations.model.views import is_qwen3_vl_embedding_view
+from ..model_errors import ModelRole
 from ..models.owned import Document
 from ..rag.chunk.metadata import merge_parser_metadata
 from ..rag.chunk.preview import preview_binary
@@ -503,9 +506,21 @@ async def preview_with_vision(
         ref_from_view(vision_config, tenant_id),
         pool=runtime.model_runtime,
     )
-    response = await model.ainvoke(
-        [HumanMessage(content=[{"type": "text", "text": instruction}, media_block])]
-    )
+    try:
+        response = await model.ainvoke(
+            [HumanMessage(content=[{"type": "text", "text": instruction}, media_block])]
+        )
+    except ModelInvokeClientError as exc:
+        role = (
+            ModelRole.VISION if suffix in image_exts
+            else ModelRole.AUDIO_TRANSCRIPTION if suffix in audio_exts
+            else ModelRole.VIDEO_UNDERSTANDING
+        )
+        error = map_model_error(exc, model_role=role)
+        if error.http_status_override == 503:
+            # Preview is GET and the gateway retries 503; avoid invoking the model twice.
+            error.http_status_override = 500
+        raise error from exc
     text = _message_text(response)
     if not text:
         raise KnowledgeError.from_code(
