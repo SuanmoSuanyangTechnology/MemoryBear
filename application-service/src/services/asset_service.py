@@ -1131,8 +1131,17 @@ class AssetService:
         选具体方法时按 operation_key 反查展示名；查不到就退回原值，不让预览因为
         方法树解析失败而崩掉——那只是「少了个更友好的名字」。
 
-        走 `ToolService.get_tool_methods_batch`，与共享校验共用同一份方法树口径；
-        MCP 传 `read_only=True`，不会因为缓存为空去连远端（预览是只读操作）。
+        走 `ToolService.get_tool_methods_batch`，与共享校验共用同一份方法树口径。
+        但只读展示有两个限制，与共享校验（真要在安装后能执行）不同：
+
+        1. MCP 传 `read_only=True`，不会因为缓存为空去连远端；
+        2. `allow_remote_schema=False`，只用已存的 `schema_content`。只有
+           `schema_url` 的自定义工具会被跳过——`parse_from_url` 是同步
+           requests、超时 30 秒，且 schema_url 往往是第三方主机，预览会直接
+           卡住并超时，「预览不做外部请求」的约定也就破了。
+
+        跳过之后该工具没有方法树，`method_labels()` 自动退回快照里的
+        operation_key；牺牲一个更友好的名字，换预览的确定性时延。
         """
 
         tool_ids = {tool_id for tool_id in tool_ids if tool_id is not None}
@@ -1148,7 +1157,9 @@ class AssetService:
 
             items, _missing = _run_async(
                 lambda: ToolService(self.db).get_tool_methods_batch(
-                    [str(tool_id) for tool_id in tool_ids], tenant_id
+                    [str(tool_id) for tool_id in tool_ids],
+                    tenant_id,
+                    allow_remote_schema=False,
                 )
             )
         except Exception as exc:  # noqa: BLE001 - 预览不因方法树失败而整体 5xx

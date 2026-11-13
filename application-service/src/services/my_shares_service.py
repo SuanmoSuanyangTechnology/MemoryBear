@@ -270,19 +270,30 @@ class MySharesService:
             self.db.scalars(
                 select(MarketSync)
                 .where(MarketSync.asset_id.in_([asset.id for asset in assets]))
-                .order_by(MarketSync.updated_at.desc())
+                # 投稿先后只看 `created_at`：`updated_at` 带 `onupdate`，同步重试 /
+                # 状态推进都会刷新它，用它排序会让「较早的投稿晚完成」压过更新的那版。
+                .order_by(MarketSync.created_at.desc(), MarketSync.id.desc())
             ).all()
         )
 
     @staticmethod
     def _latest_sync_per_asset(syncs: list[MarketSync]) -> dict[uuid.UUID, MarketSync]:
-        """一个条目可能投过多次（每次新版本一行），列表只展示最近一次。"""
+        """一个条目可能投过多次（每次新版本一行），列表只展示最近一次。
+
+        「最近」= 最后一次**发起**投稿，所以排序键是 `created_at`（不可变），
+        不是 `updated_at`。`updated_at` 会在派发、重试、状态回写时被刷新：
+        第 1 版投稿先发、第 2 版后发，但第 1 版的同步行最后才落定，按
+        `updated_at` 取就会把第 1 版当成最新——列表于是显示旧的 `release_id` /
+        `version`，与市场版本记录对不上。
+
+        平局按 `id` 决胜，保证同一批数据无论传入顺序如何都取到同一行。
+        """
 
         latest: dict[uuid.UUID, MarketSync] = {}
         for sync in syncs:
             current = latest.get(sync.asset_id)
-            if current is None or (sync.updated_at or sync.created_at) > (
-                    current.updated_at or current.created_at
+            if current is None or (sync.created_at, sync.id) > (
+                    current.created_at, current.id
             ):
                 latest[sync.asset_id] = sync
         return latest
