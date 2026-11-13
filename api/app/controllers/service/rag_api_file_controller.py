@@ -3,15 +3,18 @@
 from typing import Any, Optional
 import uuid
 
-from fastapi import APIRouter, Body, Depends, Request, Query, File, UploadFile
+from fastapi import APIRouter, Body, Depends, Request, Query, File, UploadFile, Security
 from sqlalchemy.orm import Session
 
+from error_core.knowledge_upload import UploadCreated, UploadedDocument, upload_responses
+
 from app.controllers import file_controller
-from app.core.api_key_auth import require_api_key
+from app.core.api_key_auth import require_api_key, require_api_key_self_db, knowledge_upload_api_key, knowledge_upload_bearer
 from app.core.logging_config import get_business_logger
 from app.db import get_db
 from app.integrations.knowledge.call_profile import CallProfile
 from app.integrations.knowledge.contracts import KnowledgeRetrievalSource
+from app.integrations.knowledge.errors import KnowledgeUnavailableError
 from app.integrations.knowledge.route_proxy import route_through_knowledge_service
 from app.schemas import file_schema
 from app.schemas.api_key_schema import ApiKeyAuth
@@ -89,6 +92,28 @@ async def create_folder(
                                                folder_name=folder_name,
                                                db=db,
                                                current_user=current_user)
+
+
+@router.post(
+    "/v1/file", status_code=201,
+    response_model=UploadCreated[UploadedDocument],
+    responses=upload_responses(outer_status=429),
+    dependencies=[Security(knowledge_upload_api_key), Security(knowledge_upload_bearer)],
+)
+@require_api_key_self_db(scopes=["rag"])
+@route_through_knowledge_service(
+    source=KnowledgeRetrievalSource.EXTERNAL_API,
+    profile=CallProfile.MULTIPART_UPLOAD,
+    require_remote=True,
+)
+async def upload_file_v1(
+    request: Request,
+    kb_id: uuid.UUID,
+    parent_id: uuid.UUID,
+    file: UploadFile = File(...),
+    api_key_auth: ApiKeyAuth = None,
+):
+    raise KnowledgeUnavailableError("Knowledge upload requires the remote service")
 
 
 @router.post("/file", response_model=ApiResponse)

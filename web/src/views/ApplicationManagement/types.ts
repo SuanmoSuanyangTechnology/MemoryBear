@@ -263,7 +263,7 @@ export interface UploadModalRef {
 }
 
 /**
- * 共享范围。`resource_center`=租户资源中心（共享即生效，无审核）；`community_market`=社区市场（需运营审核）。
+ * Share scope. `resource_center`=tenant resource center (effective immediately, no review); `community_market`=community market (requires operation review).
  */
 export enum Scope {
     CommunityMarket = "community_market",
@@ -271,8 +271,8 @@ export enum Scope {
 }
 
 /**
- * 共享状态，见接口描述的状态表。`resource_center` 只会是 `shared`；`unknown`
- * 表示市场不可用时的降级值，前端渲染为「状态未知」并允许点「查看记录」重试，不要当成失败。
+ * Share status, see status table in API description. `resource_center` is always `shared`; `unknown`
+ * is a fallback value when market is unavailable, frontend renders as "status unknown" and allows clicking "view records" to retry, do not treat as failure.
  */
 export enum ShareStatus {
     Approved = "approved",
@@ -286,69 +286,145 @@ export enum ShareStatus {
 }
 export interface MySharedOutItem {
     /**
-     * 源应用 ID。两行共享同一个应用时值相同。
+     * Source application ID. Same value when two rows share the same application.
      */
     app_id: string;
     /**
-     * 应用名称，取钉住的 release 快照，不是草稿。
+     * Application name, from pinned release snapshot, not draft.
      */
     app_name: string;
     /**
-     * 应用类型，取钉住的 release 快照。前端据此渲染类型标签与图标配色。
+     * Application type, from pinned release snapshot. Frontend renders type label and icon color based on this.
      */
     app_type: Application['type'];
     /**
-     * 资源中心条目 ID，`DELETE /apps/assets/{asset_id}` 用它取消共享。只开市场开关时条目以 `unpublished`
-     * 落库做市场指针载体，此时该字段有值但 `scope` 不会出现 `resource_center` 行——**不要**因为 `asset_id` 有值就渲染资源中心行。
+     * Resource center entry ID, `DELETE /apps/assets/{asset_id}` uses this to cancel share. When only market switch is on, entry is stored as `unpublished`
+     * as market pointer carrier, at this time this field has value but `scope` will not have `resource_center` row—**do not** render resource center row just because `asset_id` has value.
      */
     asset_id: null | string;
     /**
-     * 编辑权限（原型开关）。`resource_center` = 条目 `share_mode == editable`；`community_market` 恒
-     * `true`（市场只有复制为可编辑副本一条路径），前端应把市场行的开关置为不可点。
+     * Edit permission (prototype switch). `resource_center` = entry `share_mode == editable`; `community_market` is always
+     * `true` (market only has copy to editable copy path), frontend should disable the switch for market rows.
      */
     editable: boolean;
     /**
-     * 方形图标地址；未设置时为 null。
+     * Square icon address; null when not set.
      */
     icon: null | string;
     /**
-     * 图标类型（内置图标名 / 图片），未设置时为 null。
+     * Icon type (built-in icon name / image), null when not set.
      */
     icon_type: null | string;
     /**
-     * 市场侧资源 ID。尚未在市场建条目（如 `pending_sync`）时为 null。
+     * Market side resource ID. Null when entry not yet created in market (e.g., `pending_sync`).
      */
     market_resource_id: null | string;
     /**
-     * 源应用当前生效的本体（`schemas/app_schema.py::AppOntologyInfo`）。按 `app_id`
-     * 解析，同一应用的两行值相同；未绑定时为系统默认本体兜底；社区版恒为 null。
+     * Currently effective ontology of source application (`schemas/app_schema.py::AppOntologyInfo`). Parsed by `app_id`,
+     * same value for two rows of same application; falls back to system default ontology when not bound; always null for community edition.
      */
     ontology: Application['ontology'];
     /**
-     * 待审核投稿 ID，「撤回申请」用它：`POST /external-catalog/publications/{id}/withdraw`。仅在 `share_status =
-     * pending` 时有值，其余为 null——前端直接据此决定按钮是否出现，不要再按状态推一遍。
+     * Pending review submission ID, "withdraw application" uses this: `POST /external-catalog/publications/{id}/withdraw`. Only has value when `share_status =
+     * pending`, null otherwise—frontend directly decides button visibility based on this, do not infer from status again.
      */
     pending_publication_id: null | string;
     /**
-     * 共享范围。`resource_center`=租户资源中心（共享即生效，无审核）；`community_market`=社区市场（需运营审核）。
+     * Share scope. `resource_center`=tenant resource center (effective immediately, no review); `community_market`=community market (requires operation review).
      */
     scope: Scope;
     /**
-     * 共享状态，见接口描述的状态表。`resource_center` 只会是 `shared`；`unknown`
-     * 表示市场不可用时的降级值，前端渲染为「状态未知」并允许点「查看记录」重试，不要当成失败。
+     * Share status, see status table in API description. `resource_center` is always `shared`; `unknown`
+     * is a fallback value when market is unavailable, frontend renders as "status unknown" and allows clicking "view records" to retry, do not treat as failure.
      */
     share_status: ShareStatus;
     /**
-     * 最近一次共享 / 投稿时间，Unix 毫秒。`resource_center` 取条目最近更新时间，市场取最近一次投稿时间。
+     * Last share / submission time, Unix milliseconds. `resource_center` takes entry last update time, market takes last submission time.
      */
     shared_at: number;
     /**
-     * 该范围当前的版本号（`version_name`，如
-     * `v1.0.3`）。资源中心取条目钉住的版本；市场取最新一次投稿的版本。两个范围可能不同——这是合法中间态，不要用其中一个推另一个。
+     * Current version number for this scope (`version_name`, e.g., `v1.0.3`). Resource center takes entry pinned version; market takes latest submission version. Two scopes may differ—this is a valid intermediate state, do not infer one from the other.
      */
     version: string;
     /**
-     * `version` 对应的整数序号，用于排序与「是否有新版本」比较。
+     * Integer sequence number for `version`, used for sorting and comparing "has new version".
      */
     version_number: number;
+    /**
+     * Version number of the latest reviewed version (may differ from `version`, e.g., version under review).
+     */
+    review_version?: string;
+    /**
+     * Market listing status. `not_listed`=not listed, `listed`=listed, `pending_listing`=publisher delisted pending relist,
+     * `delisted`=platform delisted. Always null for resource center rows; also null when market is unavailable.
+     */
+    listing_status?: 'not_listed' | 'listed' | 'pending_listing' | 'delisted' | null;
+    /**
+     * Delist actor. `publisher`=publisher self-delist (can self-relist); `operator`=platform delist (only platform can restore).
+     * Always null for resource center rows.
+     */
+    delist_actor?: 'publisher' | 'operator' | null;
+    /**
+     * Whether delist API can be called. Determined by market, always false for resource center rows.
+     */
+    can_delist: boolean;
+    /**
+     * Whether self-relist API can be called. Only true when `listing_status=pending_listing` and `delist_actor=publisher`.
+     * Always false for resource center rows.
+     */
+    can_relist: boolean;
+}
+
+/**
+ * Community market publication event types
+ */
+export type PublicationEventType = 'submitted' | 'pending' | 'approved' | 'rejected' | 'withdrawn';
+
+/**
+ * Community market publication event
+ */
+export interface PublicationEvent {
+    event_id: string;
+    event_type: PublicationEventType;
+    event_label: string;
+    version: string;
+    publication_id: string;
+    occurred_at: number;
+    reason: string | null;
+}
+
+/**
+ * Community market publication record response
+ */
+export interface PublicationRecordData {
+    resource_type: string;
+    resource_id: string;
+    market_resource_id: string | null;
+    listing_status: 'listed' | 'unlisted' | null;
+    current_version: string;
+    can_publish: boolean;
+    block_reason: string | null;
+    pending_publication_id: string | null;
+    events: PublicationEvent[];
+}
+
+/**
+ * Application record modal ref
+ */
+export interface ApplicationRecordModalRef {
+    handleOpen: (app_id: string) => void;
+}
+
+/**
+ * Delist modal ref
+ */
+export interface DelistModalRef {
+    handleOpen: (publication_id: string, app_name: string) => void;
+}
+
+/**
+ * Relist modal ref
+ */
+export interface RelistModalRef {
+    handleOpen: (item: MySharedOutItem) => void;
 }

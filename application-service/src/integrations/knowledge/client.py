@@ -194,7 +194,7 @@ class KnowledgeServiceClient:
         return StreamingResponse(
             body_iterator(),
             status_code=upstream.status_code,
-            headers=self._transport.response_headers(upstream.headers),
+            headers=self._transport.response_headers(upstream.headers, status_code=upstream.status_code),
         )
 
     async def retrieval_policy(
@@ -272,6 +272,7 @@ class KnowledgeServiceClient:
                 raw,
                 status_code=upstream.status_code,
                 trace_id=trace_id,
+                headers=self._transport.response_headers(upstream.headers, status_code=upstream.status_code),
             )
             code = envelope["code"]
             result = retrieval_result_from_data(envelope.get("data"))
@@ -409,9 +410,16 @@ class KnowledgeServiceClient:
         code = envelope.get("code")
         if not isinstance(code, int):
             raise KnowledgeProtocolError("Knowledge service envelope code must be an integer")
-        message = str(envelope.get("error") or envelope.get("msg") or "Knowledge error")
+        message = str(envelope.get("msg") or "Knowledge error")
         if not 200 <= status_code < 300 or code != 0:
-            raise KnowledgeServiceError(status_code, code, message, trace_id)
+            raise KnowledgeServiceError(
+                status_code,
+                code,
+                message,
+                trace_id,
+                diagnostic=str(envelope.get("error") or ""),
+                headers=self._transport.response_headers(upstream.headers, status_code=upstream.status_code),
+            )
         envelope["time"] = int(time.time() * 1000)
         logger.info(
             "knowledge_detached_call_completed method=%s path=%s status=%s code=%s "

@@ -313,6 +313,13 @@ def _merge_event_details(
             "grounded_memory_count": grounded_memory_count,
         }
 
+    elif engine_type == "PERSONALITY_ANCHOR":
+        return {
+            "candidate_count": sum(
+                _as_count((event.get("details") or {}).get("candidate_count")) for event in events
+            )
+        }
+
     return {}
 
 
@@ -551,6 +558,10 @@ def _generate_card_text_zh(
                 f"最近一次模拟了 {rounds} 轮情景、结合了 {grounded} 条历史记忆。"
             )
         return name, content
+
+    elif engine_type == "PERSONALITY_ANCHOR":
+        count = merged["candidate_count"]
+        return "我生成了待确认的人格候选", f"这一天共生成了 {count} 条人格候选，供你确认。"
 
     return ("", "")
 
@@ -821,6 +832,14 @@ def _generate_card_text_en(
                 f"{_pluralize('memory', grounded, 'memories')}."
             )
         return name, content
+
+    if engine_type == "PERSONALITY_ANCHOR":
+        count = merged["candidate_count"]
+        return (
+            "I generated personality candidates for review",
+            f"I generated {count} personality {_pluralize('candidate', count)}"
+            " for review that day.",
+        )
 
     return ("", "")
 

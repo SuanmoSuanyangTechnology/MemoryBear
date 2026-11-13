@@ -81,12 +81,11 @@ const useDatasetUpload = ({
       } else if (response.id) {
         onUploaded(response.id);
       }
-    } catch (error) {
-      const uploadError = error as Error & { code?: string };
-      if (uploadError.name !== 'AbortError' && uploadError.code !== 'ERR_CANCELED') {
-        messageApi.error(uploadError.message);
-        onError?.(uploadError);
-      }
+    } catch (error: any) {
+      if (error?.name === 'AbortError' || error?.code === 'ERR_CANCELED') return;
+      const data = error?.response?.data || error;
+      const msg = data?.msg || data?.error || error?.message || t('knowledgeBase.uploadFailed');
+      onError?.(msg);
     } finally {
       controllersRef.current.delete(target.uid);
     }

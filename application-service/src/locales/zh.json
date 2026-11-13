@@ -20,6 +20,7 @@
       "quota_exceeded": "{resource} 配额已超限",
       "sub_agent_invalid": "以下子 Agent 校验未通过：{details}",
       "sub_agent_unpublished": "以下子 Agent 尚未发布，请先发布它们：{details}",
+      "workflow_agent_unpublished": "工作流 Agent 节点引用的应用尚未发布，请先发布它们：{details}",
       "share_dependencies_unavailable": "应用引用了不可用的工具、技能或 Agent 版本，请先修复后再共享：{details}"
     },
     "validation": {

@@ -10,6 +10,8 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from error_core.codes import BizCode, is_known_code
+from error_core.envelope import fail
 from error_core.fastapi_handlers import (
     ErrorHandlerDeps,
 )
@@ -25,12 +27,14 @@ from error_core.fastapi_handlers import (
 from error_core.fastapi_handlers import (
     validation_error_content as _validation_error_content,
 )
+from error_core.knowledge import knowledge_message
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, Response
 from pydantic import ValidationError as PydanticValidationError
 
 from ..errors import BusinessException, I18nException
 from ..i18n import get_default_locale, translate
+from ..integrations.knowledge.errors import KnowledgeClientError, KnowledgeServiceError
 from ..integrations.model.errors import ModelInvokeCancelledError
 from ..request_logging import log_request_failure
 from ..sensitive import SensitiveDataFilter
@@ -51,9 +55,7 @@ _deps = ErrorHandlerDeps(
 )
 
 
-def auth_rejection_content(
-    http_status: int, detail: str, language: str
-) -> dict[str, Any]:
+def auth_rejection_content(http_status: int, detail: str, language: str) -> dict[str, Any]:
     """The envelope HTTP and gRPC render for an authentication rejection."""
 
     return _auth_rejection_content(
@@ -72,9 +74,7 @@ def validation_error_content(
 ) -> dict[str, Any]:
     """Pydantic errors -> the legacy 422 envelope (HTTP handler and gRPC share it)."""
 
-    return _validation_error_content(
-        exc, language, translate=translate, trace_id=trace_id
-    )
+    return _validation_error_content(exc, language, translate=translate, trace_id=trace_id)
 
 
 def render_error(
@@ -107,6 +107,53 @@ def render_error(
 
 def register_error_handlers(application: FastAPI) -> None:
     _register_error_handlers(application, _deps)
+    original_unhandled_handler = application.exception_handlers[Exception]
+
+    @application.exception_handler(Exception)
+    async def knowledge_error_handler(request: Request, exc: Exception):
+        if not isinstance(exc, KnowledgeClientError) or (
+            isinstance(exc, KnowledgeServiceError) and exc.status_code < 400
+        ):
+            return await original_unhandled_handler(request, exc)
+        if isinstance(exc, KnowledgeServiceError):
+            status, code, detail = 500, exc.code, exc.diagnostic
+            headers = {
+                key: value
+                for key, value in exc.headers.items()
+                if key.lower() not in {"content-length", "content-type"}
+            }
+            trace_id = exc.trace_id
+        else:
+            from ..integrations.knowledge.errors import (
+                KnowledgeProtocolError,
+                KnowledgeTimeoutError,
+            )
+
+            status = 500
+            code = (
+                BizCode.KB_UPSTREAM_RESPONSE_INVALID if isinstance(exc, KnowledgeProtocolError)
+                else BizCode.KB_REQUEST_TIMEOUT if isinstance(exc, KnowledgeTimeoutError)
+                else BizCode.KB_HTTP_SERVICE_UNAVAILABLE
+            )
+            detail = type(exc).__name__
+            headers = {}
+            trace_id = getattr(request.state, "trace_id", None) or get_trace_id()
+        locale = getattr(request.state, "language", None) or get_default_locale()
+        message = knowledge_message(code, locale, legacy_message=getattr(exc, "user_message", None))
+        response = render_error(
+            request,
+            status_code=status,
+            content=fail(code, message, SensitiveDataFilter.filter_string(detail)),
+            error_code=str(code),
+            message=message,
+            exception=exc,
+        )
+        response.headers.update(headers)
+        if is_known_code(code):
+            response.headers["Content-Language"] = locale
+        if trace_id:
+            response.headers[TRACE_ID_HEADER] = trace_id
+        return response
 
     @application.exception_handler(ModelInvokeCancelledError)
     async def invoke_cancelled_handler(

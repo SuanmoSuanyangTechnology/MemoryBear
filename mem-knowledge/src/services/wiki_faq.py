@@ -3,6 +3,7 @@
 import asyncio
 import logging
 
+from ..error_mapping import map_wiki_error
 from ..errors import KnowledgeError
 from ..rag.faq.contracts import FAQ_GENERATE_TASK, FAQ_QUEUE
 from ..rag.wiki.config import WikiError
@@ -19,7 +20,7 @@ async def run(runtime, operation, scope, *args, **kwargs):
     try:
         result = await asyncio.to_thread(transaction, runtime, operation, scope, *args, **kwargs)
     except WikiError as exc:
-        raise KnowledgeError.from_code("KB_RESOURCE_NOT_FOUND") from exc
+        raise map_wiki_error(exc, faq=True) from exc
     if synchronize_index and operation in {
         write.create,
         write.edit,

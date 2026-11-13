@@ -29,7 +29,7 @@ from ..dependencies import (
     get_source,
 )
 from ..schemas.chunk import KnowledgeRetrievalSource
-from ..schemas.common import SuccessEnvelope, success
+from ..schemas.common import INPUT_422_RESPONSES, SuccessEnvelope, success
 from ..schemas.file import (
     BatchDownloadRequest,
     CustomTextFileCreate,
@@ -74,6 +74,7 @@ async def _persist_upload(
     content: bytes,
     content_type: str | None,
     inherit_parser_config: bool,
+    record_fingerprint: bool = False,
 ) -> file_service.UploadOutcome:
     storage = KnowledgeFileStorage(runtime.storage)
     async with runtime.database.async_session() as db:
@@ -88,6 +89,7 @@ async def _persist_upload(
             content_type=content_type,
             principal=principal,
             inherit_parser_config=inherit_parser_config,
+            record_fingerprint=record_fingerprint,
         )
     await storage.upload(plan.file_key, content, content_type)
     persistence_succeeded = False
@@ -102,7 +104,11 @@ async def _persist_upload(
     return outcome
 
 
-@router.get("/{kb_id}/{parent_id}/files", response_model=SuccessEnvelope[dict[str, Any]])
+@router.get(
+    "/{kb_id}/{parent_id}/files",
+    response_model=SuccessEnvelope[dict[str, Any]],
+    responses=INPUT_422_RESPONSES,
+)
 async def get_files(
     request: Request,
     kb_id: uuid.UUID,
@@ -193,6 +199,7 @@ async def upload_file(
         content=contents,
         content_type=file.content_type,
         inherit_parser_config=True,
+        record_fingerprint=True,
     )
     return _success(
         request,
@@ -327,7 +334,11 @@ async def batch_download_files(
     )
 
 
-@router.put("/{file_id}", response_model=SuccessEnvelope[dict[str, Any]])
+@router.put(
+    "/{file_id}",
+    response_model=SuccessEnvelope[dict[str, Any]],
+    responses=INPUT_422_RESPONSES,
+)
 async def update_file(
     request: Request,
     file_id: uuid.UUID,

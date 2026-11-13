@@ -242,10 +242,10 @@ class KnowledgeGrpcRetriever:
                 f"Knowledge {operation} response code must be an integer"
             )
         if code != 0:
-            message = str(
-                envelope.get("error") or envelope.get("msg") or "Knowledge error"
+            message = str(envelope.get("msg") or "Knowledge error")
+            raise KnowledgeServiceError(
+                200, code, message, trace_id, diagnostic=str(envelope.get("error") or "")
             )
-            raise KnowledgeServiceError(200, code, message, trace_id)
         return envelope
 
     @staticmethod
@@ -265,11 +265,11 @@ class KnowledgeGrpcRetriever:
                 payload = None
             if isinstance(payload, dict):
                 code = payload.get("code")
-                message = str(
-                    payload.get("error") or payload.get("msg") or "Knowledge error"
-                )
+                message = str(payload.get("msg") or "Knowledge error")
                 if isinstance(code, int):
-                    return KnowledgeServiceError(status, code, message, trace_id)
+                    return KnowledgeServiceError(
+                        status, code, message, trace_id, diagnostic=str(payload.get("error") or "")
+                    )
             return KnowledgeProtocolError("Knowledge error envelope is invalid")
         if exc.code() == grpc.StatusCode.DEADLINE_EXCEEDED:
             return KnowledgeTimeoutError("Knowledge service request timed out")

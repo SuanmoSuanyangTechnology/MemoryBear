@@ -70,9 +70,13 @@ class YuqueAPIClient:
         except httpx.HTTPError as exc:
             raise YuqueAPIError("Yuque network request failed") from exc
         if response.status_code == 401:
-            raise YuqueAuthError("Yuque authentication failed", "401")
+            raise YuqueAuthError(
+                "Yuque authentication failed", "401", response=response
+            )
         if response.status_code != 200:
-            raise YuqueAPIError("Yuque API request failed", str(response.status_code))
+            raise YuqueAPIError(
+                "Yuque API request failed", str(response.status_code), response=response
+            )
         body = response.json()
         result = []
         for item in body.get("data", []):
@@ -104,7 +108,9 @@ class YuqueAPIClient:
         except httpx.HTTPError:
             raise YuqueAPIError("Yuque document list request failed") from None
         if response.status_code == 401:
-            raise YuqueAuthError("Yuque authentication failed", "401")
+            raise YuqueAuthError(
+                "Yuque authentication failed", "401", response=response
+            )
         if response.status_code != 200:
             raise YuqueAPIError("Yuque document list request failed", str(response.status_code))
         documents = []
@@ -130,7 +136,9 @@ class YuqueAPIClient:
         except httpx.HTTPError:
             raise YuqueAPIError("Yuque document detail request failed") from None
         if response.status_code == 401:
-            raise YuqueAuthError("Yuque authentication failed", "401")
+            raise YuqueAuthError(
+                "Yuque authentication failed", "401", response=response
+            )
         if response.status_code != 200:
             raise YuqueAPIError("Yuque document detail request failed", str(response.status_code))
         payload = response.json().get("data") or {}

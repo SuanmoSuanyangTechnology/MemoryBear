@@ -149,8 +149,7 @@ const ReleasePage: FC<{data: Application; refresh: () => void}> = ({data, refres
                   <RbButton type="primary" ghost onClick={() => releaseShareModalRef.current?.handleOpen()}>{t('application.share')}</RbButton>
                   <RbButton type="primary" ghost onClick={() => embedWebsiteModalRef.current?.handleOpen()}>{t('application.embedWebsite')}</RbButton>
                 </>}
-                {/* <RbButton type="primary" ghost onClick={() => embedWebsiteModalRef.current?.handleOpen()}>{t('application.embedWebsite')}</RbButton> */}
-                {!['pure_workflow'].includes(data?.type) && <RbButton type="primary" ghost onClick={() => appSharingModalRef.current?.handleOpen()}>{t('application.sharing')}</RbButton>}
+                <RbButton type="primary" ghost onClick={() => appSharingModalRef.current?.handleOpen()}>{t('application.sharing')}</RbButton>
               </>}
               {data?.type === 'pure_workflow'
                 ? <Dropdown

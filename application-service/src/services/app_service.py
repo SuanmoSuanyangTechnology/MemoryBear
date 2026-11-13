@@ -31,6 +31,7 @@ from ..errors import (
     BusinessException,
     ResourceNotFoundException,
     SubAgentUnpublishedError,
+    WorkflowAgentUnpublishedError,
 )
 from ..memory.ontology_binding import ONTOLOGY_BINDING_PLUGIN, OntologyUpstreamError
 from ..models import (
@@ -64,7 +65,13 @@ from .agent_config_converter import AgentConfigConverter
 from .asset_release_resolver import AssetReleaseResolver
 from .category_service import CategoryService
 from .model_ref_gate import assert_refs_publishable, raise_model_unavailable, resolve_invoke_ref
-from .multi_agent_release_resolver import POLICY_PINNED, resolve_effective_release_id
+from .multi_agent_release_resolver import (
+    POLICY_CURRENT,
+    POLICY_PINNED,
+    get_policy,
+    parse_uuid,
+    resolve_effective_release_id,
+)
 from .tool_service import ToolService
 from .workflow_service import WorkflowService
 
@@ -1719,55 +1726,6 @@ class AppService:
             target_tenant_id, target_workspace_id, set(), kb_ids
         )
 
-        def node_config_of(node: dict[str, Any]) -> dict[str, Any] | None:
-            config = node.get("config")
-            if isinstance(config, dict):
-                return config
-            data = node.get("data")
-            if isinstance(data, dict) and isinstance(data.get("config"), dict):
-                return data["config"]
-            return None
-
-        # Agent 节点的「引用已发布 Agent 应用」只能指向本空间应用（发布时会校验
-        # workspace），复制到目标空间后源空间的 app_id 必然失效，所以整段清掉，
-        # 节点退回 inline 交给用户重新配置，否则副本连发布都过不了。
-        agent_reference_ids: set[uuid.UUID] = set()
-
-        def collect_agent_references(value: Any) -> None:
-            if isinstance(value, list):
-                for child in value:
-                    collect_agent_references(child)
-                return
-            if not isinstance(value, dict):
-                return
-            node_config = node_config_of(value)
-            reference = (
-                node_config.get("reference")
-                if isinstance(node_config, dict)
-                and node_config.get("mode") == "reference"
-                else None
-            )
-            if isinstance(reference, dict):
-                try:
-                    agent_reference_ids.add(uuid.UUID(str(reference.get("app_id"))))
-                except (TypeError, ValueError, AttributeError):
-                    pass
-            for child in value.values():
-                collect_agent_references(child)
-
-        collect_agent_references(copied)
-        available_agent_app_ids: set[uuid.UUID] = set()
-        if agent_reference_ids:
-            available_agent_app_ids = set(
-                self.db.scalars(
-                    select(App.id).where(
-                        App.id.in_(agent_reference_ids),
-                        App.workspace_id == target_workspace_id,
-                        App.is_active.is_(True),
-                    )
-                ).all()
-            )
-
         def clean(value: Any, path: str = "nodes") -> Any:
             if isinstance(value, list):
                 return [clean(child, f"{path}[{index}]") for index, child in enumerate(value)]
@@ -1814,26 +1772,6 @@ class AppService:
                         "reason": "记忆配置不属于目标工作空间",
                     })
                 result = cleaned_memory
-
-            node_config = node_config_of(result)
-            if isinstance(node_config, dict) and node_config.get("mode") == "reference":
-                reference = node_config.get("reference")
-                try:
-                    referenced_app_id = uuid.UUID(
-                        str(reference.get("app_id"))
-                    ) if isinstance(reference, dict) else None
-                except (TypeError, ValueError, AttributeError):
-                    referenced_app_id = None
-                if referenced_app_id not in available_agent_app_ids:
-                    missing.append({
-                        "kind": "agent",
-                        "name": str(referenced_app_id) if referenced_app_id else None,
-                        "path": path,
-                        "reason": "引用的 Agent 不属于目标工作空间",
-                    })
-                    # 引用模式缺了 reference 会校验失败，必须一并退回 inline。
-                    node_config.pop("reference", None)
-                    node_config["mode"] = "inline"
 
             for key, child in list(result.items()):
                 if key != "knowledge_bases":
@@ -2552,6 +2490,11 @@ class AppService:
                 BizCode.INVALID_PARAMETER,
             )
 
+        # Cluster save rejects unusable members up front (MultiAgentService
+        # .check_config_data); the workflow side used to learn about a draft
+        # referenced Agent only at publish time. Same standing here.
+        self._assert_workflow_agent_references_published(config_dict["nodes"])
+
         if not workflow_cfg:
             # Create a new config if none exists
             workflow_cfg = WorkflowConfig(
@@ -3154,6 +3097,95 @@ class AppService:
             "多智能体配置检查通过"
         )
 
+    def _assert_workflow_agent_references_published(
+            self,
+            nodes: list[dict[str, Any]],
+    ) -> None:
+        """Reject a workflow save whose ``agent`` nodes reference unpublished apps.
+
+        A workflow copied out of the resource center takes the Agent its node points
+        at along as a **draft** (``AssetService._remap_workflow_agent_reference``
+        rewires the node to ``release_policy=current`` / ``release_id=None``), so the
+        node references an app that has no release yet. Publishing already refuses
+        that in ``_pin_workflow_agent_references``, but the user only found out after
+        finishing the whole edit — while the cluster save path has always checked its
+        members up front. This brings the workflow save to the same standard.
+
+        Scope is deliberately narrow: **only** "the reference has no usable release"
+        is enforced. For a pinned reference that means the row must exist, be active
+        *and* belong to the referenced app — a release whose ``app_id`` points
+        elsewhere is a stale pointer left by a manual re-bind, and publishing rejects
+        it anyway (``_pin_workflow_agent_references`` requires
+        ``release.app_id == referenced_app.id``). A wrong app type, a cross-workspace
+        id or a nonexistent app keep their current save-time behaviour and stay a
+        publish-time error; folding those in would make this a second copy of the
+        publish gate and start rejecting saves that work today.
+
+        Every offender is collected and raised once — failing on the first one would
+        force the user to retry N times to learn which Agents need publishing.
+        """
+
+        def _active_release(raw: Any) -> AppRelease | None:
+            """Resolve an active release; only the *parse* is guarded.
+
+            A malformed id means "there is no such release", but a DB failure must
+            surface: swallowing it would report a broken query to the user as
+            "the reference is gone" and hide the real problem behind a 400.
+            """
+
+            release_id = parse_uuid(raw)
+            if release_id is None:
+                return None
+            candidate = self.db.get(AppRelease, release_id)
+            return candidate if candidate is not None and candidate.is_active else None
+
+        unavailable: list[str] = []
+        for node in nodes or []:
+            if node.get("type") != "agent":
+                continue
+            config = node.get("config")
+            if not isinstance(config, dict) or config.get("mode", "inline") != "reference":
+                continue
+            reference = config.get("reference")
+            reference = reference if isinstance(reference, dict) else {}
+            label = node.get("name") or node.get("id") or "未命名节点"
+
+            # 同样只护住解析：非法/缺失的 app_id 落到下面的「不存在」，DB 异常照抛。
+            referenced_app_id = parse_uuid(reference.get("app_id"))
+            referenced_app = (
+                self.db.get(App, referenced_app_id) if referenced_app_id else None
+            )
+            if referenced_app is None:
+                unavailable.append(f"Agent 节点「{label}」引用的应用不存在")
+                continue
+            if not referenced_app.is_active:
+                unavailable.append(
+                    f"Agent 节点「{label}」引用的应用「{referenced_app.name}」已停用"
+                )
+                continue
+
+            # 缺字段/非法值一律按 pinned（`get_policy`），与运行时同一口径；
+            # 发布侧 `_pin_workflow_agent_references` 也走它，不要在这里手写
+            # `== "current"`——非法值的归属会随写法漂移。
+            if get_policy(reference) == POLICY_CURRENT:
+                if _active_release(referenced_app.current_release_id) is None:
+                    unavailable.append(
+                        f"Agent 节点「{label}」引用的应用「{referenced_app.name}」尚未发布"
+                    )
+                continue
+            # 归属也查：发布侧要求 ``release.app_id == referenced_app.id``，只查
+            # ``is_active`` 会让「钉住的版本其实属于别的应用」这种历史残留保存成功、
+            # 发布才报错。type 不查 —— 那是 docstring 明确留给发布侧的范围。
+            pinned_release = _active_release(reference.get("release_id"))
+            if pinned_release is None or pinned_release.app_id != referenced_app.id:
+                unavailable.append(
+                    f"Agent 节点「{label}」引用的应用「{referenced_app.name}」"
+                    "钉住的发布版本不可用"
+                )
+
+        if unavailable:
+            raise WorkflowAgentUnpublishedError(details="；".join(unavailable))
+
     def _pin_workflow_agent_references(
             self,
             nodes: list[dict[str, Any]],
@@ -3193,10 +3225,9 @@ class AppService:
                     "引用的 Agent 应用尚未发布或已归档", BizCode.APP_NOT_PUBLISHED
                 )
 
-            release_policy = reference.get("release_policy", "pinned")
             effective_release_id = (
                 referenced_app.current_release_id
-                if release_policy == "current"
+                if get_policy(reference) == POLICY_CURRENT
                 else reference.get("release_id")
             )
             try:
@@ -3230,7 +3261,7 @@ class AppService:
                 node_config.pop("files", None)
 
             reference["app_id"] = str(referenced_app.id)
-            reference["release_policy"] = "pinned"
+            reference["release_policy"] = POLICY_PINNED
             reference["release_id"] = str(referenced_release.id)
             node_config["reference"] = reference
             node["config"] = node_config

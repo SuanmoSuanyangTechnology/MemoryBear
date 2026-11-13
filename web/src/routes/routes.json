@@ -8,6 +8,7 @@
       { "path": "/space", "element": "SpaceManagement" },
       { "path": "/tool", "element": "ToolManagement" },
       { "path": "/resources", "element": "ResourceCenter" },
+      { "path": "/community-market", "element": "CommunityMarket" },
       { "path": "/pricing", "element": "Package" },
       { "path": "/upgrade", "element": "Package" },
       { "path": "/order-pay", "element": "OrderPayment" },

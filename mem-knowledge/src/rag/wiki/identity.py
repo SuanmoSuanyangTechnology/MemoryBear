@@ -1,15 +1,15 @@
 """Wiki 主题身份不依赖模型自由填写的 scope。"""
 
-import unicodedata
 from typing import Any
 
 from .config import WikiError, fingerprint, normalize_name, source_reference_key
 
-TOPIC_IDENTITY_VERSION = "wiki_topic_identity_v1"
+# 旧键已丢失词边界，不能用于查找按新规则生成的主题。
+TOPIC_IDENTITY_VERSION = "wiki_topic_identity_v2"
 
 
 def topic_identity(kind: str, name: str) -> tuple[str, str]:
-    return kind, "".join(unicodedata.normalize("NFKC", name).casefold().split())
+    return kind, normalize_name(name)
 
 
 def merge_candidate(target: dict[str, Any], incoming: dict[str, Any]) -> None:

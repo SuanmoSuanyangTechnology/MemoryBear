@@ -3,6 +3,7 @@
 import logging
 import uuid
 
+from error_core.codes import BizCode
 from pydantic import ValidationError
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -79,7 +80,6 @@ def edit(session, scope, faq_id, actor_id, payload):
             answers=row.answers,
             answer_strategy=row.answer_strategy,
         )
-        merged = edit_content(current, payload["standard_question"], payload["standard_answer"])
     except ValidationError as exc:
         logger.warning(
             "FAQ 编辑字段冲突 faq_id=%s stage=validate_content error_type=%s errors=%s",
@@ -87,7 +87,15 @@ def edit(session, scope, faq_id, actor_id, payload):
             type(exc).__name__,
             exc.errors(include_input=False, include_url=False, include_context=False),
         )
-        raise KnowledgeError.from_code("KB_FAQ_CONTENT_INVALID") from exc
+        raise KnowledgeError.from_code(
+            "KB_FAQ_CONTENT_INVALID", response_code=BizCode.KB_FAQ_STORED_DATA_INVALID
+        ) from exc
+    try:
+        merged = edit_content(current, payload["standard_question"], payload["standard_answer"])
+    except ValidationError as exc:
+        raise KnowledgeError.from_code(
+            "KB_FAQ_CONTENT_INVALID", response_code=BizCode.KB_FAQ_CONTENT_CONFLICT
+        ) from exc
     target = None
     if row.review_state == "approved" and row.wiki_page_id is not None:
         info = source(session, scope, row)
@@ -160,12 +168,15 @@ def _latest_snapshot(
     if target is None:
         logger.warning(
             "FAQ 当前 Wiki 快照缺失 faq_id=%s wiki_page_id=%s wiki_version=%s "
-            "stage=load_latest_snapshot error_type=KnowledgeError error_code=KB_FAQ_SOURCE_CHANGED",
+            "stage=load_latest_snapshot error_type=KnowledgeError "
+            "error_code=KB_FAQ_SOURCE_SNAPSHOT_UNAVAILABLE",
             row.id,
             row.wiki_page_id,
             wiki_version,
         )
-        conflict("KB_FAQ_SOURCE_CHANGED")
+        raise KnowledgeError.from_code(
+            "KB_FAQ_SOURCE_CHANGED", response_code=BizCode.KB_WIKI_SNAPSHOT_UNAVAILABLE
+        )
     return target
 
 

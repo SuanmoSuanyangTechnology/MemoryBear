@@ -14,6 +14,7 @@ import logging
 import time
 from typing import Any
 
+from error_core.knowledge import validation_diagnostic
 from memorybear.knowledge.v1 import retrieval_pb2, retrieval_pb2_grpc
 from memorybear_grpc.interceptors import current_principal
 from memorybear_grpc.metadata import (
@@ -64,8 +65,12 @@ def _decode_retrieval_request(
             any(part in _RERANK_FIELDS for part in error.get("loc", ()))
             for error in exc.errors()
         ):
-            raise KnowledgeError.from_code("KB_RERANK_CONFIG_INVALID") from exc
-        raise KnowledgeError.from_code("KB_RETRIEVAL_REQUEST_INVALID") from exc
+            raise KnowledgeError.from_code(
+                "KB_RERANK_CONFIG_INVALID", diagnostic=validation_diagnostic(exc.errors())
+            ) from exc
+        raise KnowledgeError.from_code(
+            "KB_RETRIEVAL_REQUEST_INVALID", diagnostic=validation_diagnostic(exc.errors())
+        ) from exc
 
 
 def _decode_policy_request(body_json: bytes) -> RetrievalPolicyRequest:
@@ -73,7 +78,9 @@ def _decode_policy_request(body_json: bytes) -> RetrievalPolicyRequest:
     try:
         return RetrievalPolicyRequest.model_validate(body)
     except ValidationError as exc:
-        raise KnowledgeError.from_code("KB_HTTP_VALIDATION_ERROR") from exc
+        raise KnowledgeError.from_code(
+            "KB_HTTP_VALIDATION_ERROR", diagnostic=validation_diagnostic(exc.errors())
+        ) from exc
 
 
 def _principal() -> Principal:
@@ -92,7 +99,7 @@ def _source(context) -> KnowledgeRetrievalSource:
             headers.get("x-kb-source") or KnowledgeRetrievalSource.GENERAL
         )
     except ValueError as exc:
-        raise KnowledgeError.from_code("KB_PRINCIPAL_INVALID") from exc
+        raise KnowledgeError.from_code("KB_SOURCE_HEADER_INVALID") from exc
 
 
 def _language(context) -> str:
@@ -143,13 +150,12 @@ def _log_failure(
         "knowledge_grpc_failed %s",
         json.dumps(details, ensure_ascii=False, default=str),
         exc_info=(type(error), error, error.__traceback__)
-        if not bounded_chain and len(nodes) > 1 else None,
+        if not bounded_chain and len(nodes) > 1
+        else None,
     )
 
 
-class KnowledgeRetrievalServicer(
-    retrieval_pb2_grpc.KnowledgeRetrievalServiceServicer
-):
+class KnowledgeRetrievalServicer(retrieval_pb2_grpc.KnowledgeRetrievalServiceServicer):
     """Stateless adapter: the pipeline resolves everything per call."""
 
     def __init__(self, runtime: ProcessRuntime) -> None:
@@ -179,12 +185,14 @@ class KnowledgeRetrievalServicer(
                 body = success_body(_retrieval_data(result), "retrieval successful")
             except KnowledgeError as exc:
                 _log_failure(
-                    exc, operation="Retrieve", stage=stage, trace_id=trace_id,
-                    principal=principal, source=source,
+                    exc,
+                    operation="Retrieve",
+                    stage=stage,
+                    trace_id=trace_id,
+                    principal=principal,
+                    source=source,
                 )
-                await abort_with_error(
-                    context, exc, language=language, trace_id=trace_id
-                )
+                await abort_with_error(context, exc, language=language, trace_id=trace_id)
             except Exception:
                 logger.exception(
                     "knowledge_grpc_retrieval_error source=%s elapsed_ms=%.2f trace_id=%s",
@@ -240,12 +248,13 @@ class KnowledgeRetrievalServicer(
                 )
             except KnowledgeError as exc:
                 _log_failure(
-                    exc, operation="RetrievalPolicy", stage=stage, trace_id=trace_id,
+                    exc,
+                    operation="RetrievalPolicy",
+                    stage=stage,
+                    trace_id=trace_id,
                     principal=principal,
                 )
-                await abort_with_error(
-                    context, exc, language=language, trace_id=trace_id
-                )
+                await abort_with_error(context, exc, language=language, trace_id=trace_id)
             except Exception:
                 logger.exception(
                     "knowledge_grpc_retrieval_policy_error elapsed_ms=%.2f trace_id=%s",

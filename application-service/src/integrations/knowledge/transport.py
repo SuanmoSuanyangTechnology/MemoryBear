@@ -35,6 +35,7 @@ _RESPONSE_HEADER_ALLOWLIST = frozenset(
         "x-trace-id",
     }
 )
+_ERROR_RESPONSE_HEADERS = frozenset({"www-authenticate", "allow", "retry-after"})
 _END_OF_STREAM = object()
 
 
@@ -121,11 +122,16 @@ class KnowledgeHttpTransport:
         return headers
 
     @staticmethod
-    def response_headers(incoming: Mapping[str, str]) -> dict[str, str]:
+    def response_headers(
+        incoming: Mapping[str, str], *, status_code: int | None = None,
+    ) -> dict[str, str]:
+        allowed = _RESPONSE_HEADER_ALLOWLIST
+        if status_code is not None and status_code >= 400:
+            allowed = allowed | _ERROR_RESPONSE_HEADERS
         return {
             key: value
             for key, value in incoming.items()
-            if key.lower() in _RESPONSE_HEADER_ALLOWLIST
+            if key.lower() in allowed
         }
 
     async def send(

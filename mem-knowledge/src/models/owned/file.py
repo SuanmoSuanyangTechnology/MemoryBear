@@ -2,7 +2,7 @@
 
 import uuid
 
-from sqlalchemy import Column, DateTime, Integer, String
+from sqlalchemy import Column, DateTime, ForeignKey, Index, Integer, String
 from sqlalchemy.dialects.postgresql import UUID
 
 from ...db import KnowledgeBase
@@ -64,3 +64,14 @@ class File(KnowledgeBase):
         comment="documents.id for a derived image asset",
     )
     created_at = Column(DateTime, default=utcnow_naive)
+
+
+class UploadFingerprint(KnowledgeBase):
+    __tablename__ = "knowledge_upload_fingerprints"
+    __table_args__ = (Index("ix_knowledge_upload_fingerprints_kb_digest", "kb_id", "digest"),)
+
+    file_id = Column(
+        UUID(as_uuid=True), ForeignKey("files.id", ondelete="CASCADE"), primary_key=True,
+    )
+    kb_id = Column(UUID(as_uuid=True), nullable=False)
+    digest = Column(String(64), nullable=False)

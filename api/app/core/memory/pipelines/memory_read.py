@@ -254,7 +254,7 @@ class ReadPipeLine(ModelClientMixin, BasePipeline):
         if search_switch in [SearchStrategy.DEEP, SearchStrategy.NORMAL] and not self.ctx.draft:
             await self._save_short_term(query, search_switch, res)
 
-        if record_display and search_switch != SearchStrategy.COMMUNITY:
+        if record_display:
             self._dispatch_display_record(display_query, search_switch, res)
 
         if self._notification_error is not None:
@@ -394,36 +394,32 @@ class ReadPipeLine(ModelClientMixin, BasePipeline):
             search_switch: SearchStrategy,
             result: MemorySearchResult,
     ) -> None:
-        """聚合读取展示快照并非阻塞投递，任何异常都不影响检索返回。"""
+        """聚合读取展示快照并非阻塞投递，展示失败时保留检索结果。"""
+        search_mode = search_switch.name.lower()
+        if search_mode not in RETRIEVE_SEARCH_MODES:
+            logger.debug("[ReadPipeLine] 检索方式 %s 不在读取展示白名单内，跳过投递", search_mode)
+            return
+
         try:
-            search_mode = search_switch.name.lower()
-            if search_mode not in RETRIEVE_SEARCH_MODES:
-                logger.debug(
-                    f"[ReadPipeLine] 检索方式 {search_mode} 不在读取展示白名单内，跳过投递"
-                )
-                return
+            end_user_uuid = uuid.UUID(self.ctx.end_user_id)
+        except ValueError:
+            logger.warning(
+                "[ReadPipeLine] end_user_id 不是合法 UUID，跳过读取展示投递: %s",
+                self.ctx.end_user_id,
+            )
+            return
 
-            try:
-                end_user_uuid = uuid.UUID(str(self.ctx.end_user_id))
-            except (ValueError, AttributeError, TypeError):
-                logger.warning(
-                    f"[ReadPipeLine] end_user_id 不是合法 UUID，跳过读取展示投递: "
-                    f"{self.ctx.end_user_id}"
-                )
-                return
-
-            # memory_config 为空时取 None
-            workspace_uuid = getattr(self.ctx.memory_config, "workspace_id", None)
-
+        memory_config = self.ctx.memory_config
+        workspace_uuid = memory_config.workspace_id if memory_config is not None else None
+        try:
             snapshot = build_retrieve_snapshot(
                 result=result,
                 query=display_query,
                 language=self.ctx.language,
+                search_mode=search_mode,
             )
-            if not snapshot:
-                logger.debug(
-                    "[ReadPipeLine] 本次检索没有可展示的 Summary/Entity，跳过投递"
-                )
+            if snapshot is None:
+                logger.debug("[ReadPipeLine] %s 检索没有可展示内容，跳过投递", search_mode)
                 return
 
             MemoryRetrievalDisplayQueue.enqueue_nowait(
@@ -438,9 +434,9 @@ class ReadPipeLine(ModelClientMixin, BasePipeline):
                     occurred_at=utcnow_naive(),
                 )
             )
-        except Exception as e:
+        except Exception:
             logger.warning(
-                f"[ReadPipeLine] 读取展示投递失败（不影响主流程）: {e}",
+                "[ReadPipeLine] %s 读取展示快照组装或投递失败", search_mode,
                 exc_info=True,
             )
 

@@ -255,6 +255,7 @@ class MemoryDisplayService:
         end_user_id: UUID | None = None,
         start_time: int | None = None,
         end_time: int | None = None,
+        excluded_search_modes: tuple[str, ...] = (),
     ) -> tuple[list[RetrievedItem], int]:
         await self._ensure_user_in_workspace(end_user_id, workspace_id)
         return await self._load_retrieved(
@@ -264,6 +265,7 @@ class MemoryDisplayService:
             end_user_id=end_user_id,
             start_time=start_time,
             end_time=end_time,
+            excluded_search_modes=excluded_search_modes,
         )
 
     async def _load_retrieved(
@@ -275,6 +277,7 @@ class MemoryDisplayService:
         end_user_id: UUID | None = None,
         start_time: int | None = None,
         end_time: int | None = None,
+        excluded_search_modes: tuple[str, ...] = (),
     ) -> tuple[list[RetrievedItem], int]:
         records, total = await self.repository.query_retrieved_paginated(
             workspace_id=workspace_id,
@@ -283,6 +286,7 @@ class MemoryDisplayService:
             end_user_id=end_user_id,
             start_time=epoch_ms_to_datetime(start_time),
             end_time=epoch_ms_to_datetime(end_time),
+            excluded_search_modes=excluded_search_modes,
         )
 
         items = [
@@ -311,6 +315,7 @@ class MemoryDisplayService:
         end_user_id: UUID | None = None,
         start_time: int | None = None,
         end_time: int | None = None,
+        excluded_engine_types: tuple[str, ...] = (),
     ) -> tuple[list[EngineItem], int]:
         await self._ensure_user_in_workspace(end_user_id, workspace_id)
         return await self._load_engines(
@@ -322,6 +327,7 @@ class MemoryDisplayService:
             end_user_id=end_user_id,
             start_time=start_time,
             end_time=end_time,
+            excluded_engine_types=excluded_engine_types,
         )
 
     async def _load_engines(
@@ -335,6 +341,7 @@ class MemoryDisplayService:
         end_user_id: UUID | None = None,
         start_time: int | None = None,
         end_time: int | None = None,
+        excluded_engine_types: tuple[str, ...] = (),
     ) -> tuple[list[EngineItem], int]:
         groups, total = await self.repository.query_engine_groups_paginated(
             workspace_id=workspace_id,
@@ -344,6 +351,7 @@ class MemoryDisplayService:
             end_user_id=end_user_id,
             start_time=epoch_ms_to_datetime(start_time),
             end_time=epoch_ms_to_datetime(end_time),
+            excluded_engine_types=excluded_engine_types,
         )
         cards = build_cards_from_groups(
             groups=groups,
@@ -365,6 +373,8 @@ class MemoryDisplayService:
         include_engines: bool = True,
         start_time: int | None = None,
         end_time: int | None = None,
+        excluded_search_modes: tuple[str, ...] = (),
+        excluded_engine_types: tuple[str, ...] = (),
     ) -> tuple[list[AllItem], int]:
         await self._ensure_user_in_workspace(end_user_id, workspace_id)
 
@@ -383,6 +393,7 @@ class MemoryDisplayService:
             end_user_id=end_user_id,
             start_time=start_time,
             end_time=end_time,
+            excluded_search_modes=excluded_search_modes,
         )
 
         blocks: dict[str, tuple[Sequence[WrittenItem | RetrievedItem | EngineItem], int]] = {
@@ -400,6 +411,7 @@ class MemoryDisplayService:
                 end_user_id=end_user_id,
                 start_time=start_time,
                 end_time=end_time,
+                excluded_engine_types=excluded_engine_types,
             )
             blocks["engines"] = engines_result
 
