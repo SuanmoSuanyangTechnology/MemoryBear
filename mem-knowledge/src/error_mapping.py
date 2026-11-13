@@ -325,7 +325,7 @@ def map_connector_check_error(exc: Exception) -> KnowledgeError:
         code = "KB_CONNECTOR_SOURCE_INVALID"
     else:
         return KnowledgeError.from_code(map_connector_error(exc).code, status_code=500)
-    return KnowledgeError.from_code(code, status_code=422)
+    return KnowledgeError.from_code(code, status_code=400)
 
 
 _WIKI_CAUSES = {

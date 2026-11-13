@@ -29,7 +29,7 @@ from ..dependencies import (
     get_source,
 )
 from ..schemas.chunk import KnowledgeRetrievalSource
-from ..schemas.common import INPUT_422_RESPONSES, SuccessEnvelope, success
+from ..schemas.common import SuccessEnvelope, success
 from ..schemas.file import (
     BatchDownloadRequest,
     CustomTextFileCreate,
@@ -107,7 +107,6 @@ async def _persist_upload(
 @router.get(
     "/{kb_id}/{parent_id}/files",
     response_model=SuccessEnvelope[dict[str, Any]],
-    responses=INPUT_422_RESPONSES,
 )
 async def get_files(
     request: Request,
@@ -337,7 +336,6 @@ async def batch_download_files(
 @router.put(
     "/{file_id}",
     response_model=SuccessEnvelope[dict[str, Any]],
-    responses=INPUT_422_RESPONSES,
 )
 async def update_file(
     request: Request,

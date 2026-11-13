@@ -61,7 +61,7 @@ from ..dependencies import (
 )
 from ..error_handlers import render_error
 from ..schemas.chunk import KnowledgeRetrievalSource
-from ..schemas.common import INPUT_422_RESPONSES, SuccessEnvelope, success
+from ..schemas.common import SuccessEnvelope, success
 from ..schemas.file import KBBatchDownloadRequest
 from ..schemas.knowledge import (
     KnowledgeCreate,
@@ -176,7 +176,6 @@ async def get_knowledge_graph_entity_types(
 @router.get(
     "/check/yuque/auth",
     response_model=SuccessEnvelope[None],
-    responses=INPUT_422_RESPONSES,
 )
 async def check_yuque_auth(
     request: Request,
@@ -197,7 +196,6 @@ async def check_yuque_auth(
 @router.get(
     "/check/feishu/auth",
     response_model=SuccessEnvelope[None],
-    responses=INPUT_422_RESPONSES,
 )
 async def check_feishu_auth(
     request: Request,
@@ -221,7 +219,6 @@ async def check_feishu_auth(
 @router.get(
     "/knowledges",
     response_model=SuccessEnvelope[dict[str, Any]],
-    responses=INPUT_422_RESPONSES,
 )
 async def get_knowledges(
     request: Request,
@@ -268,7 +265,6 @@ async def get_knowledges(
 @router.post(
     "/knowledge",
     response_model=SuccessEnvelope[dict[str, Any]],
-    responses=INPUT_422_RESPONSES,
 )
 async def create_knowledge(
     request: Request,
@@ -363,7 +359,6 @@ async def get_knowledge_chunk_policy(
 @router.put(
     "/{knowledge_id}",
     response_model=SuccessEnvelope[dict[str, Any]],
-    responses=INPUT_422_RESPONSES,
 )
 async def update_knowledge(
     request: Request,

@@ -159,7 +159,6 @@ def _knowledge_values(
         except GraphPipelineConfigError as exc:
             raise KnowledgeError.from_code(
                 "KB_KNOWLEDGE_PARSER_CONFIG_INVALID",
-                status_code=422,
                 diagnostic="body.parser_config.graphrag: invalid graph pipeline configuration",
             ) from exc
     return values

@@ -49,6 +49,38 @@ _VALIDATION_CONTRACTS = {
 _RERANK_FIELDS = frozenset({"rerank_mode", "rerank_weights"})
 
 
+# These legacy HTTP operations address the missing resource directly. Keep the
+# shared defaults for references supplied in a payload, background jobs and gRPC.
+_RESOURCE_NOT_FOUND = {
+    "get_knowledge": "KB_KNOWLEDGE_NOT_FOUND",
+    "update_knowledge": "KB_KNOWLEDGE_NOT_FOUND",
+    "delete_knowledge": "KB_KNOWLEDGE_NOT_FOUND",
+    "get_document": "KB_DOCUMENT_NOT_FOUND",
+    "update_document": "KB_DOCUMENT_NOT_FOUND",
+    "delete_document": "KB_DOCUMENT_NOT_FOUND",
+    "get_file": "KB_FILE_NOT_FOUND",
+    "update_file": "KB_FILE_NOT_FOUND",
+    "delete_file": "KB_FILE_NOT_FOUND",
+}
+_KNOWLEDGE_CONFLICTS = {
+    "create_knowledge": {"KB_KNOWLEDGE_NAME_EXISTS", "KB_EXTERNAL_ID_EXISTS"},
+    "update_knowledge": {"KB_KNOWLEDGE_NAME_EXISTS"},
+}
+
+
+def _business_http_status(request: Request, error: KnowledgeError) -> int:
+    if error.status_code == 400:
+        endpoint = request.scope.get("endpoint")
+        module = getattr(endpoint, "__module__", "")
+        if module in {"src.api.routes.knowledge", "src.api.routes.document", "src.api.routes.file"}:
+            operation = endpoint.__name__
+            if error.code == _RESOURCE_NOT_FOUND.get(operation):
+                return 404
+            if error.code in _KNOWLEDGE_CONFLICTS.get(operation, ()):
+                return 409
+    return error.status_code
+
+
 def request_locale(request: Request) -> str:
     selected = getattr(request.state, "knowledge_locale", None)
     if normalize_locale(selected):
@@ -118,9 +150,10 @@ def render_error(
         "KB_FEISHU_AUTH_INVALID", "KB_YUQUE_AUTH_INVALID", "KB_WIKI_BACKFILL_DISPATCH_FAILED",
     }:
         return render_legacy_business_error(request, error, exception=exception)
+    status_code = _business_http_status(request, error)
     log_request_failure(
         request,
-        status_code=error.status_code,
+        status_code=status_code,
         response_code=error.response_code,
         error_code=error.code,
         message=knowledge_message(error.response_code, "en"),
@@ -131,7 +164,7 @@ def render_error(
     )
     return _response(
         request,
-        status_code=error.status_code,
+        status_code=status_code,
         response_code=error.response_code,
         message=knowledge_message(error.response_code, request_locale(request)),
         headers=headers,
