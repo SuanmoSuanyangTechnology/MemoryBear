@@ -33,7 +33,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse
 
 from .api.dependencies import Principal, _principal_from_headers
-from .errors import KnowledgeError
+from .errors import TRANSIENT_DEPENDENCY_HTTP_STATUSES, KnowledgeError
 from .request_logging import log_request_failure, safe_failure_detail
 from .trace import TRACE_ID_HEADER
 
@@ -205,11 +205,13 @@ class KbAuthMiddleware(BaseHTTPMiddleware):
                 RedisConnectionError, RedisTimeoutError,
             )) or (
                 isinstance(exc, httpx.HTTPStatusError)
-                and (exc.response.status_code == 429 or exc.response.status_code >= 500)
+                and exc.response.status_code in TRANSIENT_DEPENDENCY_HTTP_STATUSES
             ):
                 return _auth_error(
                     request, 503, "authentication service unavailable", exception=exc,
                 )
+            if isinstance(exc, httpx.HTTPStatusError) and 500 <= exc.response.status_code < 600:
+                return _auth_error(request, 500, "authentication service error", exception=exc)
             return _auth_error(request, 401, "invalid token", exception=exc)
         if ctx is None:
             # 通道 2：老单体直连豁免（过渡态，NetworkPolicy 兜底受信来源）

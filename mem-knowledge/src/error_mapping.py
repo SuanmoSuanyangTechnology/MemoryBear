@@ -30,7 +30,7 @@ from redbear_model import (
 )
 from redbear_model.errors import is_provider_rate_limit_error
 
-from .errors import KnowledgeError
+from .errors import TRANSIENT_DEPENDENCY_HTTP_STATUSES, KnowledgeError
 from .integrations.model.errors import (
     ModelInvokeConfigurationError,
     ModelInvokeFailedError,
@@ -338,7 +338,7 @@ def map_storage_error(exc: BaseException) -> KnowledgeError:
             return _with_cause(
                 "KB_STORAGE_OPERATION_AUTH_OR_CONFIG_INVALID", exc, http_status_override=500,
             )
-        if status == 429 or isinstance(status, int) and status >= 500:
+        if status in TRANSIENT_DEPENDENCY_HTTP_STATUSES:
             return _with_cause("KB_STORAGE_DEPENDENCY_UNAVAILABLE", exc, http_status_override=503)
     return _with_cause("KB_STORAGE_OPERATION_UNEXPECTED", exc, http_status_override=500)
 

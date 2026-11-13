@@ -14,6 +14,7 @@ logger = logging.getLogger(__name__)
 ErrorResponseStyle = Literal["http", "business", "internal"]
 type PublicScalar = str | int | float | bool
 MAX_PUBLIC_PARAM_LENGTH = 200
+TRANSIENT_DEPENDENCY_HTTP_STATUSES = frozenset({429, 502, 503, 504})
 
 
 def public_text(value: str) -> str:
