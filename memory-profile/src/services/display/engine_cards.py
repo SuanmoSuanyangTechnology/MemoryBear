@@ -833,7 +833,8 @@ def _generate_card_text_en(
         count = merged["candidate_count"]
         return (
             "I generated personality candidates for review",
-            f"I generated {count} personality {_pluralize('candidate', count)} for review that day.",
+            f"I generated {count} personality {_pluralize('candidate', count)}"
+            " for review that day.",
         )
 
     return ("", "")
