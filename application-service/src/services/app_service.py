@@ -1726,55 +1726,6 @@ class AppService:
             target_tenant_id, target_workspace_id, set(), kb_ids
         )
 
-        def node_config_of(node: dict[str, Any]) -> dict[str, Any] | None:
-            config = node.get("config")
-            if isinstance(config, dict):
-                return config
-            data = node.get("data")
-            if isinstance(data, dict) and isinstance(data.get("config"), dict):
-                return data["config"]
-            return None
-
-        # Agent 节点的「引用已发布 Agent 应用」只能指向本空间应用（发布时会校验
-        # workspace），复制到目标空间后源空间的 app_id 必然失效，所以整段清掉，
-        # 节点退回 inline 交给用户重新配置，否则副本连发布都过不了。
-        agent_reference_ids: set[uuid.UUID] = set()
-
-        def collect_agent_references(value: Any) -> None:
-            if isinstance(value, list):
-                for child in value:
-                    collect_agent_references(child)
-                return
-            if not isinstance(value, dict):
-                return
-            node_config = node_config_of(value)
-            reference = (
-                node_config.get("reference")
-                if isinstance(node_config, dict)
-                and node_config.get("mode") == "reference"
-                else None
-            )
-            if isinstance(reference, dict):
-                try:
-                    agent_reference_ids.add(uuid.UUID(str(reference.get("app_id"))))
-                except (TypeError, ValueError, AttributeError):
-                    pass
-            for child in value.values():
-                collect_agent_references(child)
-
-        collect_agent_references(copied)
-        available_agent_app_ids: set[uuid.UUID] = set()
-        if agent_reference_ids:
-            available_agent_app_ids = set(
-                self.db.scalars(
-                    select(App.id).where(
-                        App.id.in_(agent_reference_ids),
-                        App.workspace_id == target_workspace_id,
-                        App.is_active.is_(True),
-                    )
-                ).all()
-            )
-
         def clean(value: Any, path: str = "nodes") -> Any:
             if isinstance(value, list):
                 return [clean(child, f"{path}[{index}]") for index, child in enumerate(value)]
@@ -1821,26 +1772,6 @@ class AppService:
                         "reason": "记忆配置不属于目标工作空间",
                     })
                 result = cleaned_memory
-
-            node_config = node_config_of(result)
-            if isinstance(node_config, dict) and node_config.get("mode") == "reference":
-                reference = node_config.get("reference")
-                try:
-                    referenced_app_id = uuid.UUID(
-                        str(reference.get("app_id"))
-                    ) if isinstance(reference, dict) else None
-                except (TypeError, ValueError, AttributeError):
-                    referenced_app_id = None
-                if referenced_app_id not in available_agent_app_ids:
-                    missing.append({
-                        "kind": "agent",
-                        "name": str(referenced_app_id) if referenced_app_id else None,
-                        "path": path,
-                        "reason": "引用的 Agent 不属于目标工作空间",
-                    })
-                    # 引用模式缺了 reference 会校验失败，必须一并退回 inline。
-                    node_config.pop("reference", None)
-                    node_config["mode"] = "inline"
 
             for key, child in list(result.items()):
                 if key != "knowledge_bases":
