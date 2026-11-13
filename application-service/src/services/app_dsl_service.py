@@ -1301,11 +1301,15 @@ class AppDslService:
             if not raw_wf:
                 raise BusinessException("工作流配置缺失", BizCode.BAD_REQUEST)
             raw_nodes = raw_wf.get("nodes") or []
+            pending_config_nodes: set[str] = set()
             resolved_nodes = self._resolve_workflow_nodes(
-                raw_nodes, tenant_id, workspace_id, warnings, dep_map=dep_map
+                raw_nodes, tenant_id, workspace_id, warnings, dep_map=dep_map,
+                deferred_config_nodes=pending_config_nodes,
             )
             resolved_dsl = {**dsl, "workflow": {**raw_wf, "nodes": resolved_nodes}}
-            adapter = MemoryBearAdapter(resolved_dsl)
+            adapter = MemoryBearAdapter(
+                resolved_dsl, deferred_config_node_ids=pending_config_nodes
+            )
             if not adapter.validate_config():
                 raise BusinessException("工作流配置格式无效", BizCode.BAD_REQUEST)
             result = adapter.parse_workflow()
@@ -1740,13 +1744,26 @@ class AppDslService:
     def _resolve_workflow_nodes(
         self, nodes: list, tenant_id: uuid.UUID, workspace_id: uuid.UUID, warnings: list,
         *, dep_map: dict[str, str] | None = None,
+        deferred_config_nodes: set[str] | None = None,
     ) -> list:
-        """Resolve tool/KB/model references in workflow nodes; clear when unmatched."""
+        """Resolve tool/KB/model references in workflow nodes; clear when unmatched.
+
+        `deferred_config_nodes` 收集「引用未匹配、已按约定置空」的节点 id。这些节点的
+        必填字段（`model_id` / `tool_id`）本来就是空着等导入后人工补配置，再跑一遍
+        pydantic 校验只会把「待配置」报成 `[节点错误] ... input_value=None`。调用方拿
+        这个集合让 adapter 跳过这些节点的 config 校验。
+        """
+
+        def _mark_deferred(node_key) -> None:
+            if deferred_config_nodes is not None and node_key:
+                deferred_config_nodes.add(str(node_key))
+
         resolved_nodes = []
         for node in nodes:
             node_type = node.get("type")
             config = dict(node.get("config") or {})
             node_label = node.get("name") or node.get("id")
+            node_id = node.get("id")
             if node_type == NodeType.TOOL.value:
                 tool_id = config.get("tool_id")
                 if not tool_id:
@@ -1766,6 +1783,7 @@ class AppDslService:
                         )
                         config["tool_id"] = None
                         config["tool_parameters"] = {}
+                        _mark_deferred(node_id)
                 else:
                     tool_ref = {}
                     if isinstance(tool_id, str) and len(tool_id) >= 36:
@@ -1785,6 +1803,7 @@ class AppDslService:
                         )
                         config["tool_id"] = None
                         config["tool_parameters"] = {}
+                        _mark_deferred(node_id)
             elif node_type == NodeType.KNOWLEDGE_RETRIEVAL.value:
                 config["knowledge_bases"] = self._resolve_kb_entries(
                     config.get("knowledge_bases") or [], workspace_id, warnings, node_label
@@ -1902,11 +1921,13 @@ class AppDslService:
                         else:
                             warnings.append(f"[{node_label}] 模型未匹配，已置空，请导入后手动配置")
                             config["model_id"] = None
+                            _mark_deferred(node_id)
                             if "model_ref" in config:
                                 del config["model_ref"]
                     else:
                         warnings.append(f"[{node_label}] 模型未匹配，已置空，请导入后手动配置")
                         config["model_id"] = None
+                        _mark_deferred(node_id)
                         if "model_ref" in config:
                             del config["model_ref"]
             elif node_type in (NodeType.MEMORY_READ.value, NodeType.MEMORY_WRITE.value):

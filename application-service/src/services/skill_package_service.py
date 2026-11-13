@@ -1582,12 +1582,17 @@ members: list[str] | None = None,
                 return None
             return SkillPackageService._pack_file_entries(files, db), pkg.name
 
-        # legacy -> standard on-the-fly conversion (never written back)
-        _frontmatter, files = SkillPackageService.legacy_to_package_files(skill)
-        return (
-            [(rel, text.encode("utf-8")) for rel, text in files.items()],
-            slugify_name(skill.name, str(skill.id)),
-        )
+        # legacy -> standard on-the-fly conversion (never written back).
+        # The frontmatter dict and the body are two separate halves there, so the
+        # export must re-join them: a body-only SKILL.md has no ``name`` and every
+        # importer rejects it with "frontmatter 缺少 name 字段" (400).
+        frontmatter, files = SkillPackageService.legacy_to_package_files(skill)
+        entries: list[tuple[str, bytes]] = []
+        for rel_path, text in files.items():
+            if rel_path == "SKILL.md":
+                text = _build_skill_md(frontmatter, text)
+            entries.append((rel_path, text.encode("utf-8")))
+        return entries, slugify_name(skill.name, str(skill.id))
 
     @staticmethod
     def _pack_file_entries(files, db: Session | None = None) -> list[tuple[str, bytes]]:

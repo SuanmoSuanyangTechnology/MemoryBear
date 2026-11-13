@@ -30,9 +30,25 @@ VALID_NODE_TYPES = frozenset(t.value for t in NodeType if t != NodeType.UNKNOWN)
 class MemoryBearAdapter(BasePlatformAdapter, MemoryBearConverter):
     NODE_TYPE_MAPPING = {t.value: t for t in NodeType}
 
-    def __init__(self, config: dict[str, Any]):
+    def __init__(
+        self,
+        config: dict[str, Any],
+        *,
+        deferred_config_node_ids: set[str] | None = None,
+    ):
+        """`deferred_config_node_ids`：已按导入约定置空必填引用的节点。
+
+        导入时模型 / 工具引用在目标租户查不到，会显式清空 `model_id` / `tool_id`
+        并提示「请导入后手动配置」。这些节点再跑一遍 config 校验只会把
+        「待人工补配置」渲染成 `validation error ... input_value=None`，让用户以为
+        导入失败。跳过它们（节点本身仍照常保留）即可。
+        """
+
         MemoryBearConverter.__init__(self)
         BasePlatformAdapter.__init__(self, config)
+        self.deferred_config_node_ids = {
+            str(node_id) for node_id in (deferred_config_node_ids or set())
+        }
 
     @property
     def origin_nodes(self):
@@ -90,8 +106,9 @@ class MemoryBearAdapter(BasePlatformAdapter, MemoryBearConverter):
                 return None
 
             config = node.get("config") or {}
-            converter = self.get_node_convert(node_type)
-            converter(node_id, node_name, config)  # validates and appends errors if invalid
+            if str(node_id) not in self.deferred_config_node_ids:
+                converter = self.get_node_convert(node_type)
+                converter(node_id, node_name, config)  # validates and appends errors if invalid
 
             return NodeDefinition(**node)
         except Exception as e:

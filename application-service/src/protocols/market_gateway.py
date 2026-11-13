@@ -58,8 +58,14 @@ class MarketPublicationStatus:
     status: str
     current_version: str | None
     latest_version: str | None
-    latest_publication_status: str | None
-    updated_at: int | None
+    # 契约 §6.4 的正式字段名：最新申请的审核状态
+    # （`pending` / `approved` / `rejected` / `withdrawn`）。市场侧实际返回与
+    # `external_catalog_service` 读取的都是它；`latest_publication_status` 是早期
+    # 实现的名字，只作兜底。声明在这里是为了让协议与契约同名——读取方靠
+    # `getattr(..., None)` 兜底时不会因为字段缺失而静默降级。
+    review_status: str | None = None
+    latest_publication_status: str | None = None
+    updated_at: int | None = None
     # v0.10 起市场侧的精确状态口径；`status` 只用于推导 review/未上架等旧语义，
     # 回填到本地 `external` 的只有这两个字段。
     listing_status: str | None = None

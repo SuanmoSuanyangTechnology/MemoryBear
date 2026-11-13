@@ -1015,6 +1015,10 @@ class AssetService:
         剔除（它只指向源租户的某个工作流，目标租户没有可填的落点）。这里不 import
         市场包（开源版没有它），所以规则写在两边——但它只是分类，不是准入判定，
         漂移的后果是展示分组不同，不会让提交行为不一致。
+
+        随包/占位的条目额外带 `methods`（「所需方法」）：目标企业拿到占位行后要知道
+        该工具**被用到了哪些方法**才配得回来。选中具体方法时只列选中的那几个；整工具
+        选择时列全量——否则确认页只写一个工具名，用户装完不知道该补哪些 operation。
         """
 
         ids = {ref["id"] for ref in tool_refs if ref["id"] is not None}
@@ -1041,6 +1045,35 @@ class AssetService:
                     )
                 ).all()
             }
+
+        # 每个工具「被用到了哪些方法」：选中具体 operation 的只算那几个，整工具选择
+        # 的标记为 whole 并展开全量。确认页因此能写出「这个占位行要补哪些方法」。
+        picked: dict[uuid.UUID, list[str]] = {}
+        whole: set[uuid.UUID] = set()
+        for ref in tool_refs:
+            if ref["id"] is None:
+                continue
+            operation = ref["operation"]
+            if operation:
+                ops = picked.setdefault(ref["id"], [])
+                if str(operation) not in ops:
+                    ops.append(str(operation))
+            else:
+                whole.add(ref["id"])
+        labels_by_tool = self._preview_tool_method_labels(
+            {row[0] for row in rows if row[2] != ToolType.BUILTIN}, tenant_id
+        )
+
+        def method_labels(tool_id: uuid.UUID) -> list[str]:
+            labels, by_operation = labels_by_tool.get(tool_id, ([], {}))
+            if tool_id in whole:
+                return list(labels)
+            resolved: list[str] = []
+            for operation in picked.get(tool_id, []):
+                label = by_operation.get(operation) or operation
+                if label not in resolved:
+                    resolved.append(label)
+            return resolved
 
         builtin_tools: list[dict[str, Any]] = []
         dependencies: list[dict[str, Any]] = []
@@ -1083,8 +1116,75 @@ class AssetService:
                 "kind": kind,
                 "name": name,
                 "disposition": disposition,
+                "methods": method_labels(row[0]),
             })
         return builtin_tools, dependencies
+
+    def _preview_tool_method_labels(
+            self, tool_ids: set[uuid.UUID], tenant_id: uuid.UUID
+    ) -> dict[uuid.UUID, tuple[list[str], dict[str, str]]]:
+        """每个工具的「方法展示名」：``(全部方法, {operation 键: 展示名})``。
+
+        展示名与工具列表里看到的一致：自定义工具用 `METHOD:path`（截图里的
+        `GET:/example/t-http`），MCP 用远端方法名，工作流工具只有工具名本身。
+        `operation` 存在快照里的是 operation_key（`add_ref` 的第四个参数），所以
+        选具体方法时按 operation_key 反查展示名；查不到就退回原值，不让预览因为
+        方法树解析失败而崩掉——那只是「少了个更友好的名字」。
+
+        走 `ToolService.get_tool_methods_batch`，与共享校验共用同一份方法树口径；
+        MCP 传 `read_only=True`，不会因为缓存为空去连远端（预览是只读操作）。
+        """
+
+        tool_ids = {tool_id for tool_id in tool_ids if tool_id is not None}
+        if not tool_ids:
+            return {}
+
+        try:
+            # 两个 import 都放在 try 内：`bundle_install_service` 会拉整条工作流/
+            # 模型栈，在裁掉那些包的部署形态里导入就会失败——预览是只读装饰，
+            # 不能因为「拿不到更友好的方法名」而整个 500。
+            from .bundle_install_service import _run_async
+            from .tool_service import ToolService
+
+            items, _missing = _run_async(
+                lambda: ToolService(self.db).get_tool_methods_batch(
+                    [str(tool_id) for tool_id in tool_ids], tenant_id
+                )
+            )
+        except Exception as exc:  # noqa: BLE001 - 预览不因方法树失败而整体 5xx
+            logger.warning(
+                "共享预览：工具方法树读取失败，所需方法退回原始标识",
+                extra={"tool_ids": [str(tool_id) for tool_id in tool_ids],
+                       "error": str(exc)},
+            )
+            return {}
+
+        labels: dict[uuid.UUID, tuple[list[str], dict[str, str]]] = {}
+        for item in items:
+            try:
+                tool_id = uuid.UUID(str(item["tool_id"]))
+            except (KeyError, ValueError):
+                continue
+            all_labels: list[str] = []
+            by_operation: dict[str, str] = {}
+            for method in item.get("methods") or []:
+                verb = str(method.get("method") or "").strip()
+                path = str(method.get("path") or "").strip()
+                operation_key = method.get("operation_key")
+                if verb and path:
+                    label = f"{verb}:{path}"
+                else:
+                    label = str(
+                        operation_key or method.get("name") or method.get("method_id") or ""
+                    ).strip()
+                if not label:
+                    continue
+                if label not in all_labels:
+                    all_labels.append(label)
+                if operation_key is not None:
+                    by_operation[str(operation_key)] = label
+            labels[tool_id] = (all_labels, by_operation)
+        return labels
 
     def _preview_skills(
             self, skill_refs: list[dict[str, Any]], tenant_id: uuid.UUID
