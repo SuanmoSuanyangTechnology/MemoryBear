@@ -313,7 +313,7 @@ const ApplicationManagement: React.FC = () => {
                     {key === 'source' && item.is_shared
                       ? item.source_workspace_name
                       : key === 'source' && !item.is_shared
-                        ? t('application.configuration')
+                        ? item.source === 'local' ? t('application.configuration') : t(`application.${item.source}`)
                         : key === 'created_at'
                           ? formatDateTime(item.created_at, 'YYYY-MM-DD HH:mm:ss')
                           : key === 'tags'

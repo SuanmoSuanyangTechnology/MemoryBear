@@ -70,6 +70,7 @@ export interface Application {
     custom_field_labels: string[];
     emotion_count: number;
   },
+  source: 'local' | 'community_market' | 'resource_center';
 }
 
 /**

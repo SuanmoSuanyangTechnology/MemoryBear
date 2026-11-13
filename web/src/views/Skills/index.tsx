@@ -14,6 +14,7 @@ import SkillIcon from './components/SkillIcon';
 import { Kind, type Skill, type SkillQuery, type Statistic } from './types';
 import { isPlugin } from './utils';
 import MoreDropdown from '@/components/MoreDropdown'
+import { deleteInstallations } from '@/api/resourceCenter';
 
 type AllKind = Kind | 'all'
 
@@ -36,7 +37,11 @@ const Skills = () => {
 
   const performDelete = async (item: Skill) => {
     try {
-      await deleteSkill(item.id);
+      if (item.origin === 'external') {
+        deleteInstallations('skill_package', item.id)
+      } else {
+        await deleteSkill(item.id);
+      }
       message.success(t('skills.deleteSuccess'));
       refresh()
     } catch {

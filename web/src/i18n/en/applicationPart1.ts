@@ -7,6 +7,8 @@ export const applicationPart1: ApplicationPart1 = {
       created_at: 'Create Time',
       shared: 'Shared',
       configuration: 'Configuration',
+      community_market: 'Community Market',
+      resource_center: 'Resource Center',
 
       applicationName: 'Application Name',
       applicationIcon: 'Application Icon',

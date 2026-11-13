@@ -41,14 +41,14 @@ const statusLabelMap: Record<string, string> = {
 const listingStatusColorMap: Record<string, string> = {
   listed: 'success',
   not_listed: 'default',
-  pending_listing: 'warning',
+  pending_listing: 'default',
   delisted: 'error',
 };
 
 const listingStatusLabelMap: Record<string, string> = {
   listed: 'application.listingStatus_listed',
   not_listed: 'application.listingStatus_not_listed',
-  pending_listing: 'application.listingStatus_pending_listing',
+  pending_listing: 'application.listingStatus_delisted',
   delisted: 'application.listingStatus_delisted',
 };
 
@@ -181,7 +181,7 @@ const MySharing = forwardRef<MySharingRef, { switchOntology: (item: Application)
       width: 160,
       render: (_: unknown, record: MySharedOutItem) => {
         const reviewStatus = record.share_status;
-        const reviewVersion = record.review_version || record.version;
+        const reviewVersion = record.version;
         if (!reviewStatus || reviewStatus === 'shared' || reviewStatus === 'unknown') {
           return <span>-</span>;
         }

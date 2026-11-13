@@ -2,6 +2,7 @@ import { useCallback } from 'react';
 import { App } from 'antd';
 import { useTranslation } from 'react-i18next';
 import { deleteTool } from '@/api/tools';
+import { deleteInstallations } from '@/api/resourceCenter';
 
 /**
  * Common hook for tool deletion with confirmation
@@ -12,7 +13,7 @@ export function useToolDelete(onSuccess?: () => void) {
   const { modal, message } = App.useApp();
 
   return useCallback(
-    (item: { id?: string; name: string }) => {
+    (item: { id: string; name: string; origin: string; external?: { resource_id: string; } | null }) => {
       if (!item.id) return;
 
       modal.confirm({
@@ -21,7 +22,10 @@ export function useToolDelete(onSuccess?: () => void) {
         cancelText: t('common.cancel'),
         okType: 'danger',
         onOk: () => {
-          return deleteTool(item.id as string)
+          const request = item.origin === 'external'
+          ? deleteInstallations('tool', item.id)
+          : deleteTool(item.id as string)
+          return request
             .then(() => {
               message.success(t('common.deleteSuccess'));
               onSuccess?.();

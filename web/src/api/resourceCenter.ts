@@ -32,3 +32,8 @@ export const getAppAssetsCategoriesUrl = '/apps/assets/categories'
 export const getAppAssetsCategories = () => {
   return request.get<Categories[]>(getAppAssetsCategoriesUrl)
 };
+
+// Community Market · Uninstall Resource
+export const deleteInstallations = (resource_type: string, local_resource_id: string) => {
+  return request.delete(`/external-catalog/installations/${resource_type}/${local_resource_id}`)
+};

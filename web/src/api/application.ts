@@ -400,15 +400,14 @@ export const clearWorkflowCache = (app_id: string) => {
 }
 // Community Market · Application and Operation Records
 export const appExternalCatalog = (data: {
-    /**
-     * Local resource ID.
-     */
-    resource_id: string;
-    /**
-     * Resource type.
-     */
-    resource_type: string;
-    [property: string]: any;
+  /**
+   * Local resource ID.
+   */
+  resource_id: string;
+  /**
+   * Resource type.
+   */
+  resource_type: string;
 }) => {
   return request.get(`/external-catalog/publications`, data)
 }
@@ -421,11 +420,11 @@ export const appPublicationDelist = (market_resource_id: string, data?: { delist
   return request.post(`/external-catalog/resources/${market_resource_id}/delist`, data)
 }
 // Community Market · Publisher Relist
-export const appPublicationRelist = (market_resource_id: string, data: { version: string; relist_reason?: string }) => {
+export const appPublicationRelist = (market_resource_id: string, data: { version: string; relist_note?: string }) => {
   return request.post(`/external-catalog/resources/${market_resource_id}/relist`, data)
 }
 // Community Market · Publisher Restorable Versions List
 export const resourcesVersionListUrl = (market_resource_id: string) => `/external-catalog/resources/${market_resource_id}/versions`
-export const resourcesVersionList = (market_resource_id: string, data: { version: string; relist_reason?: string }) => {
-  return request.get(resourcesVersionListUrl(market_resource_id), data)
+export const resourcesVersionList = (market_resource_id: string) => {
+  return request.get(resourcesVersionListUrl(market_resource_id))
 }

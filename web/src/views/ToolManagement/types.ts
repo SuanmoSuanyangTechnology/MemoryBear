@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2025-12-26 11:57:50
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-10-16 16:57:55
+ * @Last Modified time: 2026-11-13 18:28:00
  */
 export type ToolType = 'mcp' | 'builtin' | 'custom' | 'workflow'
 export interface Query {
@@ -97,7 +97,6 @@ export interface WorkflowToolItem {
   created_at: number;
 }
 export interface ToolItem {
-  is_active: boolean;
   origin: 'local' | 'external';
   method_count: number;
   external: import('./toolContract').ExternalRef | null;
@@ -173,7 +172,7 @@ export interface ExecuteData {
   tool_id: string;
   parameters: {
     operation?: string;
-    // 时间戳转换日期时间
+    // Timestamp to datetime conversion
     input_value?: string;
     output_format?: string;
     to_timezone?: string;

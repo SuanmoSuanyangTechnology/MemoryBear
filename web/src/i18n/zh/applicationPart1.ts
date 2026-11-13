@@ -6,6 +6,8 @@ export const applicationPart1 = {
       created_at: '创建时间',
       shared: '已分享',
       configuration: '配置',
+      community_market: '社区市场',
+      resource_center: '资源中心',
 
       applicationName: '应用名称',
       applicationIcon: '应用图标',
