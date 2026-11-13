@@ -31,6 +31,18 @@ EnginePageApiResponse = ApiResponse[PageData[EngineItem]]
 AllPageApiResponse = ApiResponse[PageData[AllItem]]
 
 
+# v0.5.6–v0.5.9 V1 compatibility; remove this policy in v0.5.10.
+def _v1_display_exclusions(context: MemoryPrincipal, kind: str) -> dict:
+    if context.source != "ex_api":
+        return {}
+    exclusions = {}
+    if kind in {"retrieved", "all"}:
+        exclusions["excluded_search_modes"] = ("community",)
+    if kind in {"engines", "all"}:
+        exclusions["excluded_engine_types"] = ("PERSONALITY_ANCHOR",)
+    return exclusions
+
+
 def validate_time_window(start_time: int | None, end_time: int | None) -> None:
     if start_time is not None and end_time is not None and start_time > end_time:
         raise LocalizedProfileError(
@@ -210,6 +222,7 @@ class MemoryDisplayHandler:
             end_user_id=user_uuid,
             start_time=start_time,
             end_time=end_time,
+            **_v1_display_exclusions(context, "retrieved"),
         )
         return RetrievedPageApiResponse(
             data=PageData[RetrievedItem].create(
@@ -251,6 +264,7 @@ class MemoryDisplayHandler:
             end_user_id=user_uuid,
             start_time=start_time,
             end_time=end_time,
+            **_v1_display_exclusions(context, "engines"),
         )
         return EnginePageApiResponse(
             data=PageData[EngineItem].create(
@@ -294,6 +308,7 @@ class MemoryDisplayHandler:
             include_engines=include_engines,
             start_time=start_time,
             end_time=end_time,
+            **_v1_display_exclusions(context, "all"),
         )
         return AllPageApiResponse(
             data=PageData[AllItem].create(

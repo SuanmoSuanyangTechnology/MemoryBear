@@ -154,6 +154,7 @@ class MemoryDisplayRepository:
         end_user_id: UUID | None = None,
         start_time: datetime | None = None,
         end_time: datetime | None = None,
+        excluded_search_modes: tuple[str, ...] = (),
     ) -> tuple[list[dict[str, Any]], int]:
         return await self._query_records_paginated(
             operation="RETRIEVE",
@@ -163,6 +164,7 @@ class MemoryDisplayRepository:
             end_user_id=end_user_id,
             start_time=start_time,
             end_time=end_time,
+            excluded_search_modes=excluded_search_modes,
         )
 
     async def _query_records_paginated(
@@ -174,6 +176,7 @@ class MemoryDisplayRepository:
         end_user_id: UUID | None = None,
         start_time: datetime | None = None,
         end_time: datetime | None = None,
+        excluded_search_modes: tuple[str, ...] = (),
     ) -> tuple[list[dict[str, Any]], int]:
         base_filter = MemoryDisplayRecord.operation == operation
         if end_user_id is not None:
@@ -195,6 +198,12 @@ class MemoryDisplayRepository:
             base_filter = and_(base_filter, MemoryDisplayRecord.occurred_at >= start_time)
         if end_time is not None:
             base_filter = and_(base_filter, MemoryDisplayRecord.occurred_at <= end_time)
+
+        if excluded_search_modes:
+            base_filter = and_(base_filter, or_(
+                MemoryDisplayRecord.search_mode.is_(None),
+                MemoryDisplayRecord.search_mode.not_in(excluded_search_modes),
+            ))
 
         async with self.postgres.session() as session:
             count_stmt = select(func.count(MemoryDisplayRecord.id)).where(base_filter)
@@ -241,6 +250,7 @@ class MemoryDisplayRepository:
         end_user_id: UUID | None = None,
         start_time: datetime | None = None,
         end_time: datetime | None = None,
+        excluded_engine_types: tuple[str, ...] = (),
     ) -> tuple[list[dict[str, Any]], int]:
         is_workspace_level = end_user_id is None
         display_event = MemoryEngineDisplayEvent
@@ -272,6 +282,8 @@ class MemoryDisplayRepository:
                 stmt = stmt.where(display_event.occurred_at >= start_time)
             if end_time is not None:
                 stmt = stmt.where(display_event.occurred_at <= end_time)
+            if excluded_engine_types:
+                stmt = stmt.where(display_event.engine_type.not_in(excluded_engine_types))
             return stmt
 
         grouped = (
