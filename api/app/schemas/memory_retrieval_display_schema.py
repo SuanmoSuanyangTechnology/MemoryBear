@@ -11,12 +11,12 @@ from __future__ import annotations
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Literal
+from typing import Literal, get_args
 
 from pydantic import BaseModel, Field
 
-# 只有用户可见的四种检索方式会生成读取卡片；recent / meta 不在范围内。
-RETRIEVE_SEARCH_MODES: frozenset[str] = frozenset({"deep", "normal", "quick", "express"})
+RetrieveSearchMode = Literal["deep", "normal", "quick", "express", "community"]
+RETRIEVE_SEARCH_MODES: frozenset[str] = frozenset(get_args(RetrieveSearchMode))
 
 
 @dataclass(frozen=True)
@@ -65,7 +65,7 @@ class MemoryRetrievalDisplayItem(BaseModel):
     """读取展示卡片 - 前端列表项"""
 
     id: str = Field(..., description="PG 记录主键，作为前端列表项唯一 key")
-    search_mode: Literal["deep", "normal", "quick", "express"] = Field(
+    search_mode: RetrieveSearchMode = Field(
         ...,
         description="稳定英文检索方式枚举，由前端负责文案映射",
     )
