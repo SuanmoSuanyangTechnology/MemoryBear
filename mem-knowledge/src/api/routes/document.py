@@ -16,7 +16,7 @@ from ...services.knowledge_file_storage import KnowledgeFileStorage
 from ...services.knowledge_metadata import KnowledgeMetadataService
 from ...tasks.dispatch import TaskDispatcher
 from ..dependencies import Principal, get_principal, get_runtime
-from ..schemas.common import INPUT_422_RESPONSES, SuccessEnvelope, success
+from ..schemas.common import SERVICE_UNAVAILABLE_RESPONSE, SuccessEnvelope, success
 from ..schemas.document import DocumentCreate, DocumentUpdate
 from ..schemas.knowledge_metadata import (
     BatchUpdateMetadataRequest,
@@ -52,7 +52,6 @@ async def _require_document(
 @router.get(
     "/{kb_id}/documents",
     response_model=SuccessEnvelope[dict[str, Any]],
-    responses=INPUT_422_RESPONSES,
 )
 async def get_documents(
     request: Request,
@@ -98,7 +97,6 @@ async def get_documents(
 @router.post(
     "/document",
     response_model=SuccessEnvelope[dict[str, Any]],
-    responses=INPUT_422_RESPONSES,
 )
 async def create_document(
     request: Request,
@@ -138,7 +136,6 @@ async def get_document(
 @router.put(
     "/{document_id}",
     response_model=SuccessEnvelope[dict[str, Any]],
-    responses=INPUT_422_RESPONSES,
 )
 async def update_document(
     request: Request,
@@ -185,7 +182,11 @@ async def update_document(
     )
 
 
-@router.delete("/{document_id}", response_model=SuccessEnvelope[None])
+@router.delete(
+    "/{document_id}",
+    response_model=SuccessEnvelope[None],
+    responses=SERVICE_UNAVAILABLE_RESPONSE,
+)
 async def delete_document(
     request: Request,
     document_id: uuid.UUID,
@@ -280,7 +281,6 @@ async def parse_documents(
 @router.post(
     "/metadata/batch",
     response_model=SuccessEnvelope[dict[str, Any]],
-    responses=INPUT_422_RESPONSES,
 )
 async def batch_update_document_metadata(
     request: Request,
@@ -306,7 +306,6 @@ async def batch_update_document_metadata(
 @router.put(
     "/{document_id}/metadata",
     response_model=SuccessEnvelope[dict[str, Any]],
-    responses=INPUT_422_RESPONSES,
 )
 async def update_document_metadata(
     request: Request,

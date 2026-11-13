@@ -5,7 +5,7 @@ from __future__ import annotations
 import time
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, Field
 
 
 class ApiResponse[DataT](BaseModel):
@@ -18,23 +18,14 @@ class ApiResponse[DataT](BaseModel):
     time: int = Field(default_factory=lambda: int(time.time() * 1000))
 
 
-class _ValidationIssue(BaseModel):
-    model_config = ConfigDict(extra="allow")
-
-    loc: list[str | int]
-    msg: str
-    type: str
+class _AuthDependencyError(BaseModel):
+    detail: str
 
 
-class _RequestValidationResponse(BaseModel):
-    detail: list[_ValidationIssue]
-
-
-# OpenAPI only: legacy request validation and business errors use different bodies.
-INPUT_422_RESPONSES = {
-    422: {
-        "model": ApiResponse[Any] | _RequestValidationResponse,
-        "description": "Invalid request field or business input",
+SERVICE_UNAVAILABLE_RESPONSE = {
+    503: {
+        "model": ApiResponse[Any] | _AuthDependencyError,
+        "description": "A required dependency is temporarily unavailable",
     },
 }
 
@@ -72,4 +63,4 @@ def fail(
 SuccessEnvelope = ApiResponse
 
 
-__all__ = ["INPUT_422_RESPONSES", "ApiResponse", "SuccessEnvelope", "fail", "success"]
+__all__ = ["ApiResponse", "SuccessEnvelope", "fail", "success"]

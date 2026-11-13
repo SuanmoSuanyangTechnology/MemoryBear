@@ -19,6 +19,7 @@ from starlette.exceptions import HTTPException
 from ..error_mapping import map_storage_error
 from ..errors import KnowledgeError
 from ..i18n import normalize_locale, resolve_locale, translate_legacy
+from ..integrations.model.errors import ModelInvokeProtocolError
 from ..request_logging import log_request_failure
 from ..services.upload_deduplication import DuplicateUploadError
 from ..trace import TRACE_ID_HEADER, get_trace_id, normalize_trace_id
@@ -47,6 +48,62 @@ _VALIDATION_CONTRACTS = {
     ("src.api.routes.chunk", "retrieve_chunks"): "KB_RETRIEVAL_REQUEST_INVALID",
 }
 _RERANK_FIELDS = frozenset({"rerank_mode", "rerank_weights"})
+
+
+# These legacy HTTP operations address the missing resource directly. Keep the
+# shared defaults for references supplied in a payload, background jobs and gRPC.
+_RESOURCE_NOT_FOUND = {
+    "get_knowledge": "KB_KNOWLEDGE_NOT_FOUND",
+    "update_knowledge": "KB_KNOWLEDGE_NOT_FOUND",
+    "delete_knowledge": "KB_KNOWLEDGE_NOT_FOUND",
+    "get_document": "KB_DOCUMENT_NOT_FOUND",
+    "update_document": "KB_DOCUMENT_NOT_FOUND",
+    "delete_document": "KB_DOCUMENT_NOT_FOUND",
+    "get_file": "KB_FILE_NOT_FOUND",
+    "update_file": "KB_FILE_NOT_FOUND",
+    "delete_file": "KB_FILE_NOT_FOUND",
+}
+_KNOWLEDGE_CONFLICTS = {
+    "create_knowledge": {"KB_KNOWLEDGE_NAME_EXISTS", "KB_EXTERNAL_ID_EXISTS"},
+    "update_knowledge": {"KB_KNOWLEDGE_NAME_EXISTS"},
+}
+
+
+# These causes have one server-side meaning even when raised from shared services.
+_INTERNAL_FAILURES = frozenset({
+    "KB_KNOWLEDGE_CREATOR_NOT_FOUND",
+    "KB_KNOWLEDGE_SHARE_REFERENCE_INCOMPLETE",
+    "KB_TASK_NAME_CONFIG_INVALID",
+    "KB_TASK_QUEUE_CONFIG_INVALID",
+    "KB_TASK_DISPATCH_CONFIG_INVALID",
+    "KB_VISION_MODEL_OUTPUT_EMPTY",
+})
+
+
+def _business_http_status(request: Request, error: KnowledgeError) -> int:
+    if not 400 <= error.status_code < 500:
+        return error.status_code
+    endpoint = request.scope.get("endpoint")
+    operation = getattr(endpoint, "__name__", "")
+    if error.http_status_override is not None:
+        if (
+            operation == "get_knowledge_graph_entity_types"
+            and getattr(endpoint, "__module__", "") == "src.api.routes.knowledge"
+            and error.http_status_override == 503
+        ):
+            # The gateway retries 503 on GET; this endpoint invokes a billable model.
+            return error.status_code
+        return error.http_status_override
+    if error.code in _INTERNAL_FAILURES:
+        return 500
+    if error.status_code == 400:
+        module = getattr(endpoint, "__module__", "")
+        if module in {"src.api.routes.knowledge", "src.api.routes.document", "src.api.routes.file"}:
+            if error.code == _RESOURCE_NOT_FOUND.get(operation):
+                return 404
+            if error.code in _KNOWLEDGE_CONFLICTS.get(operation, ()):
+                return 409
+    return error.status_code
 
 
 def request_locale(request: Request) -> str:
@@ -118,12 +175,20 @@ def render_error(
         "KB_FEISHU_AUTH_INVALID", "KB_YUQUE_AUTH_INVALID", "KB_WIKI_BACKFILL_DISPATCH_FAILED",
     }:
         return render_legacy_business_error(request, error, exception=exception)
+    status_code = _business_http_status(request, error)
+    response_code = error.upstream_response_code or error.response_code
+    if error.code == "KB_TASK_DISPATCH_FAILED":
+        message = translate_legacy(error.code, request_locale(request))
+        log_message = translate_legacy(error.code, "en")
+    else:
+        message = knowledge_message(response_code, request_locale(request))
+        log_message = knowledge_message(response_code, "en")
     log_request_failure(
         request,
-        status_code=error.status_code,
-        response_code=error.response_code,
+        status_code=status_code,
+        response_code=response_code,
         error_code=error.code,
-        message=knowledge_message(error.response_code, "en"),
+        message=log_message,
         params=dict(error.params),
         retryable=error.retryable,
         exception=exception if exception is not None else error,
@@ -131,9 +196,9 @@ def render_error(
     )
     return _response(
         request,
-        status_code=error.status_code,
-        response_code=error.response_code,
-        message=knowledge_message(error.response_code, request_locale(request)),
+        status_code=status_code,
+        response_code=response_code,
+        message=message,
         headers=headers,
         diagnostic=format_diagnostics(
             trace_id=getattr(request.state, "trace_id", get_trace_id()),
@@ -269,4 +334,8 @@ def register_error_handlers(application: FastAPI) -> None:
                     request, exc, status=503, cause="KB_DATABASE_UNAVAILABLE",
                 )
             return render_upload_error(request, exc, status=500, cause="KB_INTERNAL_ERROR")
+        if isinstance(exc, ModelInvokeProtocolError) and exc.http_status in {429, 503, 504}:
+            return render_error(
+                request, KnowledgeError.from_code("KB_HTTP_UNAVAILABLE"), exception=exc,
+            )
         return render_error(request, KnowledgeError.from_code("KB_INTERNAL_ERROR"), exception=exc)

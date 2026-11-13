@@ -115,9 +115,9 @@ async def guard_chunk_mutation(
                 document_id,
                 type(cleanup_exc).__name__,
             )
-        raise KnowledgeError.from_code("KB_SEARCH_UNAVAILABLE") from exc
+        raise KnowledgeError.from_code("KB_SEARCH_UNAVAILABLE", http_status_override=503) from exc
     except TimeoutError as exc:
-        raise KnowledgeError.from_code("KB_SEARCH_UNAVAILABLE") from exc
+        raise KnowledgeError.from_code("KB_SEARCH_UNAVAILABLE", http_status_override=503) from exc
     finally:
         if mutation.changed and not registered:
             # 租约丢失后的写入仅在重新取得同一文档锁后登记，不覆盖删除操作。

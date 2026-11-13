@@ -25,7 +25,7 @@ def parse_uuid_filter(value: str | None, *, field: str) -> list[UUID] | None:
         return ids
     except ValueError as exc:
         raise KnowledgeError.from_code(
-            "KB_HTTP_VALIDATION_ERROR", diagnostic=f"query.{field}: invalid UUID list"
+            "KB_VALIDATION_ERROR", diagnostic=f"query.{field}: invalid UUID list"
         ) from exc
 
 
@@ -44,7 +44,7 @@ async def execute_list_page(
             attribute.property, ColumnProperty
         ):
             raise KnowledgeError.from_code(
-                "KB_HTTP_VALIDATION_ERROR", diagnostic="query.orderby: field cannot be sorted"
+                "KB_VALIDATION_ERROR", diagnostic="query.orderby: field cannot be sorted"
             )
         stmt = stmt.order_by(attribute.desc() if desc else attribute.asc())
 
@@ -62,6 +62,6 @@ async def execute_list_page(
             and "could not identify an ordering operator for type json" in str(cause)
         ):
             raise KnowledgeError.from_code(
-                "KB_HTTP_VALIDATION_ERROR", diagnostic="query.orderby: field cannot be sorted"
+                "KB_VALIDATION_ERROR", diagnostic="query.orderby: field cannot be sorted"
             ) from exc
         raise

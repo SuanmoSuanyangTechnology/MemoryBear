@@ -362,10 +362,12 @@ def _unwrap_envelope(raw: bytes, http_status: int) -> Any:
 
     payload = _parse_envelope(raw)
     if payload is None:
-        raise RemoteInvokeProtocolError(f"malformed envelope (status={http_status})")
+        raise RemoteInvokeProtocolError(
+            f"malformed envelope (status={http_status})", http_status=http_status,
+        )
     code = payload.get("code")
     if code is None:
-        raise RemoteInvokeProtocolError("envelope is missing 'code'")
+        raise RemoteInvokeProtocolError("envelope is missing 'code'", http_status=http_status)
     if code:
         raise envelope_failure(payload, http_status)
     return payload.get("data")
@@ -470,7 +472,8 @@ class AsyncInvokeTransport:
             raise RemoteInvokeProtocolError(
                 "expected an SSE stream, got status="
                 f"{response.status_code} content-type="
-                f"{response.headers.get('content-type')!r}"
+                f"{response.headers.get('content-type')!r}",
+                http_status=response.status_code,
             )
         raise envelope_failure(payload, response.status_code)
 
@@ -579,7 +582,8 @@ class SyncInvokeTransport:
             raise RemoteInvokeProtocolError(
                 "expected an SSE stream, got status="
                 f"{response.status_code} content-type="
-                f"{response.headers.get('content-type')!r}"
+                f"{response.headers.get('content-type')!r}",
+                http_status=response.status_code,
             )
         raise envelope_failure(payload, response.status_code)
 

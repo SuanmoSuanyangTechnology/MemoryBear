@@ -14,7 +14,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..api.dependencies import Principal
 from ..error_mapping import map_model_error
-from ..integrations.model.errors import ModelInvokeClientError
+from ..integrations.model.errors import (
+    ModelInvokeClientError,
+    ModelInvokeFailedError,
+    ModelInvokeProtocolError,
+)
 from ..integrations.model.invoke import ModelCallContext
 from ..integrations.model.runtime import ModelInvokeRuntime
 from ..model_errors import MODEL_FIELD_ROLES, ModelFailure, model_error
@@ -54,6 +58,8 @@ async def validate_requested_knowledge_model_availability(
             continue
         try:
             available = await model_runtime.invoke_client.is_model_available(model_id, context)
+        except (ModelInvokeFailedError, ModelInvokeProtocolError) as exc:
+            raise map_model_error(exc, model_role=MODEL_FIELD_ROLES[field_name]) from exc
         except ModelInvokeClientError as exc:
             raise model_error(
                 MODEL_FIELD_ROLES[field_name],

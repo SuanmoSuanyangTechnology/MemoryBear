@@ -14,6 +14,7 @@ logger = logging.getLogger(__name__)
 ErrorResponseStyle = Literal["http", "business", "internal"]
 type PublicScalar = str | int | float | bool
 MAX_PUBLIC_PARAM_LENGTH = 200
+TRANSIENT_DEPENDENCY_HTTP_STATUSES = frozenset({429, 502, 503, 504})
 
 
 def public_text(value: str) -> str:
@@ -694,6 +695,8 @@ class KnowledgeError(Exception):
         status_code: int | None = None,
         diagnostic: str = "",
         response_code: int | None = None,
+        http_status_override: int | None = None,
+        upstream_response_code: int | None = None,
     ) -> None:
         # Excluded task callers still use exception text in progress messages.
         # Preserve that legacy argument; HTTP rendering only uses code and params.
@@ -708,6 +711,9 @@ class KnowledgeError(Exception):
         self._status_code = status_code
         self.diagnostic = diagnostic
         self._response_code = response_code
+        # 仅在 HTTP 出口生效，gRPC trailer 与任务仍使用原状态。
+        self.http_status_override = http_status_override
+        self.upstream_response_code = upstream_response_code
 
     @property
     def code(self) -> str:
@@ -759,6 +765,8 @@ class KnowledgeError(Exception):
         status_code: int | None = None,
         diagnostic: str = "",
         response_code: int | None = None,
+        http_status_override: int | None = None,
+        upstream_response_code: int | None = None,
     ) -> KnowledgeError:
         return cls(
             code=code,
@@ -767,4 +775,6 @@ class KnowledgeError(Exception):
             status_code=status_code,
             diagnostic=diagnostic,
             response_code=response_code,
+            http_status_override=http_status_override,
+            upstream_response_code=upstream_response_code,
         )

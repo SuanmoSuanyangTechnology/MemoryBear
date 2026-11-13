@@ -13,7 +13,7 @@ INT32_MAX = 2**31 - 1
 
 def _invalid_field(field: str, reason: str) -> KnowledgeError:
     return KnowledgeError.from_code(
-        "KB_HTTP_VALIDATION_ERROR", diagnostic=f"body.{field}: {reason}"
+        "KB_VALIDATION_ERROR", diagnostic=f"body.{field}: {reason}"
     )
 
 

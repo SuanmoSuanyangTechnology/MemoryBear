@@ -39,12 +39,16 @@ class ModelInvokeConfigurationError(ModelInvokeClientError):
 class ModelInvokeProtocolError(ModelInvokeClientError):
     """The model service violated the response contract (malformed or truncated stream)."""
 
+    def __init__(self, message: str, *, http_status: int | None = None):
+        super().__init__(message)
+        self.http_status = http_status
+
 
 class ModelInvokeFailedError(ModelInvokeClientError):
     """The model service ran the invoke and reported a terminal failure.
 
     ``remote_code`` 为服务侧原样码（SSE 帧 = ``BizCode`` 名、JSON 信封 = 数值）；
-    业务层按需翻译回 ``KB_*`` 词表（``error_mapping``），本层不重编码。
+    HTTP 出口保留原码并按该码取提示，知识库只包装 HTTP 状态。
     """
 
     def __init__(
@@ -80,7 +84,7 @@ def to_invoke_error(exc: RemoteInvokeError) -> ModelInvokeClientError:
             f"Model invoke produced no frame within {exc.idle_seconds:g}s"
         )
     elif isinstance(exc, RemoteInvokeProtocolError):
-        error = ModelInvokeProtocolError(str(exc))
+        error = ModelInvokeProtocolError(str(exc), http_status=exc.http_status)
     elif isinstance(exc, RemoteInvokeFailedError):
         error = ModelInvokeFailedError(
             remote_code=exc.code,
@@ -93,9 +97,11 @@ def to_invoke_error(exc: RemoteInvokeError) -> ModelInvokeClientError:
     else:
         error = ModelInvokeUnavailableError("Model service is unavailable")
     logger.warning(
-        "model_invoke_failed error=%s remote=%s detail=%s",
+        "model_invoke_failed error=%s remote=%s remote_code=%s remote_http_status=%s detail=%s",
         type(error).__name__,
         type(exc).__name__,
+        getattr(error, "remote_code", None),
+        getattr(error, "http_status", None),
         exc,
     )
     return error

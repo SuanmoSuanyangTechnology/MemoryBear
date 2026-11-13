@@ -289,7 +289,8 @@ class RemoteInvokeIdleTimeoutError(RemoteInvokeError):
 class RemoteInvokeProtocolError(RemoteInvokeError):
     """The peer violated the frame contract: unknown kind, malformed JSON, truncation."""
 
-    def __init__(self, detail: str):
+    def __init__(self, detail: str, *, http_status: int | None = None):
+        self.http_status = http_status
         super().__init__(f"Remote invoke protocol error: {detail}")
 
 
