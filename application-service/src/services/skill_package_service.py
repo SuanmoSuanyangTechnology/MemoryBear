@@ -1583,16 +1583,14 @@ members: list[str] | None = None,
             return SkillPackageService._pack_file_entries(files, db), pkg.name
 
         # legacy -> standard on-the-fly conversion (never written back).
-        # The frontmatter dict and the body are two separate halves there, so the
-        # export must re-join them: a body-only SKILL.md has no ``name`` and every
-        # importer rejects it with "frontmatter 缺少 name 字段" (400).
-        frontmatter, files = SkillPackageService.legacy_to_package_files(skill)
-        entries: list[tuple[str, bytes]] = []
-        for rel_path, text in files.items():
-            if rel_path == "SKILL.md":
-                text = _build_skill_md(frontmatter, text)
-            entries.append((rel_path, text.encode("utf-8")))
-        return entries, slugify_name(skill.name, str(skill.id))
+        # 拼接 frontmatter 与正文的唯一点在 `_legacy_pack_texts`：两处各拼一次就会
+        # 分叉，任一方调整后另一方悄悄退回 body-only，重新引入
+        # 「frontmatter 缺少 name 字段」400。
+        files = SkillPackageService._legacy_pack_texts(skill)
+        return (
+            [(rel_path, text.encode("utf-8")) for rel_path, text in files.items()],
+            slugify_name(skill.name, str(skill.id)),
+        )
 
     @staticmethod
     def _pack_file_entries(files, db: Session | None = None) -> list[tuple[str, bytes]]:
@@ -1731,15 +1729,36 @@ members: list[str] | None = None,
         return frontmatter, {"SKILL.md": body}
 
     @staticmethod
+    def _legacy_pack_texts(skill: Skill) -> dict[str, str]:
+        """legacy 技能 → ``{相对路径: 文本}``，其中 ``SKILL.md`` 已把 frontmatter 拼回。
+
+        `legacy_to_package_files` 把 frontmatter 和正文分成两半返回（标准包永远走
+        原文，不经过这条路），但每个消费方最终要的都是**完整文件**。所以拼接只在
+        这里做一次：`_skill_pack_entries`（导出 zip）与 `legacy_pack_bytes`（单技能
+        下载）都从这里取。以前两处各判一次 ``rel_path == "SKILL.md"``，任何一方
+        后续调整（加子目录、多文件）都会让另一方悄悄退回 body-only，重新引入
+        「frontmatter 缺少 name 字段」400。
+        """
+
+        frontmatter, files = SkillPackageService.legacy_to_package_files(skill)
+        return {
+            rel_path: (
+                _build_skill_md(frontmatter, text)
+                if rel_path == "SKILL.md"
+                else text
+            )
+            for rel_path, text in files.items()
+        }
+
+    @staticmethod
     def legacy_pack_bytes(skill: Skill) -> bytes:
         """Render a converted legacy pack as zip bytes ready to stream (UTF-8 filename flag set)."""
 
-        frontmatter, files = SkillPackageService.legacy_to_package_files(skill)
-        skill_md = _build_skill_md(frontmatter, files["SKILL.md"])
+        files = SkillPackageService._legacy_pack_texts(skill)
         buffer = io.BytesIO()
         with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as zf:
             for rel_path, text in files.items():
-                payload = skill_md if rel_path == "SKILL.md" else text
+                payload = text
                 info = zipfile.ZipInfo(rel_path, date_time=(2026, 1, 1, 0, 0, 0))
                 info.flag_bits |= 0x800
                 info.compress_type = zipfile.ZIP_DEFLATED

@@ -331,8 +331,11 @@ class BundleInstallService:
             local_name = self.db.get(ToolConfig, uuid.UUID(local_id)).name
         elif resource_type == "skill_package":
             # 单独装的这一个技能/插件，`_origin` 指的就是它自己 → 能写全 source_ref。
-            # 插件是多成员容器，`call_name` 是成员级运行时标识：从插件这一层给一个
-            # 值会让每个成员抢同一个名字，所以插件只允许改名称与描述。
+            # 插件是多成员容器，`call_name` 是**成员级**运行时标识（ADR-11）：从插件
+            # 这一层给一个值会让每个成员抢同一个名字，`_plan_import_members` 会直接判
+            # 「本次导入中重复」。所以插件只接受名称与描述：市场安装门面
+            # （`external_catalog_service._skill_overrides`）对插件根本不传这一项，这里
+            # 硬拒是给绕过门面的调用方的兜底，与资源中心同口径（那里也没有这层覆盖）。
             is_plugin = payload.get("kind") == "plugin" or bool(dependencies.get("plugins"))
             if is_plugin and (overrides or {}).get("call_name"):
                 raise BusinessException(
@@ -340,11 +343,12 @@ class BundleInstallService:
                     BizCode.INVALID_PARAMETER,
                     data={"reason": "PLUGIN_CALL_NAME_NOT_SUPPORTED"},
                 )
+            skill_dependencies = _skill_dependencies(payload, dependencies)
             # `strict=True`：顶层安装只有这一个资源，落地失败就该整单失败并把原始
             # 错误码抛给前端（调用名称冲突是 DUPLICATE_NAME，用户改个名字重试），
             # 而不是「result=partial + 一条 missing」——那样用户会以为已经装好了。
             self._land_skills(
-                _skill_dependencies(payload, dependencies),
+                skill_dependencies,
                 tenant_id, dep_map, missing,
                 own_market_ref=True,
                 overrides=overrides,
@@ -352,8 +356,10 @@ class BundleInstallService:
             )
             local_id, local_name = self._skill_result(
                 tenant_id=tenant_id,
-                kind=payload.get("kind"),
+                is_plugin=is_plugin,
                 name=payload.get("name"),
+                dependencies=skill_dependencies,
+                dep_map=dep_map,
             )
         else:
             raise BusinessException(
@@ -378,19 +384,37 @@ class BundleInstallService:
             self,
             *,
             tenant_id: uuid.UUID,
-            kind: str | None,
+            is_plugin: bool,
             name: str | None,
+            dependencies: dict[str, Any] | None = None,
+            dep_map: dict[str, str] | None = None,
     ) -> tuple[str | None, str | None]:
         """落地后的本地 id 与展示名。
 
         `dep_map` 的值是 `skills` 行 id（Agent 绑定用），而安装响应要的是技能包/
-        插件这一层，所以回包表按 `(tenant, name)` 取——落地上一步刚建好它，
-        同租户同 name 唯一（`uq_skill_pkg_tenant_name`），不会取错。
+        插件这一层：技能包按 `(tenant, name)` 回查（落地上一步刚建好它，同租户同
+        name 唯一，`uq_skill_pkg_tenant_name`）；插件必须走 `dep_map` —— 用户在安装
+        弹窗里改过 `display_name` 之后插件行的 `name` 已不是包内原名，按名字回查会
+        取不到，安装响应就会带着空的 `local_resource_id` 出去（卸载、needs_config
+        全部断掉）。
         """
 
         repo = SkillPackageRepository(self.db)
-        if kind == "plugin":
-            plugin = repo.get_plugin_by_name(tenant_id, str(name or ""))
+        if is_plugin:
+            plugin_id = next(
+                (
+                    (dep_map or {}).get(str(entry.get("ref")))
+                    for entry in (dependencies or {}).get("plugins") or []
+                    if (dep_map or {}).get(str(entry.get("ref")))
+                ),
+                None,
+            )
+            plugin = (
+                repo.get_plugin_by_id(uuid.UUID(plugin_id), tenant_id)
+                if plugin_id
+                # 兜底：老包或异常路径下 `dep_map` 没有插件引用时仍按包内原名回查。
+                else repo.get_plugin_by_name(tenant_id, str(name or ""))
+            )
             if plugin is None:
                 return None, None
             return str(plugin.id), plugin.name
@@ -1573,13 +1597,19 @@ def _skill_meta_overrides(
     ).strip()
     if not identifier:
         return None
+    # 三个覆盖项都先 strip 再判空：「  」是真值，直接写进去会变成空串覆盖。
+    # `import_package` 对「提供了 call_name 但为空」是硬报错
+    # （`skill_package_service` 的成员级校验），用户会为自己没填的字段挨一条
+    # 错误提示；空 `name` 同理会把技能名清空。全空 = 没改任何东西。
     item: dict[str, Any] = {"identifier": identifier}
-    if overrides.get("display_name"):
-        item["name"] = str(overrides["display_name"]).strip()
-    if overrides.get("description"):
-        item["description"] = str(overrides["description"]).strip()
-    if overrides.get("call_name"):
-        item["call_name"] = str(overrides["call_name"]).strip()
+    for key, field in (
+            ("display_name", "name"),
+            ("description", "description"),
+            ("call_name", "call_name"),
+    ):
+        value = str(overrides.get(key) or "").strip()
+        if value:
+            item[field] = value
     # 只有 identifier 等于没改任何东西：不传 meta 才不会触发 identifier 校验
     return [item] if len(item) > 1 else None
 

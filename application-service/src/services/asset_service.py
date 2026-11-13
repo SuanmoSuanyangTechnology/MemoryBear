@@ -1060,13 +1060,27 @@ class AssetService:
                     ops.append(str(operation))
             else:
                 whole.add(ref["id"])
+        # 只给 custom / mcp 取方法树。workflow 的方法树要构造
+        # `WorkflowAsTool(db=self.db)` 并读一次 `workflow_config`（见
+        # `ToolService._get_workflow_tool_methods`），而这里的 Session 属于调用方；
+        # `_run_async` 在已有运行中事件循环时会把协程丢到私有线程执行，跨线程复用
+        # Session 会抛 `InvalidRequestError`，而且会被外层 except 吞成「退回原始
+        # 标识」，症状极隐蔽。workflow 的展示名就是工具名本身，本地就取得到。
         labels_by_tool = self._preview_tool_method_labels(
-            {row[0] for row in rows if row[2] != ToolType.BUILTIN}, tenant_id
+            {
+                row[0] for row in rows
+                if row[2] in (ToolType.CUSTOM, ToolType.MCP)
+            },
+            tenant_id,
         )
 
         def method_labels(tool_id: uuid.UUID) -> list[str]:
             labels, by_operation = labels_by_tool.get(tool_id, ([], {}))
             if tool_id in whole:
+                # 整工具选择 = 需要该工具的全部方法。同一工具若又被按 operation
+                # 选中（`add_ref` 的去重键含 method，两条都会保留），全量已经覆盖
+                # 那些方法，不再并一次。`labels` 为空说明该工具没有方法树
+                # （只有 schema_url 的 custom，或被排除在外的 workflow）。
                 return list(labels)
             resolved: list[str] = []
             for operation in picked.get(tool_id, []):
@@ -1132,13 +1146,17 @@ class AssetService:
         方法树解析失败而崩掉——那只是「少了个更友好的名字」。
 
         走 `ToolService.get_tool_methods_batch`，与共享校验共用同一份方法树口径。
-        但只读展示有两个限制，与共享校验（真要在安装后能执行）不同：
+        但只读展示有三个限制，与共享校验（真要在安装后能执行）不同：
 
         1. MCP 传 `read_only=True`，不会因为缓存为空去连远端；
         2. `allow_remote_schema=False`，只用已存的 `schema_content`。只有
            `schema_url` 的自定义工具会被跳过——`parse_from_url` 是同步
            requests、超时 30 秒，且 schema_url 往往是第三方主机，预览会直接
            卡住并超时，「预览不做外部请求」的约定也就破了。
+        3. 调用方只传 custom / mcp 的 id：workflow 的方法树要构造
+           `WorkflowAsTool(db=session)` 并读一次 `workflow_config`，而这里的
+           Session 属于调用方，`_run_async` 在已有事件循环时会换线程执行，
+           跨线程复用 Session 会抛 `InvalidRequestError`（详见 `_preview_tools`）。
 
         跳过之后该工具没有方法树，`method_labels()` 自动退回快照里的
         operation_key；牺牲一个更友好的名字，换预览的确定性时延。

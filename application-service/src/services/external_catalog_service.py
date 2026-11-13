@@ -78,12 +78,20 @@ def _review_status_of(status: Any) -> Any:
 
     走 `_field` 而非属性访问：`HttpMarketGateway.publication_status` 直接
     透传 JSON，拿到的是 dict，`status.review_status` 会 AttributeError。
+
+    判真值而不是 `is not None`：上游给了空串时应当继续兜底，若把 `""` 当状态
+    返回，调用方会拿它去比 `_LATEST_PUBLICATION_STATUSES` 并抛
+    `INVALID_UPSTREAM_STATUS` —— 一个缺字段的旧网关就这样把降级变成 500。
+
+    这里**不**回落到摘要枚举 `status`（`published` / `unlisted` / `draft`）：
+    那就不是审核状态了，而且会被同一份枚举校验拒成 500。`status` 的归宿是
+    `_listing_status_of`，按 `_STATUS_TO_LISTING` 推上架状态。
     """
 
     review_status = _field(status, "review_status")
-    if review_status is not None:
+    if review_status:
         return review_status
-    return _field(status, "latest_publication_status")
+    return _field(status, "latest_publication_status") or None
 
 
 def _listing_status_of(status: Any) -> str | None:
