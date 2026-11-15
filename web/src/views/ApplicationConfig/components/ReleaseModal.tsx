@@ -60,7 +60,7 @@ const ReleaseModal = forwardRef<ReleaseModalRef, ReleaseModalProps>(({
           name: response.name,
           icon: response.icon ? { url: response.icon, uid: response.icon, status: 'done', name: 'icon' } : undefined,
           categories: release?.categories || [],
-          usage_examples: release?.usage_examples,
+          usage_examples: release?.usage_examples && release?.usage_examples.length > 0 ? release?.usage_examples : ['', '', '',],
           setup_steps: release?.setup_steps
         })
       })
