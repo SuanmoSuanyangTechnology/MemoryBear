@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-02 15:30:52 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-02-10 15:01:42
+ * @Last Modified time: 2026-11-14 13:42:44
  */
 /**
  * UploadImages Component
@@ -243,7 +243,7 @@ const UploadImages = forwardRef<UploadImagesRef, UploadImagesProps>(({
       showRemoveIcon: true,
       showDownloadIcon: false,
     },
-    className: `${styles.imageUpload} ${className}`,
+    className: `${styles.imageUpload} ${className} rb:group`,
     ...props,
   };
 
@@ -259,7 +259,7 @@ const UploadImages = forwardRef<UploadImagesRef, UploadImagesProps>(({
         {...uploadProps}
       >
         {fileList.length < maxCount && (
-          <div className="rb:size-7 rb:bg-cover rb:bg-[url('@/assets/images/plus.svg')]"></div>
+          <div className="rb:size-7 rb:bg-cover rb:bg-[url('@/assets/images/plus.svg')] rb:group-hover:bg-[url('@/assets/images/plus_blue.svg')]"></div>
         )}  
       </Upload>
       {previewImage && (
