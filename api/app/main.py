@@ -442,7 +442,7 @@ async def request_validation_error_handler(
             request.url.path,
             request.method,
         )
-        return safe_retrieval_validation_response()
+        return safe_retrieval_validation_response(request, exc.errors())
     # 请求体/参数校验失败统一走响应体（状态码保持 422）
     detail = "; ".join(
         str(error.get("msg") or "").removeprefix("Value error, ")
