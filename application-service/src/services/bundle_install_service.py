@@ -719,8 +719,13 @@ class BundleInstallService:
         `app_dsl_service._resolve_tools` "declared by the bundle, not landed here":
         the reference is **kept** as its original `tool:<名称>` local ref (not a
         valid UUID), so the batch method API reports it in `missing_tool_ids` and
-        the UI can render "该工具已失效". Clearing it instead would make the tool
-        vanish without a trace.
+        the UI can render "该工具已失效".
+
+        Workflow **tool nodes** take the other branch on the same map value —
+        `_resolve_workflow_nodes` **clears** `config.tool_id` to `None`, because a
+        node needs one concrete UUID at runtime (otherwise
+        `ToolNode.execute` raises TOOL_SELECTION_INACTIVE and the whole workflow
+        fails, while the editor's non-empty check passes silently).
         """
 
         for entry in dependencies.get("tools") or []:
@@ -786,7 +791,10 @@ class BundleInstallService:
                 missing.append(
                     _missing(
                         "tool",
-                        entry.get("name"),
+                        # 名称兜底成 ref：正常包内 `name` 恒有（`_collect_tools` 总写
+                        # 这一项），但外部制作的包可能只给 ref，缺失时安装结果里会
+                        # 出现 name=None，用户看不出少了哪个工具。
+                        entry.get("name") or ref,
                         "自定义工具不支持跨租户携带，已移除"
                         if tool_type == ToolType.CUSTOM.value
                         else "工作流工具不支持跨租户携带，已移除",
@@ -796,7 +804,15 @@ class BundleInstallService:
                 # builtin 不随包：落地时按 tool_class 在目标租户找同类，找不到就置空
                 continue
             else:
-                missing.append(_missing("tool", entry.get("name"), f"未知工具类型 {tool_type}"))
+                # 类型缺失或未知：同样兜底成 ref，否则 reason 里带一个空类型、
+                # name 也可能是 None，这条 missing 对用户没有任何信息量。
+                missing.append(
+                    _missing(
+                        "tool",
+                        entry.get("name") or ref,
+                        f"未知工具类型 {tool_type or '（包内未声明）'}",
+                    )
+                )
 
     def _land_mcp(
             self,
