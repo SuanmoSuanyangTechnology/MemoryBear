@@ -63,6 +63,18 @@ logger = logging.getLogger(__name__)
 _BUNDLE_TOOL_PREFIX = "tool:"
 
 
+def _tool_name_of(tool_id: Any) -> Any:
+    """`tool:<名称>` 本地引用 → 工具名；其它形态原样返回。
+
+    跨租户安装不想落地的工具（custom / workflow）会把引用保留成这种形式，
+    后续再导出/复制时只能按名称匹配目标环境的同类工具，前缀必须先剥掉。
+    """
+
+    if isinstance(tool_id, str) and tool_id.startswith(_BUNDLE_TOOL_PREFIX):
+        return tool_id[len(_BUNDLE_TOOL_PREFIX):]
+    return tool_id
+
+
 class AppDslService:
 
     def __init__(self, db: Session):
@@ -296,10 +308,23 @@ class AppDslService:
     def _tool_ref(self, tool_id) -> dict | None:
         if not tool_id:
             return None
-        t = get_tool_config_row(self.db, tool_id)
+        text = str(tool_id)
+        if text.startswith(_BUNDLE_TOOL_PREFIX):
+            # 跨租户安装后保留下来的本地引用（custom / workflow 不落地）：没有
+            # 工具行可查，而且它不是合法 UUID——直接拿去查 `tool_configs.id`
+            # 会抛 DataError，整个导出就失败了。名称就是 ref 的后半段，导出成
+            # `{id, name}` 让导入侧 `_resolve_tool` 按名字重新匹配。
+            return {"id": text, "name": text[len(_BUNDLE_TOOL_PREFIX):]}
+        try:
+            uuid.UUID(text)
+        except (ValueError, TypeError, AttributeError):
+            # 其它非 UUID 形态（历史脏数据）：没有任何行可查，只回名称，避免
+            # 把非法值送进 UUID 主键查询。
+            return {"name": text}
+        t = get_tool_config_row(self.db, text)
         if t:
-            return {"id": str(tool_id), "name": t.name, "tool_type": t.tool_type}
-        return {"id": str(tool_id)}
+            return {"id": text, "name": t.name, "tool_type": t.tool_type}
+        return {"id": text}
 
     def _enrich_knowledge_retrieval(self, kr: dict | None) -> dict | None:
         if not kr:
@@ -1808,9 +1833,9 @@ class AppDslService:
                             uuid.UUID(tool_id)
                             tool_ref["id"] = tool_id
                         except ValueError:
-                            tool_ref["name"] = tool_id
+                            tool_ref["name"] = _tool_name_of(tool_id)
                     else:
-                        tool_ref["name"] = tool_id
+                        tool_ref["name"] = _tool_name_of(tool_id)
                     resolved_tool_id = self._resolve_tool(tool_ref, tenant_id, [])
                     if resolved_tool_id:
                         config["tool_id"] = resolved_tool_id
@@ -2074,7 +2099,12 @@ class AppDslService:
                         entry["name"] = raw_id[len(_BUNDLE_TOOL_PREFIX):]
                     result.append(entry)
                 continue
-            ref = t.get("_ref") or ({"name": t.get("tool_id")} if t.get("tool_id") else None)
+            ref = t.get("_ref") or (
+                # 非 bundle 路径：`tool_id` 可能是 `tool:<名称>` 本地引用（跨租户
+                # 装过、之后又被导出/复制），按工具名匹配前必须剥掉前缀，否则
+                # 永远对不上库里真实的工具名。
+                {"name": _tool_name_of(t.get("tool_id"))} if t.get("tool_id") else None
+            )
             entry = {k: v for k, v in t.items() if k != "_ref"}
             # Keep the exported name as the reference's snapshot (see
             # `tool_selection_validator`): after landing, a tool that later gets

@@ -715,9 +715,12 @@ class BundleInstallService:
         `custom` and `workflow` create **no row at all** — neither can be
         configured from what the bundle carries, so a row here would only be a
         permanently unusable entry in the target tenant's tool list. Both record
-        their name in `missing` and leave `dep_map[ref] = ""`, which makes
-        `app_dsl_service._resolve_tools` drop the reference instead of pointing it
-        at a source-tenant id.
+        their name in `missing`, and `dep_map[ref] = ""` tells
+        `app_dsl_service._resolve_tools` "declared by the bundle, not landed here":
+        the reference is **kept** as its original `tool:<名称>` local ref (not a
+        valid UUID), so the batch method API reports it in `missing_tool_ids` and
+        the UI can render "该工具已失效". Clearing it instead would make the tool
+        vanish without a trace.
         """
 
         for entry in dependencies.get("tools") or []:
@@ -731,8 +734,16 @@ class BundleInstallService:
             if market_ref:
                 # 目标租户已有该市场资源就复用：版本不同也不自动升级（§3.4），
                 # 只是把 `version_mismatch` 报给调用方，避免静默改写用户空间。
-                local = self._find_external_tool_copy(
-                    market_ref["resource_id"], tenant_id
+                #
+                # 只对 mcp 复用：custom / workflow 现在一律不落地，若本租户还留着
+                # 改造前安装生成的外部占位行（`is_active=True` 且带
+                # `external_resource_id`），复用会把它绑定进来，等于让一条永远配
+                # 不好的工具替代「缺失」上报。这类历史行按不存在处理，落到下面
+                # 的 custom/workflow 分支报 missing。
+                local = (
+                    self._find_external_tool_copy(market_ref["resource_id"], tenant_id)
+                    if tool_type == ToolType.MCP.value
+                    else None
                 )
                 if local is not None:
                     local_id, local_version = local
@@ -744,9 +755,12 @@ class BundleInstallService:
                     )
                     continue
                 # B6-b 之后父包只存市场引用，内容得按引用去取；已内嵌内容的存量
-                # 包走原路径，不额外发一次 HTTP。
-                entry = self._enrich_tool_entry(entry, market_ref, missing)
-                tool_type = str(entry.get("tool_type") or tool_type)
+                # 包走原路径，不额外发一次 HTTP。只有 mcp 需要内容（要建行），
+                # custom / workflow 不落地，取回来也没用，还会多写一条
+                # 「依赖包缺少 server_url」的假 missing。
+                if tool_type == ToolType.MCP.value:
+                    entry = self._enrich_tool_entry(entry, market_ref, missing)
+                    tool_type = str(entry.get("tool_type") or tool_type)
 
             if tool_type == ToolType.MCP.value:
                 landed_id = self._land_mcp(
