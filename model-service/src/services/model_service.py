@@ -38,6 +38,7 @@ from redbear_model import (
     SpeedbearChannelMissingError,
 )
 
+from ..config import current_settings
 from ..errors import BizCode, BusinessException
 from ..infrastructure.model_provider_config import (
     get_default_provider_api_base,
@@ -95,20 +96,37 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# 连接类故障标记：命中即按"网络不可达/超时"归类，而非密钥或参数问题。
-# 覆盖 openai SDK（APITimeoutError/APIConnectionError）、httpx（Connect/ReadTimeout、
-# ConnectError）、requests 与 botocore（Max retries exceeded / EndpointConnectionError）。
-_CONNECTIVITY_ERROR_MARKERS = (
-    "timeout",
-    "timed out",
+# 连接建立失败标记：只有这些故障才提示"地址不可达/网络不通"。
+_CONNECT_ERROR_MARKERS = (
+    "connecttimeout",
     "connecterror",
-    "connection error",
     "connection refused",
-    "connection reset",
-    "max retries exceeded",
+    "failed to establish a new connection",
+    "could not connect",
     "name resolution",
+    "nodename nor servname",
     "network is unreachable",
     "no route to host",
+    "endpointconnectionerror",
+)
+
+# 响应读取超时标记：提示"模型响应超时"（慢模型/上游拥塞），不冤枉地址。
+_READ_TIMEOUT_MARKERS = (
+    "readtimeout",
+    "read timeout",
+    "apitimeouterror",
+    "timeouterror",
+    "timed out",
+    "timeout",
+)
+
+# 其余连接类故障（连接被重置/重试耗尽等）：中性提示"连接异常中断"，不再断言地址不可达。
+# 覆盖 requests 与 botocore（Max retries exceeded / EndpointConnectionError）。
+_CONNECTIVITY_ERROR_MARKERS = (
+    "connection error",
+    "connection reset",
+    "max retries exceeded",
+    "connecterror",
 )
 
 # 认证类故障标记：openai SDK 以异常类名（AuthenticationError）暴露；dashscope 原生链路
@@ -126,6 +144,36 @@ _AUTH_ERROR_MARKERS = (
     "status_code: 401",
     "unauthorized",
 )
+
+# 探活只求快速暴露配置错误：connect 独立预算，read 对齐真实调用面（LLM_TIMEOUT）。
+_VALIDATION_CONNECT_TIMEOUT_S = 10.0
+
+
+def _validation_read_timeout() -> float:
+    return current_settings().llm_timeout
+
+
+def _exception_chain_text(exc: BaseException) -> str:
+    """拼接异常因果链（最多 8 层）：openai SDK 会把底层 httpx 异常挂在 __cause__ 上。"""
+    parts: list[str] = []
+    seen: set[int] = set()
+    current: BaseException | None = exc
+    while current is not None and len(parts) < 8 and id(current) not in seen:
+        seen.add(id(current))
+        parts.append(f"{type(current).__name__} {current}".lower())
+        current = current.__cause__ or current.__context__
+    return " ".join(parts)
+
+
+def _connectivity_failure_kind(exc: BaseException) -> str | None:
+    text = _exception_chain_text(exc)
+    if any(marker in text for marker in _CONNECT_ERROR_MARKERS):
+        return "connect"
+    if any(marker in text for marker in _READ_TIMEOUT_MARKERS):
+        return "read_timeout"
+    if any(marker in text for marker in _CONNECTIVITY_ERROR_MARKERS):
+        return "interrupted"
+    return None
 
 _MODEL_VALIDATION_CONFIG_ID = uuid.UUID("00000000-0000-0000-0000-000000000001")
 _MODEL_VALIDATION_KEY_ID = uuid.UUID("00000000-0000-0000-0000-000000000002")
@@ -167,8 +215,8 @@ def _shared_validation_config(
 ) -> ResolvedModelConfig:
     """即席凭据 → 契约 ``ResolvedModelConfig``（活体验证专用，不落库、不留痕）。
 
-    身份三件套用哨兵 UUID（用量事件侧无 config 可归属）；超时 10s、零重试
-    （验证要快速失败，不放大供应商侧压力）。
+    身份三件套用哨兵 UUID（用量事件侧无 config 可归属）；connect 10s 快速失败、
+    read 对齐调用面预算（LLM_TIMEOUT）、零重试（验证不放大供应商侧压力）。
     """
     from redbear_model import ModelProfile as ContractModelProfile
     from redbear_model import ModelProvider as ContractModelProvider
@@ -196,7 +244,11 @@ def _shared_validation_config(
             output_modalities=tuple(_enum_value(item) for item in (output_modalities or [])),
             features=tuple(_enum_value(item) for item in (features or [])),
         ),
-        runtime=ModelRuntimeOptions(timeout_s=10.0, max_retries=0),
+        runtime=ModelRuntimeOptions(
+            timeout_s=_validation_read_timeout(),
+            connect_timeout_s=_VALIDATION_CONNECT_TIMEOUT_S,
+            max_retries=0,
+        ),
     )
 
 
@@ -1141,29 +1193,38 @@ class ModelConfigService:
                     "认证失败: Bedrock 凭据不完整，API Key 需要按 "
                     "access_key_id:secret_access_key 格式填写（英文冒号分隔）"
                 )
-            elif any(
-                marker in f"{error_type} {raw_error_message}".lower()
-                for marker in _CONNECTIVITY_ERROR_MARKERS
-            ):
-                # 报错时必须给出实际请求地址，否则无法区分"密钥错"与"网络不通"；
-                # 按地址来源分文案：用户配置的地址 vs 官方公共端点（后者才引导配网关）
-                configured = (api_base or "").strip()
-                official = get_default_provider_api_base(provider)
-                if configured:
+            elif (failure_kind := _connectivity_failure_kind(e)) is not None:
+                if failure_kind == "read_timeout":
+                    # 慢模型/上游拥塞是超时主因，不能断言地址不可达
                     error_message = (
-                        f"连接失败: 无法访问你配置的 API Base URL {configured}"
-                        f"（连接超时或网络不可达），请确认该地址正确且网络可达"
+                        f"模型响应超时: 模型在 {_validation_read_timeout():g} 秒内未返回响应"
+                        f"（可能模型响应较慢或上游服务拥塞），请稍后重试"
                     )
-                    if official:
-                        error_message += (
-                            f"；如需改用官方公共端点，请清空 API Base URL（默认 {official}）"
-                        )
+                elif failure_kind == "interrupted":
+                    error_message = (
+                        "连接失败: 与模型服务的连接异常中断（网络波动或上游不稳定），"
+                        "请稍后重试"
+                    )
                 else:
-                    error_message = (
-                        f"连接失败: 无法访问官方公共端点 {official or '默认端点'}"
-                        f"（连接超时或网络不可达），请检查网络连通性，"
-                        f"或为该模型配置代理/网关地址（API Base URL）"
-                    )
+                    # 报错时必须给出实际请求地址，否则无法区分"密钥错"与"网络不通"；
+                    # 按地址来源分文案：用户配置的地址 vs 官方公共端点（后者才引导配网关）
+                    configured = (api_base or "").strip()
+                    official = get_default_provider_api_base(provider)
+                    if configured:
+                        error_message = (
+                            f"连接失败: 无法访问你配置的 API Base URL {configured}"
+                            f"（连接超时或网络不可达），请确认该地址正确且网络可达"
+                        )
+                        if official and configured.rstrip("/") != official.rstrip("/"):
+                            error_message += (
+                                f"；如需改用官方公共端点，请清空 API Base URL（默认 {official}）"
+                            )
+                    else:
+                        error_message = (
+                            f"连接失败: 无法访问官方公共端点 {official or '默认端点'}"
+                            f"（连接超时或网络不可达），请检查网络连通性，"
+                            f"或为该模型配置代理/网关地址（API Base URL）"
+                        )
             elif "RateLimitError" in error_type or "rate limit" in raw_error_message.lower():
                 error_message = "请求频率限制: 已超过 API 调用限制"
             elif (

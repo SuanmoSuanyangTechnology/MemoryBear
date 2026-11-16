@@ -96,6 +96,8 @@ class RedBearModelConfig(BaseModel):
     json_output: bool = False  # 是否强制 JSON 输出
     # 请求超时时间（秒）- 默认120秒以支持复杂的LLM调用，可通过环境变量 LLM_TIMEOUT 配置
     timeout: float = Field(default_factory=lambda: float(os.getenv("LLM_TIMEOUT", "120.0")))
+    # 连接建立的独立预算（秒）；None 时沿用 min(timeout, 60s) 的旧语义
+    connect_timeout: Optional[float] = None
     # 最大重试次数 - 默认2次以避免过长等待，可通过环境变量 LLM_MAX_RETRIES 配置
     max_retries: int = Field(default_factory=lambda: int(os.getenv("LLM_MAX_RETRIES", "2")))
     concurrency: int = 5  # 并发限流
@@ -334,11 +336,11 @@ class RedBearModelFactory:
         if provider == ModelProvider.DASHSCOPE:
             if not config.base_url:
                 config.base_url = "https://dashscope.aliyuncs.com/compatible-mode/v1"
-            # 连接超时跟随调用预算（上限 60s）：短预算场景（如配置验证 timeout=10）
-            # 不应在连接阶段独占 60s 才失败
+            # 连接超时优先取独立预算（config.connect_timeout），未设置时跟随调用预算
+            # （上限 60s）：短预算场景不应在连接阶段独占 60s 才失败
             timeout_config = httpx.Timeout(
                 timeout=config.timeout,
-                connect=min(config.timeout, 60.0),
+                connect=config.connect_timeout or min(config.timeout, 60.0),
                 read=config.timeout,
                 write=60.0,
                 pool=10.0,
@@ -402,7 +404,8 @@ class RedBearModelFactory:
             # 这样可以分别控制连接超时和读取超时
             timeout_config = httpx.Timeout(
                 timeout=config.timeout,  # 总超时时间
-                connect=min(config.timeout, 60.0),  # 连接超时跟随调用预算（上限 60 秒）
+                # 连接超时优先取独立预算，未设置时跟随调用预算（上限 60 秒）
+                connect=config.connect_timeout or min(config.timeout, 60.0),
                 read=config.timeout,  # 读取超时：使用配置的超时时间
                 write=60.0,  # 写入超时：60秒
                 pool=10.0,  # 连接池超时：10秒

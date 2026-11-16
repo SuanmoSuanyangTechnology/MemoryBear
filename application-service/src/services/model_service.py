@@ -71,22 +71,72 @@ logger = logging.getLogger(__name__)
 # fallback); prefer/only always go through channel resolution
 _RESOLUTION_MODES = ("off", "prefer", "only")
 
-# Connectivity failure markers: a match is classified as "network unreachable / timeout"
-# rather than a credential or parameter problem. Covers the openai SDK
-# (APITimeoutError/APIConnectionError), httpx (Connect/ReadTimeout, ConnectError),
-# requests and botocore (Max retries exceeded / EndpointConnectionError).
-_CONNECTIVITY_ERROR_MARKERS = (
-    "timeout",
-    "timed out",
+# Connection-establishment failures: only these report "unreachable address".
+_CONNECT_ERROR_MARKERS = (
+    "connecttimeout",
     "connecterror",
-    "connection error",
     "connection refused",
-    "connection reset",
-    "max retries exceeded",
+    "failed to establish a new connection",
+    "could not connect",
     "name resolution",
+    "nodename nor servname",
     "network is unreachable",
     "no route to host",
+    "endpointconnectionerror",
 )
+
+# Response read-timeout markers: report "model response timed out" (slow model /
+# upstream congestion) instead of blaming the address.
+_READ_TIMEOUT_MARKERS = (
+    "readtimeout",
+    "read timeout",
+    "apitimeouterror",
+    "timeouterror",
+    "timed out",
+    "timeout",
+)
+
+# Other connectivity failures (connection reset / retries exhausted): neutral "connection
+# interrupted" hint, no unreachable-address assertion. Covers requests and botocore
+# (Max retries exceeded / EndpointConnectionError).
+_CONNECTIVITY_ERROR_MARKERS = (
+    "connection error",
+    "connection reset",
+    "max retries exceeded",
+    "connecterror",
+)
+
+# Probes should surface bad config fast: connect gets its own budget, read aligns with
+# the real serving path (LLM_TIMEOUT).
+_VALIDATION_CONNECT_TIMEOUT_S = 10.0
+
+
+def _validation_read_timeout() -> float:
+    return current_settings().llm_timeout
+
+
+def _exception_chain_text(exc: BaseException) -> str:
+    """Join the exception cause chain (max 8 levels); the openai SDK hangs the underlying
+    httpx exception on __cause__."""
+    parts: list[str] = []
+    seen: set[int] = set()
+    current: BaseException | None = exc
+    while current is not None and len(parts) < 8 and id(current) not in seen:
+        seen.add(id(current))
+        parts.append(f"{type(current).__name__} {current}".lower())
+        current = current.__cause__ or current.__context__
+    return " ".join(parts)
+
+
+def _connectivity_failure_kind(exc: BaseException) -> str | None:
+    text = _exception_chain_text(exc)
+    if any(marker in text for marker in _CONNECT_ERROR_MARKERS):
+        return "connect"
+    if any(marker in text for marker in _READ_TIMEOUT_MARKERS):
+        return "read_timeout"
+    if any(marker in text for marker in _CONNECTIVITY_ERROR_MARKERS):
+        return "interrupted"
+    return None
 
 # Auth failure markers: the openai SDK exposes its own exception class (AuthenticationError);
 # the native dashscope path (DashScopeEmbeddings raises ValueError for embedding,
@@ -183,7 +233,11 @@ def _shared_validation_config(
             output_modalities=tuple(_enum_value(item) for item in (output_modalities or [])),
             features=tuple(_enum_value(item) for item in (features or [])),
         ),
-        runtime=ModelRuntimeOptions(timeout_s=10.0, max_retries=0),
+        runtime=ModelRuntimeOptions(
+            timeout_s=_validation_read_timeout(),
+            connect_timeout_s=_VALIDATION_CONNECT_TIMEOUT_S,
+            max_retries=0,
+        ),
     )
 
 
@@ -678,7 +732,8 @@ class ModelConfigService:
                 input_modalities=[_enum_value(item) for item in (input_modalities or [])],
                 output_modalities=[_enum_value(item) for item in (output_modalities or [])],
                 features=[_enum_value(item) for item in (features or [])],
-                timeout=10.0,
+                timeout=_validation_read_timeout(),
+                connect_timeout=_VALIDATION_CONNECT_TIMEOUT_S,
                 max_retries=0,
             )
 
@@ -873,30 +928,39 @@ class ModelConfigService:
                     "认证失败: Bedrock 凭据不完整，API Key 需要按 "
                     "access_key_id:secret_access_key 格式填写（英文冒号分隔）"
                 )
-            elif any(
-                marker in f"{error_type} {raw_error_message}".lower()
-                for marker in _CONNECTIVITY_ERROR_MARKERS
-            ):
-                # On failure, report the actual request address, otherwise "bad key" and "network
-                # down" cannot be told apart; the message varies by address source: user-configured
-                # address vs official public endpoint (only the latter suggests configuring a gateway)
-                configured = (api_base or "").strip()
-                official = get_default_provider_api_base(provider)
-                if configured:
+            elif (failure_kind := _connectivity_failure_kind(e)) is not None:
+                if failure_kind == "read_timeout":
+                    # Slow model / upstream congestion is the usual cause; do not blame the address
                     error_message = (
-                        f"连接失败: 无法访问你配置的 API Base URL {configured}"
-                        f"（连接超时或网络不可达），请确认该地址正确且网络可达"
+                        f"模型响应超时: 模型在 {_validation_read_timeout():g} 秒内未返回响应"
+                        f"（可能模型响应较慢或上游服务拥塞），请稍后重试"
                     )
-                    if official:
-                        error_message += (
-                            f"；如需改用官方公共端点，请清空 API Base URL（默认 {official}）"
-                        )
+                elif failure_kind == "interrupted":
+                    error_message = (
+                        "连接失败: 与模型服务的连接异常中断（网络波动或上游不稳定），"
+                        "请稍后重试"
+                    )
                 else:
-                    error_message = (
-                        f"连接失败: 无法访问官方公共端点 {official or '默认端点'}"
-                        f"（连接超时或网络不可达），请检查网络连通性，"
-                        f"或为该模型配置代理/网关地址（API Base URL）"
-                    )
+                    # On failure, report the actual request address, otherwise "bad key" and "network
+                    # down" cannot be told apart; the message varies by address source: user-configured
+                    # address vs official public endpoint (only the latter suggests configuring a gateway)
+                    configured = (api_base or "").strip()
+                    official = get_default_provider_api_base(provider)
+                    if configured:
+                        error_message = (
+                            f"连接失败: 无法访问你配置的 API Base URL {configured}"
+                            f"（连接超时或网络不可达），请确认该地址正确且网络可达"
+                        )
+                        if official and configured.rstrip("/") != official.rstrip("/"):
+                            error_message += (
+                                f"；如需改用官方公共端点，请清空 API Base URL（默认 {official}）"
+                            )
+                    else:
+                        error_message = (
+                            f"连接失败: 无法访问官方公共端点 {official or '默认端点'}"
+                            f"（连接超时或网络不可达），请检查网络连通性，"
+                            f"或为该模型配置代理/网关地址（API Base URL）"
+                        )
             elif "RateLimitError" in error_type or "rate limit" in raw_error_message.lower():
                 error_message = "请求频率限制: 已超过 API 调用限制"
             elif "InvalidRequestError" in error_type or "invalid request" in raw_error_message.lower():
