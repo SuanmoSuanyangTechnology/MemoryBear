@@ -1,19 +1,20 @@
 """偏好类型页面服务
 
-偏好类型页只读：列表 / 详情均读 `ontology_preference_scene` +
-`ontology_preference_class`，进入时惰性种入；同时提供本体接口做展示名投影。
+提供随包偏好类型的只读展示，以及按工作空间存储的偏好数据查询。
 """
 
 from __future__ import annotations
 
 import logging
 import uuid
+from functools import lru_cache
 from typing import Iterable, Optional
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config.preference_type_initializer import ensure_seeded_async
+from app.config.preference_type_seed import load_preference_type_display
 from app.db import get_async_db_context
 from app.models.ontology_preference import (
     OntologyPreferenceClass,
@@ -28,6 +29,63 @@ def pick_localized(zh: Optional[str], en: Optional[str], language: str) -> str:
     if language == "en":
         return en or zh or ""
     return zh or en or ""
+
+
+@lru_cache(maxsize=1)
+def _bundled_types() -> dict[str, dict]:
+    return {
+        entry["domain"]: entry for entry in load_preference_type_display()["types"]
+    }
+
+
+def _localized(values: dict | None, language: str) -> str:
+    values = values or {}
+    return pick_localized(values.get("zh"), values.get("en"), language)
+
+
+def _bundled_summary(entry: dict, language: str) -> dict:
+    return {
+        "domain": entry["domain"],
+        "display_name": _localized(entry.get("display_name"), language) or entry["domain"],
+        "preference_count": len(entry["subjects"]),
+        "task_count": len(entry["situations"]),
+        "readonly": True,
+    }
+
+
+def list_bundled_preference_types(language: str) -> dict:
+    items = [_bundled_summary(entry, language) for entry in _bundled_types().values()]
+    return {"items": items, "total": len(items)}
+
+
+def bundled_preference_domain_exists(domain: str) -> bool:
+    return domain in _bundled_types()
+
+
+def get_bundled_preference_type(domain: str, language: str) -> dict | None:
+    entry = _bundled_types().get(domain)
+    if entry is None:
+        return None
+
+    return {
+        **_bundled_summary(entry, language),
+        "preference_categories": [
+            {
+                "key": subject["key"],
+                "label": _localized(subject.get("label"), language) or subject["key"],
+                "description": _localized(subject.get("description"), language),
+            }
+            for subject in entry["subjects"]
+        ],
+        "situations": [
+            {
+                "key": situation["key"],
+                "label": _localized(situation.get("label"), language) or situation["key"],
+            }
+            for situation in entry["situations"]
+        ],
+        "note": _localized(entry.get("note"), language),
+    }
 
 
 async def _get_scene(
