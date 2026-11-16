@@ -2,6 +2,7 @@ import type { ChatItem } from '@/components/Chat/types'
 import type { Variable } from '@/views/Workflow/components/Properties/VariableList/types'
 import type { WorkflowConfig } from '@/views/Workflow/types'
 import { nodeLibrary } from '@/views/Workflow/constant'
+import { triggerParams } from '@/views/Workflow/components/Properties/hooks/useVariableList'
 import type { NodeData } from './type'
 
 type ChatList = Array<ChatItem | ChatItem[]>
@@ -10,15 +11,19 @@ type ChatList = Array<ChatItem | ChatItem[]>
 import { mapLastVersion, flattenChatList } from '@/components/Chat/utils/messageVersions'
 export { mapLastVersion, flattenChatList }
 
-/** Builds the draft-run request payload from the current message and attachments. */
+/**
+ * Builds the draft-run request payload from the current message and attachments.
+ * `message` is omitted for message-less runs (pure workflow).
+ */
 export const formatParams = (
-  message: string,
+  message: string | undefined,
   conversation_id: string | null,
   files: any[] = [],
   variables: Record<string, any>,
+  trigger_payload: Record<string, any> = {},
 ) => {
   return {
-    message,
+    message: message || undefined,
     conversation_id,
     stream: true,
     files: files.map(file => {
@@ -32,26 +37,68 @@ export const formatParams = (
         }
       }
     }),
-    variables: Object.keys(variables).length > 0 ? variables : undefined
+    variables: Object.keys(variables).length > 0 ? variables : undefined,
+    trigger_payload: Object.keys(trigger_payload).length > 0 ? trigger_payload : undefined
   }
 }
 
 /**
  * Collects input parameters from the configured variables and reports any
- * required-but-empty variable names.
+ * required-but-empty variable names. Webhook trigger variables are grouped into
+ * the `trigger_payload` object (e.g. `body.question` -> `{ body: { question } }`).
  */
 export const collectVariableParams = (variables: Variable[]) => {
   const params: Record<string, any> = {}
+  const trigger_payload: Record<string, any> = {}
   const needRequired: string[] = []
   if (variables?.length > 0) {
-    variables.forEach(vo => {
+    variables.filter(vo => !vo.nodeType).forEach(vo => {
       params[vo.name] = vo.value ?? vo.defaultValue
       if (vo.required && (params[vo.name] === null || params[vo.name] === undefined || params[vo.name] === '')) {
         needRequired.push(vo.name)
       }
     })
+    variables.filter(vo => vo.nodeType === 'webhook').forEach(vo => {
+      const [root, ...rest] = vo.name.split('.')
+      if (!root || !rest.length) return
+      trigger_payload[root] = {
+        ...(trigger_payload[root] || {}),
+        [rest.join('.')]: vo.value,
+      }
+    })
   }
-  return { isCanSend: needRequired.length === 0, params, needRequired }
+  return { isCanSend: needRequired.length === 0, params, trigger_payload, needRequired }
+}
+
+/** Normalizes a trigger config param list (wrapped `defaultValue` or plain array). */
+const getTriggerParamList = (config: Record<string, any>, key: string): any[] => {
+  const value = config?.[key]
+  if (Array.isArray(value)) return value
+  if (Array.isArray(value?.defaultValue)) return value.defaultValue
+  return []
+}
+
+/** Collects webhook trigger input variables from the workflow's trigger nodes. */
+export const collectWebhookVariables = (nodes: WorkflowConfig['nodes'] = []): Variable[] => {
+  const list: Variable[] = []
+  nodes.filter(node => node.type === 'trigger').forEach(node => {
+    const config = (node.config || {}) as Record<string, any>
+    const triggerType = config.trigger_type?.defaultValue ?? config.trigger_type
+    if (triggerType !== 'webhook') return
+    Object.keys(triggerParams).forEach(key => {
+      getTriggerParamList(config, key).forEach(param => {
+        if (!param?.name) return
+        list.push({
+          name: `${triggerParams[key]}.${param.name}`,
+          ui_type: 'paragraph',
+          type: param.type || 'string',
+          required: !!param.required,
+          nodeType: 'webhook',
+        })
+      })
+    })
+  })
+  return list
 }
 
 /**
@@ -60,11 +107,13 @@ export const collectVariableParams = (variables: Variable[]) => {
 export const computeInitVariables = (type: string | undefined, config: any): Variable[] => {
   let initVariables: Variable[] = []
   switch (type) {
-    case 'workflow': {
+    // pure workflow shares the workflow input contract: start node + webhook triggers
+    case 'workflow':
+    case 'pure_workflow': {
       const { nodes } = config as WorkflowConfig;
       const startNodes = nodes.filter(vo => vo.type === 'start')
       if (startNodes.length) {
-        const curVariables = startNodes[0].config.variables as Variable[]
+        const curVariables = (startNodes[0].config.variables || []) as Variable[]
         curVariables.forEach((vo) => {
           if (typeof vo.default !== 'undefined') {
             vo.value = vo.default
@@ -75,6 +124,9 @@ export const computeInitVariables = (type: string | undefined, config: any): Var
           }
         })
         initVariables = curVariables
+      }
+      if (type === 'pure_workflow') {
+        initVariables = [...initVariables, ...collectWebhookVariables(nodes)]
       }
       break
     }

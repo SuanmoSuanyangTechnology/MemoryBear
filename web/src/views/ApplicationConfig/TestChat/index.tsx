@@ -1,12 +1,6 @@
-/*
- * @Author: ZhaoYing
- * @Date: 2026-03-13 17:27:52
- * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-08-13 11:55:09
- */
 import { type FC, useState, useRef, useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
-import { App } from 'antd'
+import { App, Button, Flex } from 'antd'
 import clsx from 'clsx'
 import dayjs from 'dayjs'
 
@@ -23,13 +17,16 @@ import {
 
 import Empty from '@/components/Empty'
 import Chat from '@/components/Chat'
+import ChatContent from '@/components/Chat/ChatContent'
 import RbCard from '@/components/RbCard/Card'
 import ChatToolbar, { type ChatToolbarRef } from '@/components/Chat/ChatToolbar'
 import Runtime from '@/views/Workflow/components/Chat/Runtime'
+import VariableConfigModal from '@/views/Workflow/components/Chat/VariableConfigModal'
 import ReportModal from '@/components/Chat/ReportModal'
 
 import type { ChatItem } from '@/components/Chat/types'
 import type { ReportModalRef } from '@/views/Conversation/types'
+import type { VariableConfigModalRef } from '@/views/Workflow/types'
 import type { Variable } from '@/views/Workflow/components/Properties/VariableList/types'
 import type { TestChatProps } from './type'
 import type { SSEMessage } from '@/utils/stream'
@@ -67,6 +64,7 @@ const TestChat: FC<TestChatProps> = ({
   const { message: messageApi, modal } = App.useApp()
   const toolbarRef = useRef<ChatToolbarRef>(null)
   const reportModalRef = useRef<ReportModalRef>(null)
+  const variableConfigModalRef = useRef<VariableConfigModalRef>(null)
 
   const [loading, setLoading] = useState(false)
   const [chatList, setChatList] = useState<Array<ChatItem | ChatItem[]>>([])
@@ -84,6 +82,8 @@ const TestChat: FC<TestChatProps> = ({
 
   const isWorkflow = !!application?.type.includes('workflow')
   const isCluster = application?.type === 'multi_agent'
+  // Pure workflow has no user message: it is triggered by variables + a run button
+  const isPureWorkflow = application?.type === 'pure_workflow'
 
   useEffect(() => {
     getVariables()
@@ -124,13 +124,16 @@ const TestChat: FC<TestChatProps> = ({
    * surfacing an error toast when required variables are missing.
    */
   const resolveSendParams = () => {
-    const files = (toolbarRef.current?.getFiles() || []).filter(item => !['uploading', 'error'].includes(item.status))
-    const vars = toolbarRef.current?.getVariables() || []
-    const { isCanSend, params, needRequired } = collectVariableParams(vars)
+    // Pure workflow runs from the variable panel only: no attachments / input box
+    const files = isPureWorkflow
+      ? []
+      : (toolbarRef.current?.getFiles() || []).filter(item => !['uploading', 'error'].includes(item.status))
+    const vars = isPureWorkflow ? variables : (toolbarRef.current?.getVariables() || [])
+    const { isCanSend, params, trigger_payload, needRequired } = collectVariableParams(vars)
     if (needRequired.length) {
       messageApi.error(`${needRequired.join(',')} ${t('workflow.variableRequired')}`)
     }
-    return { files, isCanSend, params }
+    return { files, isCanSend, params, trigger_payload }
   }
 
   const handleStreamMessage = (data: SSEMessage[]) =>
@@ -157,25 +160,49 @@ const TestChat: FC<TestChatProps> = ({
       config,
     })(data)
 
-  type SendMode = 'agent' | 'cluster' | 'workflow'
+  /**
+   * Clears the previous pure workflow runs and starts a fresh one: only the
+   * opening statement (when configured) and a new assistant placeholder remain.
+   */
+  const resetRunChatList = () => {
+    const openingMsg = buildOpeningStatementMessage(features?.opening_statement, { withTimestamp: true, variables })
+    const placeholder: ChatItem = {
+      role: 'assistant',
+      content: '',
+      created_at: Date.now(),
+      subContent: [],
+    }
+    setChatList(openingMsg ? [openingMsg, placeholder] : [placeholder])
+    setConversationId(null)
+    setMessage(undefined)
+  }
+
+  type SendMode = 'agent' | 'cluster' | 'workflow' | 'pure_workflow'
 
   const handleSendByMode = (mode: SendMode, msg?: string) => {
+    // Pure workflow is run without a message: only its variables are submitted
+    const isRunMode = mode === 'pure_workflow'
     const sendMessage = msg || message
-    if (loading || !application || !sendMessage?.trim()) return
+    if (loading || !application || (!isRunMode && !sendMessage?.trim())) return
 
-    const { files, isCanSend, params } = resolveSendParams()
+    const { files, isCanSend, params, trigger_payload } = resolveSendParams()
     if (!isCanSend) return
 
-    setChatList(prev => addUserMessage(prev, sendMessage, files))
-    setChatList(prev => addAssistantMessage(prev, application.type))
-    setMessage(undefined)
-    toolbarRef.current?.setFiles([])
-    setFileList([])
+    if (isRunMode) {
+      // Each pure workflow run is a standalone execution: clear the previous runs
+      resetRunChatList()
+    } else {
+      setChatList(prev => addUserMessage(prev, sendMessage as string, files))
+      setChatList(prev => addAssistantMessage(prev, application.type))
+      setMessage(undefined)
+      toolbarRef.current?.setFiles([])
+      setFileList([])
+    }
     streamLoadingRef.current = true
     setStreamLoading(true)
     setLoading(true)
 
-    const streamHandler = mode === 'workflow'
+    const streamHandler = mode === 'workflow' || isRunMode
       ? handleWorkflowStreamMessage
       : mode === 'cluster'
         ? createTestClusterStreamHandler({
@@ -191,13 +218,19 @@ const TestChat: FC<TestChatProps> = ({
 
     draftRun(
       application.id,
-      formatParams(sendMessage, conversationId, files, params),
+      // Every pure workflow run is an independent execution (no conversation history)
+      formatParams(isRunMode ? undefined : sendMessage, isRunMode ? null : conversationId, files, params, trigger_payload),
       streamHandler,
       (abort) => { abortRef.current = abort },
     )
       .catch((error) => {
-        if (mode === 'workflow') {
-          const errorInfo = JSON.parse(error.message)
+        if (mode === 'workflow' || isRunMode) {
+          let errorInfo: { error?: any } = {}
+          try {
+            errorInfo = JSON.parse(error.message)
+          } catch {
+            errorInfo = { error: error?.message }
+          }
           setChatList(prev => applyWorkflowSendError(prev, errorInfo.error))
           return
         }
@@ -213,6 +246,7 @@ const TestChat: FC<TestChatProps> = ({
   const handleSend = (msg?: string) => handleSendByMode('agent', msg)
   const handleClusterSend = (msg?: string) => handleSendByMode('cluster', msg)
   const handleWorkflowSend = (msg?: string) => handleSendByMode('workflow', msg)
+  const handlePureWorkflowRun = () => handleSendByMode('pure_workflow')
 
   useEffect(() => {
     if (!Object.keys(audioStatusMap).length) return
@@ -359,6 +393,47 @@ const TestChat: FC<TestChatProps> = ({
   }, [features?.opening_statement, variables])
   const isSupportTools = !!application?.type
 
+  // True when any required variable is missing a value, used to highlight the config button
+  const isNeedVariableConfig = variables?.some(
+    vo => vo.required && (vo.value === null || vo.value === undefined || vo.value === '')
+  )
+
+  /** Persists the values edited in the standalone variable panel (pure workflow) */
+  const handleVariablesSave = (values: Variable[]) => {
+    setVariables([...values])
+    toolbarRef.current?.setVariables([...values])
+  }
+
+  const emptyNode = (
+    <Empty
+      url={ChatIcon}
+      subTitle={t(isPureWorkflow ? 'application.testRunEmpty' : 'application.testChatEmpty')}
+      size={[240, 200]}
+      className="rb:h-full!"
+    />
+  )
+
+  /** Message list props shared by the chat layout and the run-only (pure workflow) layout */
+  const chatContentProps = {
+    data: chatList,
+    streamLoading,
+    labelFormat: (item: ChatItem) => item.role === 'user' ? t('application.you') : dayjs(item.created_at).locale('en').format('MMMM D, YYYY [at] h:mm A'),
+    // errorDesc={t('application.ReplyException')}
+    renderRuntime: application?.type ? (item: ChatItem, index: number) => <Runtime item={item} index={index} source={application.type} /> : undefined,
+    handleInterventionActionClick,
+    isSupportTools,
+    isAlwaysShowAssistantTools: isSupportTools,
+    isEnded: !loading,
+    handleFeedback: isSupportTools ? handleFeedback : undefined,
+    handleFavorite: isSupportTools ? handleFavorite : undefined,
+    deleteMsg: isSupportTools ? deleteMsg : undefined,
+    reportMsg: isSupportTools ? reportMsg : undefined,
+    regenerateMaxCount: 5,
+    // pure workflow is a one-shot execution: regenerate is rejected by the backend
+    regenerateMessages: isSupportTools && !isPureWorkflow ? regenerateMessages : undefined,
+    handleVersionChange: isSupportTools ? handleVersionChange : undefined,
+  }
+
   return (
     <div className="rb:w-250 rb:mx-auto rb:h-full">
       <RbCard
@@ -367,45 +442,70 @@ const TestChat: FC<TestChatProps> = ({
         className="rb:h-full!"
         bodyClassName="rb:h-[calc(100%-56px)]! rb:overflow-y-auto rb:px-3! rb:py-0!"
       >
-        <Chat
-          empty={<Empty url={ChatIcon} title={t('application.testChatEmpty')} isNeedSubTitle={false} size={[240, 200]} className="rb:h-full!" />}
-          contentClassName={clsx(`rb:mx-[16px] rb:pt-[24px]`, {
-            'rb:h-[calc(100%-140px)]': !fileList.length,
-            'rb:h-[calc(100%-208px)]': !!fileList.length,
-          })}
-          data={chatList}
-          streamLoading={streamLoading}
-          loading={loading}
-          onChange={setMessage}
-          onSend={isWorkflow ? handleWorkflowSend : isCluster ? handleClusterSend : handleSend}
-          fileList={fileList}
-          fileChange={(list) => {
-            setFileList(list || [])
-            toolbarRef.current?.setFiles(list || [])
-          }}
-          labelFormat={(item) => item.role === 'user' ? t('application.you') : dayjs(item.created_at).locale('en').format('MMMM D, YYYY [at] h:mm A')}
-          // errorDesc={t('application.ReplyException')}
-          renderRuntime={application?.type ? (item, index) => <Runtime item={item} index={index} source={application.type} /> : undefined}
-          handleInterventionActionClick={handleInterventionActionClick}
-          isSupportTools={isSupportTools}
-          isAlwaysShowAssistantTools={isSupportTools}
-          isEnded={!loading}
-          handleFeedback={isSupportTools ? handleFeedback : undefined}
-          handleFavorite={isSupportTools ? handleFavorite : undefined}
-          deleteMsg={isSupportTools ? deleteMsg : undefined}
-          reportMsg={isSupportTools ? reportMsg : undefined}
-          regenerateMaxCount={5}
-          regenerateMessages={isSupportTools ? regenerateMessages : undefined}
-          handleVersionChange={isSupportTools ? handleVersionChange : undefined}
-        >
-          <ChatToolbar
-            ref={toolbarRef}
-            features={features}
-            onFilesChange={setFileList}
-            onVariablesChange={setVariables}
-          />
-        </Chat>
+        {application?.type && isPureWorkflow
+          ? (
+            <Flex vertical className="rb:h-full! rb:overflow-hidden">
+              <ChatContent
+                classNames="rb:mx-[16px] rb:pt-[24px] rb:flex-1! rb:min-h-0!"
+                empty={emptyNode}
+                {...chatContentProps}
+              />
+              {/* Pure workflow has no message input: variables + a run button instead */}
+              <Flex align="center" justify="center" gap={10} className="rb:mx-4! rb:mt-3! rb:mb-0! rb:pb-3!">
+                {variables.length > 0 &&
+                  <Button
+                    danger={isNeedVariableConfig}
+                    icon={<div className={clsx("rb:size-4 rb:bg-cover", {
+                      "rb:bg-[url('@/assets/images/conversation/variables_red.svg')]": isNeedVariableConfig,
+                      "rb:bg-[url('@/assets/images/conversation/variables.svg')] rb:group-hover:bg-[url('@/assets/images/conversation/variables_blue.svg')]": !isNeedVariableConfig
+                    })} />}
+                    className="rb:group"
+                    onClick={() => variableConfigModalRef.current?.handleOpen(variables)}
+                  >
+                    {t('memoryConversation.variableConfig')}
+                  </Button>
+                }
+                <Button
+                  type="primary"
+                  onClick={handlePureWorkflowRun}
+                  loading={loading}
+                  disabled={loading}
+                >
+                  {t('workflow.startRun')}
+                </Button>
+              </Flex>
+            </Flex>
+          )
+          : application?.type
+          ? (
+            <Chat
+              empty={emptyNode}
+              contentClassName={clsx(`rb:mx-[16px] rb:pt-[24px]`, {
+                'rb:h-[calc(100%-140px)]': !fileList.length,
+                'rb:h-[calc(100%-208px)]': !!fileList.length,
+              })}
+              loading={loading}
+              onChange={setMessage}
+              onSend={isWorkflow ? handleWorkflowSend : isCluster ? handleClusterSend : handleSend}
+              fileList={fileList}
+              fileChange={(list) => {
+                setFileList(list || [])
+                toolbarRef.current?.setFiles(list || [])
+              }}
+              {...chatContentProps}
+            >
+              <ChatToolbar
+                ref={toolbarRef}
+                features={features}
+                onFilesChange={setFileList}
+                onVariablesChange={setVariables}
+              />
+            </Chat>
+          )
+          : null
+        }
       </RbCard>
+      <VariableConfigModal ref={variableConfigModalRef} refresh={handleVariablesSave} />
       {application?.id && <ReportModal ref={reportModalRef} appId={application.id} />}
     </div>
   )
