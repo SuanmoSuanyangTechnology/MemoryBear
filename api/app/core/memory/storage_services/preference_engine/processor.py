@@ -22,7 +22,7 @@ from .models import (
     PreferenceOperations,
     PreferenceProcessorResult,
 )
-from .ontology_registry import load_preference_ontology_from_db
+from .ontology_registry import load_preference_ontology
 from .prompt_runner import PreferencePromptRunner
 
 logger = logging.getLogger(__name__)
@@ -57,7 +57,6 @@ class PreferenceProcessor:
             try:
                 uuid.UUID(str(workspace_id))
             except (TypeError, ValueError):
-                # 非法 workspace 不能回退随包本体，否则会用错误的封闭集合写入
                 logger.error(
                     "[Preference] invalid workspace id, skip preference task: %s",
                     workspace_id,
@@ -66,13 +65,10 @@ class PreferenceProcessor:
                 self.ontology = None
             else:
                 try:
-                    self.ontology = load_preference_ontology_from_db(
-                        str(workspace_id), domain
-                    )
+                    self.ontology = load_preference_ontology(domain)
                 except Exception as exc:
-                    # 写路径不回退随包本体，避免用与 workspace 配置不一致的封闭集合
                     logger.error(
-                        "[Preference] DB ontology load failed, skip preference task "
+                        "[Preference] bundled ontology load failed, skip preference task "
                         "workspace=%s domain=%s error=%s",
                         workspace_id,
                         domain,
