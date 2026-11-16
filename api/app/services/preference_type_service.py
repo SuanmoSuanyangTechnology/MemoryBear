@@ -228,3 +228,98 @@ async def preference_domain_exists(
             domain,
         )
     return scene is not None
+
+
+async def list_preference_types_from_display(language: str) -> dict:
+    """从 preference_type_display.json 读取偏好类型列表，不按工作空间隔离。"""
+    import json
+    from pathlib import Path
+
+    display_path = (
+        Path(__file__).resolve().parents[1]
+        / "core"
+        / "memory"
+        / "storage_services"
+        / "preference_engine"
+        / "prompts"
+        / "preference_type_display.json"
+    )
+    payload = json.loads(display_path.read_text(encoding="utf-8"))
+    items = []
+    for display_type in payload.get("types") or []:
+        display_name = display_type.get("display_name") or {}
+        subjects = display_type.get("subjects") or []
+        situations = display_type.get("situations") or []
+        items.append(
+            {
+                "domain": display_type.get("domain"),
+                "display_name": display_name.get(language)
+                or display_name.get("zh" if language == "en" else "en")
+                or "",
+                "preference_count": len(subjects),
+                "task_count": len(situations),
+                "readonly": True,
+            }
+        )
+    return {"items": items, "total": len(items)}
+
+
+async def get_preference_type_from_display(
+    domain: str, language: str
+) -> Optional[dict]:
+    """从 preference_type_display.json 读取偏好类型详情，不按工作空间隔离。"""
+    import json
+    from pathlib import Path
+
+    display_path = (
+        Path(__file__).resolve().parents[1]
+        / "core"
+        / "memory"
+        / "storage_services"
+        / "preference_engine"
+        / "prompts"
+        / "preference_type_display.json"
+    )
+    payload = json.loads(display_path.read_text(encoding="utf-8"))
+    display_type = next(
+        (
+            item
+            for item in payload.get("types") or []
+            if item.get("domain") == domain
+        ),
+        None,
+    )
+    if display_type is None:
+        return None
+
+    def localized(value: object) -> str:
+        values = value if isinstance(value, dict) else {}
+        return values.get(language) or values.get(
+            "zh" if language == "en" else "en"
+        ) or ""
+
+    subjects = display_type.get("subjects") or []
+    situations = display_type.get("situations") or []
+    return {
+        "domain": domain,
+        "display_name": localized(display_type.get("display_name")) or domain,
+        "preference_count": len(subjects),
+        "task_count": len(situations),
+        "readonly": True,
+        "preference_categories": [
+            {
+                "key": item.get("key"),
+                "label": localized(item.get("label")) or item.get("key"),
+                "description": localized(item.get("description")),
+            }
+            for item in subjects
+        ],
+        "situations": [
+            {
+                "key": item.get("key"),
+                "label": localized(item.get("label")) or item.get("key"),
+            }
+            for item in situations
+        ],
+        "note": localized(display_type.get("note")),
+    }
