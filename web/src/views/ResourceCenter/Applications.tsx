@@ -89,7 +89,7 @@ const Applications = () => {
           </RbCard>
         )}
       />
-      <ApplicationDetailModal ref={detailModalRef} onAdd={(id) => addModalRef.current?.handleOpen(id)} />
+      <ApplicationDetailModal ref={detailModalRef} onAdd={(id) => addModalRef.current?.handleOpen(id)} categories={categories} />
       <AddToWorkspaceModal ref={addModalRef} />
     </Flex>
   );
