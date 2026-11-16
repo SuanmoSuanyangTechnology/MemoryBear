@@ -78,6 +78,12 @@ class ModelServiceSettings(BaseSettings):
 
     # Provider 调用参数（活体验证 / 可用性探测 / 调用面共用）
     llm_timeout: float = Field(default=120.0, gt=0, validation_alias="LLM_TIMEOUT")
+    # 探活连接建立的独立预算（秒）：快速暴露地址不可达，同时允许慢网关
+    model_validation_connect_timeout: float = Field(
+        default=10.0,
+        gt=0,
+        validation_alias="MODEL_VALIDATION_CONNECT_TIMEOUT",
+    )
     llm_max_retries: int = Field(default=2, ge=0, validation_alias="LLM_MAX_RETRIES")
     embedding_batch_size: int = Field(
         default=10,

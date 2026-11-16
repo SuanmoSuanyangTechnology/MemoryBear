@@ -103,11 +103,13 @@ _CONNECTIVITY_ERROR_MARKERS = (
 )
 
 # 探活只求快速暴露配置错误：connect 独立预算，read 对齐真实调用面（LLM_TIMEOUT）。
-_VALIDATION_CONNECT_TIMEOUT_S = 10.0
-
-
 def _validation_read_timeout() -> float:
     return float(getattr(settings, "LLM_TIMEOUT", 120.0) or 120.0)
+
+
+def _validation_connect_timeout() -> float:
+    value = float(getattr(settings, "MODEL_VALIDATION_CONNECT_TIMEOUT", 10.0) or 10.0)
+    return value if value > 0 else 10.0
 
 
 def _exception_chain_text(exc: BaseException) -> str:
@@ -228,7 +230,7 @@ def _shared_validation_config(
         ),
         runtime=ModelRuntimeOptions(
             timeout_s=_validation_read_timeout(),
-            connect_timeout_s=_VALIDATION_CONNECT_TIMEOUT_S,
+            connect_timeout_s=_validation_connect_timeout(),
             max_retries=0,
         ),
     )
@@ -722,7 +724,7 @@ class ModelConfigService:
                 output_modalities=[_enum_value(item) for item in (output_modalities or [])],
                 features=[_enum_value(item) for item in (features or [])],
                 timeout=_validation_read_timeout(),
-                connect_timeout=_VALIDATION_CONNECT_TIMEOUT_S,
+                connect_timeout=_validation_connect_timeout(),
                 max_retries=0,
             )
 

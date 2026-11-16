@@ -146,11 +146,12 @@ _AUTH_ERROR_MARKERS = (
 )
 
 # 探活只求快速暴露配置错误：connect 独立预算，read 对齐真实调用面（LLM_TIMEOUT）。
-_VALIDATION_CONNECT_TIMEOUT_S = 10.0
-
-
 def _validation_read_timeout() -> float:
     return current_settings().llm_timeout
+
+
+def _validation_connect_timeout() -> float:
+    return current_settings().model_validation_connect_timeout
 
 
 def _exception_chain_text(exc: BaseException) -> str:
@@ -246,7 +247,7 @@ def _shared_validation_config(
         ),
         runtime=ModelRuntimeOptions(
             timeout_s=_validation_read_timeout(),
-            connect_timeout_s=_VALIDATION_CONNECT_TIMEOUT_S,
+            connect_timeout_s=_validation_connect_timeout(),
             max_retries=0,
         ),
     )

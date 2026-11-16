@@ -108,11 +108,12 @@ _CONNECTIVITY_ERROR_MARKERS = (
 
 # Probes should surface bad config fast: connect gets its own budget, read aligns with
 # the real serving path (LLM_TIMEOUT).
-_VALIDATION_CONNECT_TIMEOUT_S = 10.0
-
-
 def _validation_read_timeout() -> float:
     return current_settings().llm_timeout
+
+
+def _validation_connect_timeout() -> float:
+    return current_settings().model_validation_connect_timeout
 
 
 def _exception_chain_text(exc: BaseException) -> str:
@@ -235,7 +236,7 @@ def _shared_validation_config(
         ),
         runtime=ModelRuntimeOptions(
             timeout_s=_validation_read_timeout(),
-            connect_timeout_s=_VALIDATION_CONNECT_TIMEOUT_S,
+            connect_timeout_s=_validation_connect_timeout(),
             max_retries=0,
         ),
     )
@@ -733,7 +734,7 @@ class ModelConfigService:
                 output_modalities=[_enum_value(item) for item in (output_modalities or [])],
                 features=[_enum_value(item) for item in (features or [])],
                 timeout=_validation_read_timeout(),
-                connect_timeout=_VALIDATION_CONNECT_TIMEOUT_S,
+                connect_timeout=_validation_connect_timeout(),
                 max_retries=0,
             )
 
