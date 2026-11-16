@@ -38,10 +38,9 @@ const ToolList: FC<ToolListProps> = ({ value, onChange }) => {
     const toolIds = [...new Set(value.map(e => e.tool_id))]
 
     getToolMethodsBatch(toolIds).then(res => {
-      const {
-        items = [], missing_tool_ids = []
-      } = res as { items: Array<{ tool_id: string; name: string; tool_type: string; is_active: boolean; methods: ToolMethod[] }>; missing_tool_ids: string[] }
-      const toolMap = new Map(items.map(item => [item.tool_id, item]))
+      const batchData = res as { items: Array<{ tool_id: string; name: string; tool_type: string; is_active: boolean; methods: ToolMethod[] }>; missing_tool_ids: string[] }
+      const toolMap = new Map(batchData.items.map(item => [item.tool_id, item]))
+      const missingSet = new Set(batchData.missing_tool_ids || [])
 
       const groupedByTool = new Map<string, ToolEntry[]>()
       for (const entry of value) {
@@ -50,44 +49,37 @@ const ToolList: FC<ToolListProps> = ({ value, onChange }) => {
         groupedByTool.set(entry.tool_id, existing)
       }
 
-      const missingSet = new Set(missing_tool_ids)
       const displayList: DisplayTool[] = []
       for (const [toolId, entries] of groupedByTool) {
         const batchItem = toolMap.get(toolId)
-        if (!batchItem) {
-          if (missingSet.has(toolId)) {
-            // The batch API cannot resolve the tool, so fall back to the name
-            // carried by the saved config entry and mark it unavailable.
-            const entryName = entries.find(e => e.name)?.name
-            displayList.push({
-              tool: {
-                id: toolId,
-                name: entryName || toolId,
-                icon: null,
-                method_count: 0,
-                is_active: false,
-              },
-              methods: [],
-              entries,
-            })
-          }
-          continue
-        }
+        const isMissing = missingSet.has(toolId)
 
-        const tool: ToolItem = {
-          id: batchItem.tool_id,
-          name: batchItem.name,
-          description: '',
-          icon: null,
-          tool_type: batchItem.tool_type as ToolItem['tool_type'],
-          method_count: batchItem.methods.length,
-          is_active: batchItem.is_active,
-          status: (batchItem as any).status,
-        }
+        if (!batchItem && !isMissing) continue
+
+        const tool: ToolItem = batchItem
+          ? {
+              id: batchItem.tool_id,
+              name: batchItem.name,
+              description: '',
+              icon: null,
+              tool_type: batchItem.tool_type as ToolItem['tool_type'],
+              method_count: batchItem.methods.length,
+              is_active: batchItem.is_active,
+              status: (batchItem as any).status,
+            }
+          : {
+              id: toolId,
+              name: entries[0].name || toolId,
+              description: '',
+              icon: null,
+              method_count: 0,
+              is_active: true,
+              status: 'missing',
+            }
 
         displayList.push({
           tool,
-          methods: batchItem.methods,
+          methods: batchItem?.methods || [],
           entries,
         })
       }
@@ -118,13 +110,6 @@ const ToolList: FC<ToolListProps> = ({ value, onChange }) => {
     onChange?.(filtered)
   }
 
-  const renderToolTag = (tool: ToolItem) => {
-    if (tool.is_active === false) {
-      return <Tag color="error" className="rb:shrink-0">{t('common.deleted')}</Tag>
-    }
-    return tool.status ? renderStatus(tool.status) : null
-  }
-
   return (
     <Card
       title={t('application.toolConfiguration')}
@@ -148,7 +133,12 @@ const ToolList: FC<ToolListProps> = ({ value, onChange }) => {
                     methods={displayTool.methods}
                     trailing={
                       <>
-                        {renderToolTag(displayTool.tool)}
+                        {displayTool.tool.is_active === false
+                          ? <Tag color="error" className="rb:shrink-0">{t('common.deleted')}</Tag>
+                          : displayTool.tool.status
+                          ? renderStatus(displayTool.tool.status)
+                          : null
+                        }
                         <div
                           className="rb:size-4.5 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/common/delete.svg')] rb:hover:bg-[url('@/assets/images/common/delete_red.svg')]"
                           onClick={() => handleDeleteTool(displayTool.tool.id)}
@@ -165,7 +155,12 @@ const ToolList: FC<ToolListProps> = ({ value, onChange }) => {
                           <span className="rb:min-w-0 rb:flex-1 rb:truncate rb:text-sm" title={method.name}>
                             {method.name}
                           </span>
-                          {renderToolTag(displayTool.tool)}
+                          {displayTool.tool.is_active === false
+                            ? <Tag color="error" className="rb:shrink-0">{t('common.deleted')}</Tag>
+                            : displayTool.tool.status
+                            ? renderStatus(displayTool.tool.status)
+                            : null
+                          }
                           <div
                             className="rb:size-4.5 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/common/delete.svg')] rb:hover:bg-[url('@/assets/images/common/delete_red.svg')]"
                             onClick={() => handleDeleteTool(displayTool.tool.id, operationKey)}

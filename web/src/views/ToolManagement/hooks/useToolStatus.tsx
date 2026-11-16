@@ -22,6 +22,8 @@ export function useToolStatus() {
           return <Tag color="warning" className="rb:shrink-0!">{t('tool.status.configured_disabled')}</Tag>;
         case 'error':
           return <Tag color="error" className="rb:shrink-0!">{t('tool.status.error')}</Tag>;
+        case 'missing':
+          return <Tag color="error" className="rb:shrink-0!">{t('tool.status.missing')}</Tag>;
         default:
           return null;
       }

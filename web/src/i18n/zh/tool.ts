@@ -35,7 +35,8 @@ export const tool = {
     available: '可用',
     unconfigured: '未配置',
     configured_disabled: '已配置未启用',
-    error: '链接异常'
+    error: '链接异常',
+    missing: '不存在'
   },
   available_desc: 'API 已配置并启用',
   unconfigured_desc: '需要配置 API Key',
