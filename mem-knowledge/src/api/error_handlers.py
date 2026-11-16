@@ -304,7 +304,10 @@ def register_error_handlers(application: FastAPI) -> None:
             any(part in _RERANK_FIELDS for part in error.get("loc", ())) for error in exc.errors()
         ):
             code = "KB_RERANK_CONFIG_INVALID"
-        return render_error(request, KnowledgeError.from_code(code), validation_errors=exc.errors())
+        return render_error(
+            request, KnowledgeError.from_code(code, status_code=422),
+            validation_errors=exc.errors(),
+        )
 
     @application.exception_handler(KnowledgeError)
     async def knowledge_error_handler(request: Request, exc: KnowledgeError):

@@ -100,6 +100,8 @@ class RedBearModelConfig(BaseModel):
     # Request timeout (seconds) - defaults to 120s for complex LLM calls; configurable
     # via the LLM_TIMEOUT env var
     timeout: float = Field(default_factory=lambda: float(os.getenv("LLM_TIMEOUT", "120.0")))
+    # Dedicated connect budget (seconds); None keeps the legacy min(timeout, 60s) semantics
+    connect_timeout: Optional[float] = None
     # Max retries - defaults to 2 to avoid overly long waits; configurable via the
     # LLM_MAX_RETRIES env var
     max_retries: int = Field(default_factory=lambda: int(os.getenv("LLM_MAX_RETRIES", "2")))
@@ -346,12 +348,12 @@ class RedBearModelFactory:
         if provider == ModelProvider.DASHSCOPE:
             if not config.base_url:
                 config.base_url = "https://dashscope.aliyuncs.com/compatible-mode/v1"
-            # Connect timeout follows the call budget (capped at 60s): short-budget
-            # scenarios (e.g. config validation with timeout=10) must not spend 60s
-            # connecting before failing
+            # Connect timeout prefers the dedicated budget (config.connect_timeout); when unset
+            # it follows the call budget (capped at 60s) so short-budget scenarios do not spend
+            # 60s connecting before failing
             timeout_config = httpx.Timeout(
                 timeout=config.timeout,
-                connect=min(config.timeout, 60.0),
+                connect=config.connect_timeout or min(config.timeout, 60.0),
                 read=config.timeout,
                 write=60.0,
                 pool=10.0,
@@ -417,7 +419,8 @@ class RedBearModelFactory:
             # so connect and read timeouts can be controlled separately
             timeout_config = httpx.Timeout(
                 timeout=config.timeout,  # Overall timeout
-                connect=min(config.timeout, 60.0),  # Connect timeout follows the call budget (cap 60s)
+                # Dedicated connect budget preferred; otherwise follow the call budget (cap 60s)
+                connect=config.connect_timeout or min(config.timeout, 60.0),
                 read=config.timeout,  # Read timeout: use the configured timeout
                 write=60.0,  # Write timeout: 60s
                 pool=10.0,  # Connection pool timeout: 10s
