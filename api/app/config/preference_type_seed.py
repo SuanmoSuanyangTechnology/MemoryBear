@@ -41,6 +41,10 @@ def _load_json(path: Path) -> dict:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
+def load_preference_type_display() -> dict:
+    return _load_json(_DISPLAY_PATH)
+
+
 def _localized(value: Any, language: str) -> Optional[str]:
     if not isinstance(value, dict):
         return None
@@ -77,7 +81,7 @@ def build_seed_rows(
     不写半份数据。
     """
     ontology_payload = _load_json(_ONTOLOGY_PATH)
-    display_payload = _load_json(_DISPLAY_PATH)
+    display_payload = load_preference_type_display()
 
     if ontology_payload.get("ontology_id") != "preference":
         raise ValueError("Invalid preference ontology_id")

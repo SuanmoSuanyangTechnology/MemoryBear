@@ -398,6 +398,8 @@ class RerankScore(ContractModel):
 
 class ModelRuntimeOptions(ContractModel):
     timeout_s: float = Field(default=120.0, gt=0)
+    # 单次连接建立的独立预算；None 时沿用 min(timeout_s, 60s) 的旧语义
+    connect_timeout_s: float | None = Field(default=None, gt=0)
     max_retries: int = Field(default=2, ge=0)
     concurrency: int = Field(default=5, ge=1)
     http_max_connections: int = Field(default=300, ge=1)
