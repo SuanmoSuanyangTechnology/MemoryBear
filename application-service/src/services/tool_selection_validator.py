@@ -7,6 +7,11 @@ selection requires a non-empty cached method list. ``(tool_id, operation)``
 pairs already present in the stored config are grandfathered and only
 normalized; a whole-tool entry overrides every third-level entry of the same
 tool, and duplicates keep their first occurrence.
+
+Each entry also carries a ``name`` snapshot, refreshed from the tenant's tool row
+on every save. When the row can no longer be resolved (cross-tenant / hard
+deleted / malformed id) the last stored snapshot is kept, so the tool list can
+still render a name instead of a bare uuid.
 """
 
 from __future__ import annotations
@@ -55,6 +60,34 @@ def _stored_keys(
     return keys
 
 
+def _stored_names(
+    stored_tools: list[dict[str, Any]] | dict[str, Any] | None,
+) -> dict[tuple[str, str | None], str]:
+    """Name snapshots already persisted in the stored config, by (tool_id, operation)."""
+    if not isinstance(stored_tools, list):
+        return {}
+    names: dict[tuple[str, str | None], str] = {}
+    for item in stored_tools:
+        if not isinstance(item, dict):
+            continue
+        tool_id = _text(item.get("tool_id"))
+        name = _text(item.get("name"))
+        if tool_id and name:
+            names[(tool_id, _text(item.get("operation")))] = name
+    return names
+
+
+def _any_stored_name(
+    stored_names: dict[tuple[str, str | None], str],
+    tool_id: str,
+) -> str | None:
+    """Any snapshot recorded for this tool, whatever operation it was saved under."""
+    for (stored_id, _operation), name in stored_names.items():
+        if stored_id == tool_id:
+            return name
+    return None
+
+
 def _requested_ids(entries: list[dict[str, Any]]) -> list[str]:
     requested: list[str] = []
     for entry in entries:
@@ -67,6 +100,7 @@ def _requested_ids(entries: list[dict[str, Any]]) -> list[str]:
 def _normalize(
     entry: dict[str, Any],
     by_id: dict[str, dict[str, Any]],
+    stored_names: dict[tuple[str, str | None], str],
 ) -> dict[str, Any]:
     tool_id = _text(entry.get("tool_id"))
     item = by_id.get(tool_id) if tool_id else None
@@ -80,6 +114,25 @@ def _normalize(
             method.get("operation_key") is not None for method in methods
         ),
     )
+    # 名称快照：命中时用库里的最新名称覆盖；未命中（跨租户 / 已删除 / id 非法）
+    # 时沿用请求里的快照或已存快照——保存请求通常只回传 tool_id/operation/enabled，
+    # 不回传 name，所以这里必须以库里的旧快照兜底，否则一次保存就会把名称抹掉。
+    name = _text((item or {}).get("name"))
+    if not name and tool_id:
+        name = (
+            _text(normalized.get("name"))
+            or stored_names.get((tool_id, normalized["operation"]))
+            or stored_names.get((tool_id, _text(entry.get("operation"))))
+            or stored_names.get((tool_id, None))
+            # 引用层级变化（方法级 ↔ 整工具级）时键对不上，同 tool_id 的任意一条
+            # 快照都比裸 id 有用：名称属于工具而不是方法。
+            or _any_stored_name(stored_names, tool_id)
+        )
+    if name:
+        normalized["name"] = name
+    else:
+        # 空值不落库，避免给每条引用平白多出一个 ``"name": null``。
+        normalized.pop("name", None)
     return normalized
 
 
@@ -137,6 +190,7 @@ def validate_tool_selection(
         return []
 
     stored_keys = _stored_keys(stored_tools)
+    stored_names = _stored_names(stored_tools)
     requested = _requested_ids(entries)
     items, _missing = (
         asyncio.run(service.get_tool_methods_batch(requested, tenant_id))
@@ -145,7 +199,7 @@ def validate_tool_selection(
     )
     by_id = {item["tool_id"]: item for item in items}
 
-    normalized = [_normalize(entry, by_id) for entry in entries]
+    normalized = [_normalize(entry, by_id, stored_names) for entry in entries]
     whole_tool_ids = {
         entry["tool_id"]
         for entry in normalized

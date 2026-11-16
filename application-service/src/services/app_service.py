@@ -456,6 +456,9 @@ class AppService:
             triggers=[trigger.model_dump() for trigger in data.triggers] if data.triggers else [],
             workflow_type=getattr(data, "workflow_type", None),
         )
+        config_dict["nodes"] = workflow_service.refresh_agent_tool_names(
+            app_id, config_dict["nodes"]
+        )
         workflow_cfg = WorkflowConfig(
             id=uuid.uuid4(),
             app_id=app_id,
@@ -2482,6 +2485,12 @@ class AppService:
             features=features,
             triggers=[trigger.model_dump() for trigger in data.triggers] if data.triggers else [],
             workflow_type=workflow_type,
+        )
+        # The editor sends only tool_id/operation/enabled per selector, so a tool
+        # deleted since the last save would lose its name on this save; the stored
+        # nodes supply the previous snapshot.
+        config_dict["nodes"] = workflow_service.refresh_agent_tool_names(
+            app_id, config_dict["nodes"], workflow_cfg.nodes if workflow_cfg else None
         )
         is_valid, errors = WorkflowValidator.validate(config_dict)
         if not is_valid:
