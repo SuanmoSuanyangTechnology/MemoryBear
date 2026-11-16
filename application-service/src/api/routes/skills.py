@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import io
 import json
+import logging
 from typing import Annotated
 from uuid import UUID
 
@@ -28,7 +29,9 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
 from ...errors import BizCode, BusinessException
+from ...models.skill_model import Skill
 from ...quota.usage import ensure_skill_quota
+from ...repositories.skill_package_repository import SkillPackageRepository
 from ...runtime import ProcessRuntime
 from ...schemas import skill_schema
 from ...services.external_status_service import apply_external_status
@@ -45,6 +48,8 @@ from ..schemas.common import success
 from ..schemas.response_schema import ApiResponse, PageData, PageMeta
 
 router = APIRouter(prefix="/skills", tags=["Skills"])
+
+logger = logging.getLogger(__name__)
 
 DbSession = Annotated[Session, Depends(get_sync_db)]
 Caller = Annotated[Principal, Depends(get_principal)]
@@ -268,16 +273,82 @@ def delete_skill(
         skill_id: UUID,
         db: DbSession,
         principal: Caller,
+        runtime: RuntimeDep,
 ):
     """Delete a skill or a whole plugin.
 
     ``{id}`` accepts a ``skills`` row id (one member) or a ``skill_plugins`` row id
     (every member plus the plugin row). Rows are soft-deleted (``is_active=False``,
     unchanged behaviour) while the pack is purged.
+
+    市场来源的技能（``source_type='market'``）删除时必须同步注销市场安装登记，
+    否则市场侧会永久显示「已添加」。登记用的 id 与本地可删的 id 不同：安装登记
+    给市场的是 `skill_packages.id` / `skill_plugins.id`
+    （`bundle_install_service._skill_result`），而本接口收的是 `skills.id` 或
+    插件 id。注销 id 必须在**删除之前**解析——删除会purge 包行，之后再也读不到
+    `source_type`。插件成员只删一个时不注销：市场登记的是整个插件条目，插件还在。
     """
+
     tenant_id = principal.tenant_id
+    market_id = _market_registration_to_revoke(db, tenant_id, skill_id)
     result = SkillPackageService.delete_entry(db, tenant_id, skill_id)
+    if market_id:
+        _deregister_skill_installation(
+            runtime, tenant_id, principal.actor_id, market_id
+        )
     return success(data=result, msg="技能删除成功")
+
+
+def _market_registration_to_revoke(
+        db: Session, tenant_id: UUID, entry_id: UUID
+) -> str | None:
+    """删除前算出该删掉哪一条市场安装登记；不是市场来源就返回 `None`。
+
+    返回 `None` 有四种情形，都不该注销：本地导入的技能、legacy 技能（无包体，
+    市场没有独立条目）、插件成员里还有别的成员（插件条目仍然有效）、行不存在。
+    """
+
+    repo = SkillPackageRepository(db)
+    plugin = repo.get_plugin_by_id(entry_id, tenant_id)
+    if plugin is not None:
+        return str(plugin.id) if str(plugin.source_type or "") == "market" else None
+
+    skill = db.query(Skill).filter(
+        Skill.id == entry_id, Skill.tenant_id == tenant_id
+    ).first()
+    if skill is None or not skill.package_id:
+        return None
+    package = repo.get_by_id(skill.package_id, tenant_id)
+    if package is None or str(package.source_type or "") != "market":
+        return None
+    if not package.plugin_id:
+        return str(package.id)
+    # 插件成员：只有删到最后一个成员，插件条目才随之一并消失
+    members = repo.list_by_plugin(package.plugin_id, tenant_id)
+    return str(package.plugin_id) if len(members) <= 1 else None
+
+
+def _deregister_skill_installation(
+        runtime: ProcessRuntime, tenant_id: UUID, actor_id: UUID, market_id: str
+) -> None:
+    """注销市场登记（best-effort）：失败只记日志，不能让删技能回滚。
+
+    本地删除已经提交，注销失败只意味着市场侧暂时多一条「已添加」，用户下次从
+    市场卸载即可补偿——比让删除接口报错、用户重试又删不掉要好。
+    """
+
+    try:
+        from ...services.bundle_install_service import _run_async
+
+        _run_async(
+            lambda: runtime.market_gateway.deregister_installation(
+                "skill_package", market_id, str(tenant_id), str(actor_id)
+            )
+        )
+    except Exception as exc:  # noqa: BLE001 - 见 docstring
+        logger.warning(
+            "技能删除后市场登记注销失败 market_id=%s: %s", market_id, exc
+        )
 
 
 def _parse_json_form(raw: str | None, field: str, *, expect: str) -> list | None:

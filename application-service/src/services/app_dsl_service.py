@@ -1348,7 +1348,15 @@ class AppDslService:
                     WorkflowConfig.app_id == app_id
                 ).first()
                 if existing:
-                    existing.nodes = [n.model_dump() for n in result.nodes]
+                    # Same name-snapshot refresh as the save path: an overwrite
+                    # import replaces nodes wholesale, so a tool that no longer
+                    # resolves keeps the name carried by the incoming DSL or the
+                    # config being replaced.
+                    existing.nodes = wf_service.refresh_agent_tool_names(
+                        app_id,
+                        [n.model_dump() for n in result.nodes],
+                        existing.nodes,
+                    )
                     existing.edges = [e.model_dump() for e in result.edges]
                     existing.variables = [v.model_dump() for v in result.variables]
                     existing.environment_variables = environment_variables
@@ -2051,6 +2059,11 @@ class AppDslService:
                 continue
             ref = t.get("_ref") or ({"name": t.get("tool_id")} if t.get("tool_id") else None)
             entry = {k: v for k, v in t.items() if k != "_ref"}
+            # Keep the exported name as the reference's snapshot (see
+            # `tool_selection_validator`): after landing, a tool that later gets
+            # deleted still renders a name instead of a bare id.
+            if isinstance(ref, dict) and ref.get("name"):
+                entry.setdefault("name", ref["name"])
             resolved_id = self._resolve_tool(ref, tenant_id, warnings)
             if resolved_id is None:
                 # Outside the bundle path an unmatched tool is dropped: there is no
