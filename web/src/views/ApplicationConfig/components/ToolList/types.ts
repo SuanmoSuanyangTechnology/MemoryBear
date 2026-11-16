@@ -23,7 +23,7 @@ export interface ToolItem {
   name: string;
   description: string;
   icon: string | null;
-  tool_type: 'builtin' | 'custom' | 'mcp' | 'workflow';
+  tool_type?: 'builtin' | 'custom' | 'mcp' | 'workflow';
   method_count: number;
   is_active: boolean;
   status?: string;
@@ -33,6 +33,7 @@ export interface ToolEntry {
   tool_id: string;
   operation: string | null;
   enabled: boolean;
+  name?: string;
 }
 
 export interface ToolModalRef {
