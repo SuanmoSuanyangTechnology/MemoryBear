@@ -1399,21 +1399,46 @@ class ToolService:
                 "disabled_count": 0
             }
 
+    @staticmethod
+    def _as_tool_uuid(tool_id: Any) -> uuid.UUID | None:
+        """Parse a tool id; ``None`` when it is not a UUID.
+
+        应用配置里的 ``tool_id`` 不一定是 UUID：跨租户安装时某类工具不落地，
+        引用会保留成包内的 ``tool:<工具名>`` 本地 ref，交由批量接口报 missing。
+        这里把非 UUID 当作「该租户查不到」，而不是让 ``ValueError`` 冒成 500——
+        否则打开这种应用的配置或跑一次对话都会整条链路报错。
+        """
+        if isinstance(tool_id, uuid.UUID):
+            return tool_id
+        try:
+            return uuid.UUID(str(tool_id))
+        except (ValueError, TypeError, AttributeError):
+            return None
+
     def _get_tool_config(self, tool_id: str, tenant_id: uuid.UUID) -> ToolConfig | None:
         """Get tool config (only is_active=True records)."""
-        return self.tool_repo.find_by_id_and_tenant(uuid.UUID(tool_id), tenant_id)
+        tool_uuid = self._as_tool_uuid(tool_id)
+        if tool_uuid is None:
+            return None
+        return self.tool_repo.find_by_id_and_tenant(tool_uuid, tenant_id)
 
     def _get_tool_config_all(self, tool_id: str, tenant_id: uuid.UUID) -> ToolConfig | None:
         """Get tool config (all records)."""
-        return self.tool_repo.find_by_id_and_tenant_all(uuid.UUID(tool_id), tenant_id)
+        tool_uuid = self._as_tool_uuid(tool_id)
+        if tool_uuid is None:
+            return None
+        return self.tool_repo.find_by_id_and_tenant_all(tool_uuid, tenant_id)
 
     async def get_tool_config_async(self, tool_id: str, tenant_id: uuid.UUID) -> ToolConfig | None:
         """Fetch a tool config (only is_active=True records)."""
+        tool_uuid = self._as_tool_uuid(tool_id)
+        if tool_uuid is None:
+            return None
         if not self._uses_async_session():
             return self._get_tool_config(tool_id, tenant_id)
 
         stmt = select(ToolConfig).where(
-            ToolConfig.id == uuid.UUID(tool_id),
+            ToolConfig.id == tool_uuid,
             ToolConfig.tenant_id == tenant_id,
             ToolConfig.is_active.is_(True),
         )

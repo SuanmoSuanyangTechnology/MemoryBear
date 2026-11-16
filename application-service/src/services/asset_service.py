@@ -1126,7 +1126,9 @@ class AssetService:
                 # 否则会在共享前告诉用户「会随包」，装完却什么都没留下。
                 kind, disposition = "workflow_tool", "dropped"
             else:
-                kind, disposition = "custom_tool", "placeholder"
+                # 自定义工具同样不落地：包里只有名字，没有 schema / base_url / 凭据，
+                # 建行只会留下一条永远配不好的记录（`_land_tools` 已改为只报 missing）。
+                kind, disposition = "custom_tool", "dropped"
             key = (kind, name or str(row[0]))
             if key in seen_dependency:
                 continue
