@@ -557,6 +557,7 @@ const Chat = forwardRef<ChatRef, ChatProps>(({
                 type="primary"
                 onClick={() => handleSend()}
                 loading={loading}
+                disabled={isNeedVariableConfig}
               >
                 {t('workflow.startRun')}
               </Button>

@@ -469,7 +469,7 @@ const TestChat: FC<TestChatProps> = ({
                   type="primary"
                   onClick={handlePureWorkflowRun}
                   loading={loading}
-                  disabled={loading}
+                  disabled={loading || isNeedVariableConfig}
                 >
                   {t('workflow.startRun')}
                 </Button>
