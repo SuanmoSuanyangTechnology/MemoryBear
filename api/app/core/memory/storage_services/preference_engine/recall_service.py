@@ -31,10 +31,7 @@ from .models import (
     RecalledPreference,
 )
 from .gating import DEFAULT_PREFERENCE_DOMAIN
-from .ontology_registry import (
-    load_preference_ontology,
-    load_preference_ontology_from_db,
-)
+from .ontology_registry import load_preference_ontology
 from .prompt_runner import PreferencePromptRunner
 
 logger = logging.getLogger(__name__)
@@ -394,31 +391,7 @@ async def execute_preference_recall(
             )
         # The reader is request-scoped; the API lifespan still owns its ES client.
         storage = PreferenceRecallStorage(get_storage_service()._backend_factory)
-        if not memory_config.workspace_id:
-            # 存量配置缺 workspace 时回退到随包本体，保持召回可用
-            logger.warning(
-                "[PreferenceRecall] workspace missing, fallback to shipped ontology "
-                "config_id=%s",
-                config_id,
-            )
-            preference_ontology = load_preference_ontology(DEFAULT_PREFERENCE_DOMAIN)
-        else:
-            try:
-                preference_ontology = await asyncio.to_thread(
-                    load_preference_ontology_from_db,
-                    str(memory_config.workspace_id),
-                    DEFAULT_PREFERENCE_DOMAIN,
-                )
-            except Exception as exc:
-                # DB 本体加载失败时回退随包本体，避免召回整体不可用
-                logger.warning(
-                    "[PreferenceRecall] DB ontology load failed, fallback to shipped "
-                    "ontology config_id=%s error=%s",
-                    config_id,
-                    exc,
-                    exc_info=True,
-                )
-                preference_ontology = load_preference_ontology(DEFAULT_PREFERENCE_DOMAIN)
+        preference_ontology = load_preference_ontology(DEFAULT_PREFERENCE_DOMAIN)
         service = PreferenceRecallService(
             configured_workspace_id=memory_config.workspace_id,
             prompt_runner=PreferencePromptRunner(llm_client, preference_ontology),
