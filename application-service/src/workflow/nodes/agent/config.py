@@ -71,6 +71,14 @@ class ToolSelector(BaseModel):
         description="是否启用该工具"
     )
 
+    name: str | None = Field(
+        default=None,
+        description=(
+            "工具名称快照（保存时刷新）。工具行被删除 / 跨租户 / 导入后无法回查时，"
+            "节点仍能展示名称而不是裸 id；工具还在时每次保存都会用库里的最新名称覆盖。"
+        )
+    )
+
 
 class AgentErrorHandleConfig(BaseModel):
     """Agent error handling config (identical to LLMErrorHandleConfig)."""

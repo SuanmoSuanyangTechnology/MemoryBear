@@ -443,6 +443,7 @@ export const applicationPart1: ApplicationPart1 = {
       log: 'Logs',
       logAnnotations: 'Logs and Annotations',
       testChatEmpty: 'Send a message to test the shared app',
+      testRunEmpty: 'Configure the variables, then click "Start Run" to see the result',
       allCancel: 'Cancel All',
       cancelShare: 'Cancel Sharing',
       confirmAppCancelShareDesc: 'Are you sure to cancel sharing of "{{app}}" app with "{{workspace}}" space? The other party will no longer have access after cancellation.',

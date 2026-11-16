@@ -440,6 +440,7 @@ export const applicationPart1 = {
       log: '日志',
       logAnnotations: '日志与标注',
       testChatEmpty: '发送消息测试共享应用效果',
+      testRunEmpty: '配置变量后点击「开始运行」查看运行结果',
       allCancel: '全部取消',
       cancelShare: '取消共享',
       confirmAppCancelShareDesc: '确定取消该【{{app}}】应用对【{{workspace}}】空间的共享？取消后对方将无法访问。',

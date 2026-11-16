@@ -84,7 +84,8 @@ const AppSharingModal = forwardRef<AppSharingModalRef, AppSharingModalProps>(({ 
         onCancel={loading ? undefined : close}
         closable={!loading}
         onOk={handleSubmit}
-        okText={marketEnabled ? t('application.submitReview') : undefined}
+        okButtonProps={{ disabled: !catalogEnabled && !marketEnabled }}
+        okText={t('application.submitReview')}
         confirmLoading={loading || previewLoading}
         width={600}
       >
@@ -123,15 +124,22 @@ const AppSharingModal = forwardRef<AppSharingModalRef, AppSharingModalProps>(({ 
               title={t('resourceSharing.catalog')}
               desc={t('application.catalogDesc')}
               name={['resource_center', 'enabled']}
-              disabled={true}
+              onChange={(checked) => {
+                if (!checked) {
+                  form.setFieldValue(['resource_center', 'allow_editable'], false);
+                }
+              }}
             />
-            <div className="rb:border-t rb:border-gray-100 rb:my-3" />
-            <SwitchFormItem
-              title={t('resourceSharing.editable')}
-              desc={t('application.editableDesc')}
-              name={['resource_center', 'allow_editable']}
-              disabled={!catalogEnabled}
-            />
+            {catalogEnabled && (
+              <>
+                <div className="rb:border-t rb:border-gray-100 rb:my-3" />
+                <SwitchFormItem
+                  title={t('resourceSharing.editable')}
+                  desc={t('application.editableDesc')}
+                  name={['resource_center', 'allow_editable']}
+                />
+              </>
+            )}
           </div>
 
           {/* Community Market */}
