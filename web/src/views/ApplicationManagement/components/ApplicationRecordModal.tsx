@@ -12,6 +12,7 @@ import RbModal from '@/components/RbModal';
 import { appExternalCatalog } from '@/api/application';
 import type { ApplicationRecordModalRef, PublicationEvent, PublicationRecordData } from '../types';
 import { formatDateTime } from '@/utils/format'
+import Empty from '@/components/Empty'
 
 const eventTypeColorMap: Record<string, string> = {
   submitted: '#3b82f6',
@@ -66,7 +67,7 @@ const ApplicationRecordModal = forwardRef<ApplicationRecordModalRef>((_props, re
   }));
 
   const handleViewMarketDetail = () => {
-    navigate('/resources');
+    navigate('/community-market');
     handleClose();
   };
 
@@ -152,9 +153,7 @@ const ApplicationRecordModal = forwardRef<ApplicationRecordModalRef>((_props, re
           })}
         />
         {events.length === 0 && !loading && (
-          <div className="rb:text-center rb:text-gray-400 rb:py-8">
-            {t('common.noData')}
-          </div>
+          <Empty size={88} />
         )}
       </Flex>
     </RbModal>
