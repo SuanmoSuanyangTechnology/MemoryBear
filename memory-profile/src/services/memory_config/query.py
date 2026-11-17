@@ -38,6 +38,7 @@ from src.repositories.memory_config import (
     WORKSPACE_MODEL_COLUMNS,
     MemoryConfigReadRepository,
 )
+from src.repositories.scene import SceneRepository
 from src.repositories.workspace import WorkspaceRepository
 from src.schemas.memory_config import (
     EmotionConfigData,
@@ -49,6 +50,7 @@ from src.schemas.memory_config import (
     ReflectionConfigData,
     SceneCommunityConfigData,
     SceneConfigData,
+    SimpleSceneData,
 )
 from src.services.memory_config.errors import (
     ConfigQueryError,
@@ -87,6 +89,14 @@ class MemoryConfigQueryService:
     def __init__(self, postgres: PostgresManager) -> None:
         self.repository = MemoryConfigReadRepository(postgres)
         self.workspaces = WorkspaceRepository(postgres)
+        self.scenes = SceneRepository(postgres)
+
+    async def simple_scenes(self, tenant_id: UUID) -> list[SimpleSceneData]:
+        rows = await self.scenes.list_visible_simple_scenes(tenant_id)
+        return [
+            SimpleSceneData(scene_id=row["scene_type_id"], scene_name=row["scene_name"])
+            for row in rows
+        ]
 
     async def personality_anchor(
         self, config_id: UUID | str, workspace_id: UUID
