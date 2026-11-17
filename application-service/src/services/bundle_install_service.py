@@ -463,8 +463,8 @@ class BundleInstallService:
         """落地后的本地 id 与展示名。
 
         `dep_map` 的值是 `skills` 行 id（Agent 绑定用），而安装响应要的是技能包/
-        插件这一层：技能包按 `(tenant, name)` 回查（落地上一步刚建好它，同租户同
-        name 唯一，`uq_skill_pkg_tenant_name`）；插件必须走 `dep_map` —— 用户在安装
+        插件这一层：技能包与插件优先通过 `dep_map` 回查，避免改名后误取原有包。
+        插件必须走 `dep_map` —— 用户在安装
         弹窗里改过 `display_name` 之后插件行的 `name` 已不是包内原名，按名字回查会
         取不到，安装响应就会带着空的 `local_resource_id` 出去（卸载、needs_config
         全部断掉）。
@@ -490,7 +490,16 @@ class BundleInstallService:
                 return None, None
             return str(plugin.id), plugin.name
 
-        package = repo.get_by_name(tenant_id, str(name or ""))
+        skill_id = next((
+            (dep_map or {}).get(str(entry.get("ref")))
+            for entry in (dependencies or {}).get("skills") or []
+            if (dep_map or {}).get(str(entry.get("ref")))
+        ), None)
+        skill = self.db.get(Skill, uuid.UUID(skill_id)) if skill_id else None
+        package = (
+            repo.get_by_id(skill.package_id, tenant_id) if skill is not None and skill.package_id
+            else repo.get_by_name(tenant_id, str(name or ""))
+        )
         if package is None:
             return None, None
         return str(package.id), (package.display_name or package.name)
@@ -587,10 +596,8 @@ class BundleInstallService:
     ) -> None:
         """Each plugin lands as one multi-member zip; standalone skills land alone.
 
-        A skill that already exists in the target tenant is *overwritten* when its
-        `call_name` matches (that is the whole idempotency key of the skill
-        runtime); a package-name clash with a different call_name is degraded
-        instead of aborting the install.
+        Market-origin installs disambiguate occupied names and create independent
+        skills. Existing skill IDs and files must never be overwritten by an install.
 
         ``own_market_ref``: 技能包没有 `origin` 列，来源靠 `source_type` /
         `source_ref` 两列表达（§11.2）。 ``True`` 只在「从市场技能/工具 tab 直接
@@ -621,9 +628,9 @@ class BundleInstallService:
             # 文件字节的来源默认是父包（顶层安装的那个版本）；按市场引用补全的
             # 依赖改为从那一版依赖自己的文件包取。
             file_source = self._origin_file_source()
-            if market_ref and not own_market_ref:
+            if origin:
                 # 同一市场技能/插件版本已在本租户 → 只补 dep_map，不重复导入。
-                local = self._find_market_skill_copy(market_ref, tenant_id, entries)
+                local = self._find_market_skill_copy(origin, tenant_id, entries)
                 if local is not None:
                     for entry in entries:
                         skill_id = local["members"].get(
@@ -634,12 +641,13 @@ class BundleInstallService:
                     if plugin_ref and local["plugin_id"]:
                         dep_map[plugin_ref] = local["plugin_id"]
                     self._record_dependency(
-                        "skill_package", market_ref,
+                        "skill_package", origin,
                         local["plugin_id"] or local["package_id"],
                         reused=True,
-                        version_mismatch=local["version"] != market_ref["version"],
+                        version_mismatch=local["version"] != origin["version"],
                     )
                     continue
+            if market_ref and not own_market_ref:
                 # 存量包可能内嵌了文件：那时键空间仍属于父版本，只有真正从依赖
                 # 清单补出来的条目才改指向依赖自己的版本文件包。
                 embedded = all(entry.get("files") for entry in entries)
@@ -681,6 +689,7 @@ class BundleInstallService:
                     source_ref=source_ref,
                     conflict_strategy="rename",
                     commit=False,
+                    isolate_conflicts=bool(origin),
                 )
             except BusinessException as error:
                 if strict:
@@ -693,7 +702,9 @@ class BundleInstallService:
                 continue
 
             for member in response.get("members") or []:
-                entry = member_refs.get(str(member.get("call_name")))
+                entry = member_refs.get(str(member.get("identifier"))) or member_refs.get(
+                    str(member.get("call_name"))
+                )
                 if entry is None:
                     continue
                 if member.get("package_id"):
@@ -733,6 +744,13 @@ class BundleInstallService:
                 root = f"{package_name}/" if nested else ""
                 if call_name:
                     member_refs[str(call_name)] = entry
+                # Import identifiers describe archive members and survive local
+                # call-name isolation; use them to bind the original app ref.
+                identifier = package_name if nested else str(
+                    (payload.get("frontmatter_raw") or {}).get("name") or call_name or ""
+                )
+                if identifier:
+                    member_refs[identifier] = entry
                 files = entry.get("files") or []
                 if not files:
                     raise BusinessException(
@@ -878,8 +896,8 @@ class BundleInstallService:
             )
 
             if market_ref:
-                # 目标租户已有该市场资源就复用：版本不同也不自动升级（§3.4），
-                # 只是把 `version_mismatch` 报给调用方，避免静默改写用户空间。
+                # Only reuse the exact version; another version gets a separate
+                # local tool so existing applications remain bound to their copy.
                 #
                 # 只对 mcp 复用：custom / workflow 现在一律不落地，若本租户还留着
                 # 改造前安装生成的外部占位行（`is_active=True` 且带
@@ -887,7 +905,9 @@ class BundleInstallService:
                 # 不好的工具替代「缺失」上报。这类历史行按不存在处理，落到下面
                 # 的 custom/workflow 分支报 missing。
                 local = (
-                    self._find_external_tool_copy(market_ref["resource_id"], tenant_id)
+                    self._find_external_tool_copy(
+                        market_ref["resource_id"], tenant_id, market_ref["version"]
+                    )
                     if tool_type == ToolType.MCP.value
                     else None
                 )
@@ -1108,14 +1128,9 @@ class BundleInstallService:
         return str(row.id) if row is not None else None
 
     def _find_external_tool_copy(
-            self, market_resource_id: Any, tenant_id: uuid.UUID
+            self, market_resource_id: Any, tenant_id: uuid.UUID, version: str
     ) -> tuple[str, str] | None:
-        """本租户已落地的同一市场工具（**不限版本**）+ 它当时的版本。
-
-        §3.4 要求「本地已有版本与引用版本不一致时复用本地版本，不自动升级」,
-        所以复用判定只能按 `external_resource_id`，版本差异通过
-        `version_mismatch` 告诉调用方。
-        """
+        """Only reuse the exact requested market tool version; never upgrade another copy."""
 
         if not market_resource_id:
             return None
@@ -1124,6 +1139,7 @@ class BundleInstallService:
             .where(
                 ToolConfig.tenant_id == tenant_id,
                 ToolConfig.external_resource_id == str(market_resource_id),
+                ToolConfig.external_version == str(version),
                 ToolConfig.is_active.is_(True),
             )
             .order_by(ToolConfig.created_at.desc())
@@ -1138,12 +1154,7 @@ class BundleInstallService:
             tenant_id: uuid.UUID,
             entries: list[dict[str, Any]],
     ) -> dict[str, Any] | None:
-        """本租户已落地的同一市场技能/插件（不限版本）。
-
-        技能包没有 `origin` 列，来源记在 `source_type='market'` +
-        `source_ref='<resource_id>@<version>'`（§11.2），所以复用只能按前缀匹配
-        资源 id，版本差异同样只体现在 `version_mismatch`。
-        """
+        """Find a complete local copy of the exact requested market skill version."""
 
         resource_id = market_ref["resource_id"]
         packages = self.db.execute(
@@ -1151,7 +1162,7 @@ class BundleInstallService:
             .where(
                 SkillPackage.tenant_id == tenant_id,
                 SkillPackage.source_type == "market",
-                SkillPackage.source_ref.like(f"{resource_id}@%"),
+                SkillPackage.source_ref == f"{resource_id}@{market_ref['version']}",
                 SkillPackage.is_active.is_(True),
             )
             .order_by(SkillPackage.created_at.desc())
@@ -1171,10 +1182,15 @@ class BundleInstallService:
                 )
             ).scalars().all()
             for row in rows:
-                if wanted and str(row.name) not in wanted:
-                    continue
-                members.setdefault(str(row.name), str(row.id))
-        if not members:
+                metadata = package.frontmatter_raw or {}
+                names = {
+                    str(row.name), str(metadata.get("_market_original_name") or row.name),
+                    str(metadata.get("_market_original_call_name") or row.call_name or row.name),
+                }
+                for name in names:
+                    if not wanted or name in wanted:
+                        members.setdefault(name, str(row.id))
+        if not members or not wanted.issubset(members):
             return None
 
         first = packages[0]
