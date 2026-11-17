@@ -1,6 +1,8 @@
 import logging
 from typing import Any
 
+from app.core.error_codes import BizCode
+from app.core.exceptions import BusinessException
 from app.core.models import RedBearChatModel
 from app.core.workflow.engine.state_manager import WorkflowState
 from app.core.workflow.engine.variable_pool import VariablePool
@@ -59,6 +61,11 @@ class QuestionClassifierNode(BaseNode):
         }
 
     async def _load_model_info_async(self, variable_pool: VariablePool) -> ModelInfo:
+        if self.typed_config.model_id is None:
+            raise BusinessException(
+                f"节点 {self.node_id} 缺少 model_id 配置，请先选择模型",
+                code=BizCode.MODEL_NOT_CONFIGURED,
+            )
         tenant_id = await self.resolve_tenant_id_async(variable_pool)
 
         async with get_async_db_context() as db:

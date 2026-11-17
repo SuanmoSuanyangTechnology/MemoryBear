@@ -15,7 +15,10 @@ class ClassifierConfig(BaseModel):
 class QuestionClassifierNodeConfig(BaseNodeConfig):
     """问题分类器节点配置"""
 
-    model_id: uuid.UUID = Field(..., description="LLM模型ID")
+    model_id: uuid.UUID | None = Field(
+        default=None,
+        description="LLM模型ID（导入的 Dify 工作流无法自动映射模型时为空，需在画布中手动选择）"
+    )
     input_variable: str = Field(default="{{sys.message}}", description="输入变量选择器(用户问题)")
     user_supplement_prompt: Optional[str] = Field(default=None, description="用户补充提示词，额外分类指令")
     categories: list[ClassifierConfig] = Field(..., description="分类类别列表")

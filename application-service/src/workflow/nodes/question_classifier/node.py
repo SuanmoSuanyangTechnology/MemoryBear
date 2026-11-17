@@ -9,6 +9,8 @@ from .config import QuestionClassifierNodeConfig
 from ...variable.base_variable import VariableType
 from ...variable.variable_objects import ArrayVariable, FileVariable
 from ....db import get_async_db_context
+from ....errors import BizCode
+from ....errors import BusinessException
 from ....schemas.model_schema import ModelInfo
 from ....services.model_service import ModelConfigService
 
@@ -59,6 +61,11 @@ class QuestionClassifierNode(BaseNode):
         }
 
     async def _load_model_info_async(self, variable_pool: VariablePool) -> ModelInfo:
+        if self.typed_config.model_id is None:
+            raise BusinessException(
+                f"节点 {self.node_id} 缺少 model_id 配置，请先选择模型",
+                code=BizCode.MODEL_NOT_CONFIGURED,
+            )
         tenant_id = await self.resolve_tenant_id_async(variable_pool)
 
         async with get_async_db_context() as db:

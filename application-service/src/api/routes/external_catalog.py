@@ -84,7 +84,7 @@ def create_installation(
     db: DbSession,
     runtime: RuntimeDep,
     caller: Caller,
-    idempotency_key: Annotated[str, Header(alias="Idempotency-Key")],
+    idempotency_key: Annotated[str | None, Header(alias="Idempotency-Key")] = None,
 ):
     service = _service(db, runtime)
     data = service.install(
