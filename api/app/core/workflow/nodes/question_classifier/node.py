@@ -160,6 +160,18 @@ class QuestionClassifierNode(BaseNode):
                 "output": DEFAULT_EMPTY_QUESTION_CASE
             }
 
+        # 配置缺失必须在 try 之外抛：下面的 `except Exception` 是为「模型调用失败时
+        # 走默认分支」的容错，会把 `MODEL_NOT_CONFIGURED` 一并吞掉，用户只看到分类
+        # 结果悄悄变成第一个分支。LLM 节点在 `_parse_typed_config` 里抛、不在 try
+        # 内，两种节点对同一配置错误的反馈必须一致。
+        #
+        # 放在空问题分支之后：那一支根本不用模型，保留原有的容错行为不变。
+        if self.typed_config.model_id is None:
+            raise BusinessException(
+                f"节点 {self.node_id} 缺少 model_id 配置，请先选择模型",
+                code=BizCode.MODEL_NOT_CONFIGURED,
+            )
+
         try:
             model_info = await self._load_model_info_async(variable_pool)
             llm = self._build_llm_from_model_info(model_info)

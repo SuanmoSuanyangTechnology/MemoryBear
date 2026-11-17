@@ -161,6 +161,21 @@ class QuestionClassifierNode(BaseNode):
                 "output": DEFAULT_EMPTY_QUESTION_CASE
             }
 
+        # Configuration errors must be raised outside the try below: its
+        # `except Exception` is the "fall back to the default branch when the model
+        # call fails" tolerance, and it would swallow MODEL_NOT_CONFIGURED too,
+        # leaving the user with a silently wrong first-branch result. The LLM node
+        # raises from `_parse_typed_config` outside its try, so both node types must
+        # report the same configuration error the same way.
+        #
+        # Placed after the empty-question branch: that path never touches the model,
+        # so its existing fault tolerance stays as it was.
+        if self.typed_config.model_id is None:
+            raise BusinessException(
+                f"节点 {self.node_id} 缺少 model_id 配置，请先选择模型",
+                code=BizCode.MODEL_NOT_CONFIGURED,
+            )
+
         try:
             model_info = await self._load_model_info_async(variable_pool)
             llm = self._build_llm_from_model_info(model_info)

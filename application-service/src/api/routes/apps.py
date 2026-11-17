@@ -17,7 +17,7 @@ from urllib.parse import quote
 from uuid import UUID
 
 import yaml
-from fastapi import APIRouter, Depends, File, Form, Path, Query, UploadFile
+from fastapi import APIRouter, Depends, File, Form, Header, Path, Query, UploadFile
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import Response, StreamingResponse
 from sqlalchemy import select
@@ -917,6 +917,7 @@ def get_app_statistics(
         workspace_id: WorkspaceId,
         db: DbSession,
         principal: Caller,
+        timezone_name: str = Header("UTC", alias="X-Timezone"),
 ):
     """Get app statistics
 
@@ -937,6 +938,14 @@ def get_app_statistics(
         - daily_tokens: Daily token consumption
         - total_tokens: Total token consumption
     """
+    from ...utils.datetime_utils import resolve_iana_timezone
+    try:
+        _, timezone_name = resolve_iana_timezone(timezone_name)
+        if end_date < start_date:
+            raise ValueError("end_date must be greater than or equal to start_date")
+    except ValueError as exc:
+        raise BusinessException(str(exc), BizCode.INVALID_PARAMETER) from exc
+
     app_service = AppService(db)
     app = app_service._get_app_or_404(app_id)
     app_service._validate_app_accessible(app, workspace_id)
@@ -948,7 +957,8 @@ def get_app_statistics(
         workspace_id=workspace_id,
         tenant_id=principal.tenant_id,
         start_date=start_date,
-        end_date=end_date
+        end_date=end_date,
+        timezone_name=timezone_name,
     )
 
     return success(data=result)

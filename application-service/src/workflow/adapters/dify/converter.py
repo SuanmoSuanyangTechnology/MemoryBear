@@ -228,7 +228,13 @@ class DifyConverter(BaseConverter):
         except ValueError:
             return None
 
-    def convert_variable_type(self, target_type: VariableType, origin_value: Any):
+    def convert_variable_type(self, target_type: VariableType | None, origin_value: Any):
+        # `variable_type_map` returns None for Dify types we do not know. An empty
+        # constant would then hit `DEFAULT_VALUE(None)` and raise TypeError, aborting
+        # the whole import. Keeping the raw value is the safer fallback: non-empty
+        # values pass through `case _` anyway, empty ones degrade to "".
+        if target_type is None:
+            return origin_value if origin_value else ""
         if not origin_value:
             return DEFAULT_VALUE(target_type)
         try:
@@ -411,7 +417,10 @@ class DifyConverter(BaseConverter):
             UnknownModelWarning(
                 node_id=node["id"],
                 node_name=node_data["title"],
-                model_name=node_data["model"].get("name")
+                # `model` is optional/nullable in Dify DSLs exported before a model
+                # is chosen; a bare subscript aborts the whole import for what only
+                # warrants a warning.
+                model_name=self._get_dify_model_name(node_data)
             )
         )
         categories = []
@@ -975,7 +984,7 @@ class DifyConverter(BaseConverter):
             UnknownModelWarning(
                 node_id=node["id"],
                 node_name=node_data["title"],
-                model_name=node_data["model"].get("name")
+                model_name=self._get_dify_model_name(node_data)
             )
         )
         params = []

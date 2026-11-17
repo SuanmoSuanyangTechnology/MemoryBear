@@ -253,6 +253,21 @@ class IterationRuntime:
             tasks.append(self.run_task(item, idx + i))
         return tasks
 
+    def _failure_placeholder(self) -> Any:
+        """失败项的占位值（`CONTINUE_ON_ERROR` 模式）。
+
+        只在迭代显式声明了 `output_type` 时给出该类型的默认值。Dify 的
+        IterationNodeData 没有 `output_type`，导入后这里是 None —— 不能退回
+        `VariableType.NUMBER` 的 `0`，否则字符串/对象输出的迭代里会混进数字，
+        下游按元素类型处理时直接错。未声明类型时用 `None`：保住长度对齐，
+        又不假装成任何类型。`ANY` 同样没有默认值（`DEFAULT_VALUE` 会抛）。
+        """
+
+        output_type = self.typed_config.output_type
+        if output_type is None or output_type == VariableType.ANY:
+            return None
+        return DEFAULT_VALUE(output_type)
+
     async def run(self):
         """
         Execute the loop over the input array according to configuration.
@@ -287,7 +302,7 @@ class IterationRuntime:
                         if error_mode == IterationErrorHandleMode.TERMINATED:
                             raise RuntimeError(f"Iteration node {self.node_id}: iteration failed, terminating")
                         elif error_mode == IterationErrorHandleMode.CONTINUE_ON_ERROR:
-                            self.result.append(DEFAULT_VALUE(self.typed_config.output_type or VariableType.NUMBER))
+                            self.result.append(self._failure_placeholder())
                         # REMOVE_ABNORMAL_OUTPUT: skip appending
                         continue
                     if isinstance(output, list) and self.typed_config.flatten:
@@ -309,7 +324,7 @@ class IterationRuntime:
                     if error_mode == IterationErrorHandleMode.TERMINATED:
                         raise RuntimeError(f"Iteration node {self.node_id}: iteration failed, terminating")
                     elif error_mode == IterationErrorHandleMode.CONTINUE_ON_ERROR:
-                        self.result.append(DEFAULT_VALUE(self.typed_config.output_type or VariableType.NUMBER))
+                        self.result.append(self._failure_placeholder())
                     # REMOVE_ABNORMAL_OUTPUT: skip appending
                     idx += 1
                     continue

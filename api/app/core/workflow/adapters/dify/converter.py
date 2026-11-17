@@ -228,7 +228,12 @@ class DifyConverter(BaseConverter):
         except ValueError:
             return None
 
-    def convert_variable_type(self, target_type: VariableType, origin_value: Any):
+    def convert_variable_type(self, target_type: VariableType | None, origin_value: Any):
+        # `variable_type_map` 对不认识的 Dify 类型返回 None。空常量会让
+        # `DEFAULT_VALUE(None)` 抛 TypeError 而中止整份导入，原始值反而更适合
+        # 兜底：非空时下面的 `case _` 原样返回，空时退回空串。
+        if target_type is None:
+            return origin_value if origin_value else ""
         if not origin_value:
             return DEFAULT_VALUE(target_type)
         try:
@@ -411,7 +416,9 @@ class DifyConverter(BaseConverter):
             UnknownModelWarning(
                 node_id=node["id"],
                 node_name=node_data["title"],
-                model_name=node_data["model"].get("name")
+                # `model` 在 Dify 里可以是缺失或 null（节点未选模型就导出），
+                # 裸下标会让整份 DSL 导入失败，而这里只需要一条 warning。
+                model_name=self._get_dify_model_name(node_data)
             )
         )
         categories = []
@@ -974,7 +981,7 @@ class DifyConverter(BaseConverter):
             UnknownModelWarning(
                 node_id=node["id"],
                 node_name=node_data["title"],
-                model_name=node_data["model"].get("name")
+                model_name=self._get_dify_model_name(node_data)
             )
         )
         params = []
