@@ -11,6 +11,7 @@ from urllib.parse import quote
 
 from fastapi import APIRouter, Body, Depends, Query, Request
 from fastapi.responses import StreamingResponse
+from pydantic import WrapValidator
 from sqlalchemy import select
 from starlette.background import BackgroundTask
 
@@ -60,6 +61,7 @@ from ..dependencies import (
     require_knowledge_copy_principal,
 )
 from ..error_handlers import render_error
+from ..query_validation import localized_query_validation
 from ..schemas.chunk import KnowledgeRetrievalSource
 from ..schemas.common import SERVICE_UNAVAILABLE_RESPONSE, SuccessEnvelope, success
 from ..schemas.file import KBBatchDownloadRequest
@@ -232,6 +234,11 @@ async def get_knowledges(
     desc: Annotated[bool, Query()] = False,
     keywords: Annotated[str | None, Query()] = None,
     kb_ids: Annotated[str | None, Query()] = None,
+    status: Annotated[
+        int | None,
+        Query(ge=0, le=1, description="0: disabled, 1: enabled"),
+        WrapValidator(localized_query_validation),
+    ] = None,
 ) -> SuccessEnvelope[dict[str, Any]]:
     async with runtime.database.async_session() as db:
         total, items = await knowledge_service.list_knowledges(
@@ -244,6 +251,7 @@ async def get_knowledges(
             desc=desc,
             keywords=keywords,
             kb_ids=kb_ids,
+            status=status,
         )
     if source is KnowledgeRetrievalSource.EXTERNAL_API:
         items = [project_public_knowledge_data(item) for item in items]

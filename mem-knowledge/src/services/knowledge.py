@@ -190,6 +190,7 @@ def build_knowledge_list_filters(
     parent_id: uuid.UUID | None,
     keywords: str | None,
     kb_ids: str | None,
+    status: int | None = None,
 ) -> list:
     filters = [Knowledge.workspace_id == principal.workspace_id]
     if keywords:
@@ -203,11 +204,14 @@ def build_knowledge_list_filters(
     if parsed_ids:
         filters.append(Knowledge.id.in_(parsed_ids))
     else:
-        filters.append(Knowledge.status != 2)
         filters.append(
             Knowledge.parent_id
             == (parent_id if parent_id is not None else principal.workspace_id)
         )
+    if status is not None:
+        filters.append(Knowledge.status == status)
+    elif not kb_ids:
+        filters.append(Knowledge.status != 2)
     filters.append(Knowledge.permission_id != PermissionType.Memory)
     return filters
 
@@ -437,12 +441,14 @@ async def list_knowledges(
     desc: bool,
     keywords: str | None,
     kb_ids: str | None,
+    status: int | None = None,
 ) -> tuple[int, list[dict[str, Any]]]:
     filters = build_knowledge_list_filters(
         principal,
         parent_id=parent_id,
         keywords=keywords,
         kb_ids=kb_ids,
+        status=status,
     )
     total, items = await knowledge_repository.get_knowledges_paginated_async(
         db,

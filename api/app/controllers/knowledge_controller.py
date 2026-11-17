@@ -1,7 +1,8 @@
 import asyncio
 import datetime
 import json
-from typing import Optional
+from http import HTTPStatus
+from typing import Annotated, Optional
 import uuid
 
 from fastapi import APIRouter, Body, Depends, HTTPException, status, Query, Request
@@ -292,6 +293,7 @@ async def get_knowledges(
         db: AsyncSession = Depends(get_async_db),
         current_user: User = Depends(get_current_user_async),
         request: Request = None,
+        status: Annotated[int | None, Query(ge=0, le=1, description="0: disabled, 1: enabled")] = None,
 ):
     """
     Query the knowledge base list in pages
@@ -306,7 +308,7 @@ async def get_knowledges(
     if page < 1 or pagesize < 1:
         api_logger.warning(f"Error in paging parameters: page={page}, pagesize={pagesize}")
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
+            status_code=HTTPStatus.BAD_REQUEST,
             detail="The paging parameter must be greater than 0"
         )
 
@@ -328,11 +330,14 @@ async def get_knowledges(
     if kb_ids:
         filters.append(knowledge_model.Knowledge.id.in_(kb_ids.split(',')))
     else:
-        filters.append(knowledge_model.Knowledge.status != 2)
         if parent_id:
             filters.append(knowledge_model.Knowledge.parent_id == parent_id)
         else:
             filters.append(knowledge_model.Knowledge.parent_id == current_user.current_workspace_id)
+    if status is not None:
+        filters.append(knowledge_model.Knowledge.status == status)
+    elif not kb_ids:
+        filters.append(knowledge_model.Knowledge.status != 2)
     # RAG 独立迁移过渡期：不按 PermissionType.Memory 过滤，存量 USER_RAG_MERORY
     # 暂时可见；全量迁移到 rag_memory_current 并验证后，统一删除这些系统记忆库。
     # 3. Execute paged query
@@ -351,7 +356,7 @@ async def get_knowledges(
     except Exception as e:
         api_logger.error(f"Knowledge base query failed: {str(e)}")
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
             detail=f"Query failed: {str(e)}"
         )
 
