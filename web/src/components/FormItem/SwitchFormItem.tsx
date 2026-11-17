@@ -32,6 +32,8 @@ interface SwitchFormItemProps {
   className?: string;
   /** Whether the switch is disabled */
   disabled?: boolean;
+  /** Callback fired when the switch value changes */
+  onChange?: (checked: boolean) => void;
 }
 
 const SwitchFormItem: FC<SwitchFormItemProps> = ({
@@ -40,7 +42,8 @@ const SwitchFormItem: FC<SwitchFormItemProps> = ({
   name,
   size = 'default',
   className,
-  disabled
+  disabled,
+  onChange
 }) => {
   return (
     <Flex
@@ -59,7 +62,7 @@ const SwitchFormItem: FC<SwitchFormItemProps> = ({
         valuePropName="checked"
         className="rb:mb-0!"
       >
-        <Switch disabled={disabled} size={size} />
+        <Switch disabled={disabled} size={size} onChange={onChange} />
       </Form.Item>
     </Flex>
   )

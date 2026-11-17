@@ -36,7 +36,8 @@ export const tool: ToolLocale = {
     available: 'Available',
     unconfigured: 'Unconfigured',
     configured_disabled: 'Configured but Disabled',
-    error: 'Connection Error'
+    error: 'Connection Error',
+    missing: 'Not Found'
   },
   available_desc: 'API is configured and enabled',
   unconfigured_desc: 'Need to configure API Key',

@@ -6,6 +6,7 @@ import { useTranslation } from 'react-i18next'
 
 import { activityKinds, activityColors } from '../constants'
 import type { ActivityDay, ActivityCategories } from '../types'
+import { formatDateTime } from '@/utils/format'
 
 // Calendar heatmap color tiers based on activity count
 const CALENDAR_COLORS = ['#E7EAF0', '#D4E2FF', '#9BBCFF', '#5C8EF5', '#155EEF']
@@ -192,13 +193,13 @@ const ActivityChart: FC<ActivityChartProps> = ({ days, calendar, year, month, ca
           return `{marker|} {label|${name}}\n{count|${value.toLocaleString()}}  {percentage|${percentage}%}`
         },
       })),
-      grid: { top: 0, left: 8, right: 0, bottom: 80 },
+      grid: { top: 0, left: 8, right: 0, bottom: 66 },
       xAxis: {
         type: 'category',
-        data: monthDays.map(day => dayjs(day.date).format('MM/DD')),
-        axisLine: { show: false },
+        data: monthDays.map(day => formatDateTime(day.date, 'MM/DD')),
+        axisLine: { show: true, lineStyle: { color: '#d5dbe5', width: 1 } },
         axisTick: { show: false },
-        axisLabel: { interval: 6 },
+        axisLabel: { interval: 6, fontSize: 10, color: '#a8a9aa' },
       },
       yAxis: { type: 'value', max: 100, show: false },
       series: [...activityKinds.map((kind, index) => ({
@@ -206,7 +207,7 @@ const ActivityChart: FC<ActivityChartProps> = ({ days, calendar, year, month, ca
         type: 'bar' as const,
         stack: 'activity',
         emphasis: { focus: 'series' as const },
-        blur: { itemStyle: { opacity: 0.2 } },
+        blur: { itemStyle: { opacity: 0.65 } },
         barCategoryGap: '12%',
         data: monthDays.map((day, dayIndex) => ({
           value: day.categories?.[kind].percentage ?? (monthTotals[dayIndex] ? Number((day.counts[kind] / monthTotals[dayIndex] * 100).toFixed(2)) : 0),

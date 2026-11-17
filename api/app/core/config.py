@@ -305,6 +305,10 @@ class Settings:
 
     # LLM Request Configuration
     LLM_TIMEOUT: float = float(os.getenv("LLM_TIMEOUT", "120.0"))
+    # 探活连接建立的独立预算（秒）：快速暴露地址不可达，同时允许慢网关
+    MODEL_VALIDATION_CONNECT_TIMEOUT: float = float(
+        os.getenv("MODEL_VALIDATION_CONNECT_TIMEOUT", "10.0")
+    )
     LLM_MAX_RETRIES: int = int(os.getenv("LLM_MAX_RETRIES", "2"))
     LLM_NETWORK_RETRY_ATTEMPTS: int = int(os.getenv("LLM_NETWORK_RETRY_ATTEMPTS", "3"))
     EMBEDDING_BATCH_SIZE: int = int(os.getenv("EMBEDDING_BATCH_SIZE", "10"))

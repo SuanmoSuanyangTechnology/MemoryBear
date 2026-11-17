@@ -21,7 +21,7 @@ export const memoryConversation = {
       memoryRecallRate: 'Memory recall rate',
       memoryAccuracy: 'Memory accuracy',
       answerFidelity: 'Answer fidelity',
-      emptyDesc: 'What can I do to help you today？',
+      emptyDesc: 'What can I do to help you today ?',
       startANewConversation: 'Start a new conversation',
       normalReply: 'Normal Reply',
       quickReply: 'Quick Reply',

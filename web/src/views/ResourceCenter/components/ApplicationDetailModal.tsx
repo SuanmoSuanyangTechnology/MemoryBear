@@ -1,11 +1,11 @@
-import { forwardRef, useImperativeHandle, useRef, useState } from 'react';
+import { forwardRef, useImperativeHandle, useRef, useState, useMemo } from 'react';
 import { App, Button, Flex, Spin } from 'antd';
 import { EyeOutlined, UserOutlined } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
 
 import RbModal from '@/components/RbModal';
 import { getAppAssetDetail } from '@/api/resourceCenter';
-import type { AppAssetDetail } from '../types';
+import type { AppAssetDetail, Categories } from '../types';
 import WorkflowPreview from './WorkflowPreview';
 import ClusterPreview from './ClusterPreview';
 import Tag from '@/components/Tag';
@@ -21,17 +21,25 @@ export interface ApplicationDetailModalRef {
 
 interface ApplicationDetailModalProps {
   onAdd?: (id: string) => void;
+  categories?: Categories[];
 }
 
 const ApplicationDetailModal = forwardRef<ApplicationDetailModalRef, ApplicationDetailModalProps>(({
-  onAdd
+  onAdd,
+  categories = []
 }, ref) => {
-    const { t } = useTranslation();
+    const { t, i18n } = useTranslation();
     const { message } = App.useApp();
     const [open, setOpen] = useState(false);
     const [loading, setLoading] = useState(false);
     const [item, setItem] = useState<AppAssetDetail>();
     const request = useRef(0);
+
+    const categoryMap = useMemo(() => {
+      const map = new Map<string, string>();
+      categories.forEach(c => map.set(c.code, i18n.language.startsWith('en') ? c.name_en : c.name));
+      return map;
+    }, [categories, i18n.language]);
     const close = () => {
       request.current += 1;
       setOpen(false);
@@ -88,7 +96,7 @@ const ApplicationDetailModal = forwardRef<ApplicationDetailModalRef, Application
               <p className="rb:mb-2 rb:text-[14px] rb:font-normal!">{item.description || t("resourceCenter.noDescription")}</p>
               {item.categories.length > 0 &&
                 <Flex align="center" wrap gap={8}>
-                  {item.categories.map(category => <Tag key={category} color="processing">{category}</Tag>)}
+                  {item.categories.map(category => <Tag key={category} color="processing">{categoryMap.get(category) ?? category}</Tag>)}
                 </Flex>
               }
             </Flex>
@@ -156,7 +164,7 @@ const ApplicationDetailModal = forwardRef<ApplicationDetailModalRef, Application
                     {item.linked_tools.length
                       ? item.linked_tools.map(tool => (
                         <Flex align="center" gap={8} wrap key={tool.name}>
-                          <ToolIcon />
+                          <ToolIcon iconUrl={tool.icon as string} />
                           {tool.name}
                           <Tag>{tool.tool_type}</Tag>
                         </Flex>

@@ -111,7 +111,7 @@ let requests: RequestQueueItem[] = [];
 // Check if URL is a public API (matches /public/ path segment, not substrings like /publications)
 const isPublicApi = (url: string | undefined): boolean => {
   if (!url) return false;
-  return url.includes('/public/') || url.endsWith('/public');
+  return url.includes('/public/') || url.endsWith('/public') || url.includes('/workspaces/invites/validate/');
 };
 
 // Request interceptor
