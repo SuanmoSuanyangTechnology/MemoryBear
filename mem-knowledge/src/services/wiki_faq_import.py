@@ -19,7 +19,7 @@ from .wiki_faq_retrieval import _target_for_sync
 
 logger = logging.getLogger(__name__)
 FAQ_IMPORT_TASK = "mem_knowledge.tasks.import_faqs"
-INDEX_BATCH_SIZE = 30
+INDEX_BATCH_SIZE = 3
 INDEX_CONCURRENCY = 3
 
 
@@ -120,7 +120,12 @@ async def prepare_one(runtime, target, task_id, index, item, semaphore):
             diagnostic_json(exception_details(exc)),
         )
         reason = "向量索引准备失败，本条问答未导入。"
-        if isinstance(exc, TimeoutError) or "timeout" in type(exc).__name__.lower():
+        if (
+            isinstance(exc, TimeoutError)
+            or "timeout" in type(exc).__name__.lower()
+            or getattr(exc, "http_status", None) == 504
+            or getattr(exc, "remote_code", None) == 10003
+        ):
             reason = "向量模型或索引服务超时，本条问答未导入。"
         elif isinstance(exc, KnowledgeError):
             from ..i18n import translate
@@ -179,6 +184,17 @@ async def execute(runtime, task_id):
         start = job["processed_count"] if job["model_key"] == target.model_key else 0
         candidates = list(job["candidates"]) if start else []
         failures = list(job["failed_entries"]) if start else []
+        await db_call(
+            runtime,
+            jobs.checkpoint,
+            task_id,
+            token,
+            candidates,
+            failures,
+            start,
+            target.model_key,
+            "indexing",
+        )
         semaphore = asyncio.Semaphore(INDEX_CONCURRENCY)
         for offset in range(start, len(items), INDEX_BATCH_SIZE):
             batch = items[offset : offset + INDEX_BATCH_SIZE]
