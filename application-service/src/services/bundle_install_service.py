@@ -38,8 +38,10 @@ Why this shape:
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import io
 import logging
+import posixpath
 import threading
 import uuid
 import zipfile
@@ -79,6 +81,33 @@ PLACEHOLDER_TOOL_TYPES = frozenset({ToolType.CUSTOM.value})
 # 是为了让本模块保持「不认识市场 HTTP」：企业扩展装配时注入，社区构建不传。
 DependencyFetcher = Callable[[str, str, str], dict[str, Any]]
 
+# `(resource_type, resource_id, version, context) -> zip bytes`。注入理由与
+# `DependencyFetcher` 相同：本模块保持「不认识市场 HTTP」。企业扩展把市场侧的
+# 版本文件包接口接进来；没有注入时（社区构建）退回直读共享桶的老路径。
+DependencyFilesFetcher = Callable[[str, str, str, str], bytes]
+
+# 市场 zip 的成员名 = 规范化后的 `object_key`（`market-service/src/storage.py`
+# 的 `normalise_object_key`）。两个服务各持一份实现，规则必须逐字一致：
+# 反斜杠转 `/`、去掉前导 `/`、`posixpath.normpath` 后不得越界。
+_FILE_SOURCE_CONTEXT_DEPENDENCY = "dependency"
+
+
+def _zip_member_name(object_key: Any) -> str:
+    raw = str(object_key or "")
+    if not raw or any(ord(char) < 0x20 for char in raw):
+        raise BusinessException(
+            "技能文件缺少 object_key", BizCode.EXTERNAL_CATALOG_INVALID,
+            data={"reason": "SKILL_FILES_MISSING"},
+        )
+    key = raw.replace("\\", "/").lstrip("/")
+    normalised = posixpath.normpath(key)
+    if normalised in (".", "") or normalised.startswith("../") or normalised == "..":
+        raise BusinessException(
+            "技能文件的 object_key 非法", BizCode.EXTERNAL_CATALOG_INVALID,
+            data={"reason": "SKILL_FILES_INVALID"},
+        )
+    return normalised
+
 
 def _run_async(coro_factory: Callable[[], Coroutine]):
     """Run a coroutine from sync code: direct when no loop, else a private thread."""
@@ -113,6 +142,7 @@ class BundleInstallService:
             dsl_service: AppDslService | None = None,
             *,
             dependency_fetcher: DependencyFetcher | None = None,
+            dependency_files_fetcher: DependencyFilesFetcher | None = None,
     ):
         self.db = db
         self.dsl_service = dsl_service or AppDslService(db)
@@ -124,11 +154,19 @@ class BundleInstallService:
         self._redacted_secrets: list[str] = []
         # 按市场引用补依赖内容的回调；社区构建不传 = 只认包内内容。
         self._dependency_fetcher = dependency_fetcher
+        # 按市场引用取整版文件包的回调；不传 = 退回直读共享桶。
+        self._dependency_files_fetcher = dependency_files_fetcher
         # 本次安装解析到的市场依赖，供安装响应的 `dependencies[]` 使用。
         self._resolved_dependencies: list[dict[str, Any]] = []
         # `(resource_type, resource_id@version)` → 展开后的依赖段，避免同一份
         # 依赖被多个子 Agent 引用时重复下载。
         self._dependency_cache: dict[str, dict[str, Any]] = {}
+        # 父包来源（顶层安装的那个版本）：包内内嵌文件从这里取。
+        self._origin_resource_type: str | None = None
+        self._origin_context = "top_level"
+        # `(resource_type, resource_id, version, context)` → 已打开的文件包。
+        # 同一个市场版本只拉一次；安装器按请求构造，关闭交给 GC（BytesIO 无 fd）。
+        self._file_archives: dict[tuple[str, str, str, str], zipfile.ZipFile] = {}
         # 本次安装落地的子 Agent 与它们的待绑定项（§3.4 `pending_agents[]`）。
         self._pending_agents: list[dict[str, Any]] = []
 
@@ -187,6 +225,7 @@ class BundleInstallService:
             user_id: uuid.UUID | None,
             commit: bool = True,
             market_origin: dict[str, str] | None = None,
+            origin_context: str = "top_level",
     ) -> dict[str, Any]:
         """Land every dependency then the application cluster; returns the report.
 
@@ -197,6 +236,8 @@ class BundleInstallService:
         """
 
         self._origin = market_origin or {}
+        self._origin_resource_type = str(manifest.get("resource_type") or "") or None
+        self._origin_context = origin_context
         self._submission_index = self._index_dependency_submissions(manifest)
 
         try:
@@ -283,6 +324,7 @@ class BundleInstallService:
             commit: bool = True,
             market_origin: dict[str, str] | None = None,
             overrides: dict[str, Any] | None = None,
+            origin_context: str = "top_level",
     ) -> dict[str, Any]:
         """Land one **tool / skill_package** bundle (no application involved).
 
@@ -292,6 +334,8 @@ class BundleInstallService:
         """
 
         self._origin = market_origin or {}
+        self._origin_resource_type = str(manifest.get("resource_type") or "") or None
+        self._origin_context = origin_context
         try:
             parse_bundle(manifest)
         except BundleError as error:
@@ -576,6 +620,9 @@ class BundleInstallService:
                 if market_ref or own_market_ref
                 else None
             )
+            # 文件字节的来源默认是父包（顶层安装的那个版本）；按市场引用补全的
+            # 依赖改为从那一版依赖自己的文件包取。
+            file_source = self._origin_file_source()
             if market_ref and not own_market_ref:
                 # 同一市场技能/插件版本已在本租户 → 只补 dep_map，不重复导入。
                 local = self._find_market_skill_copy(market_ref, tenant_id, entries)
@@ -595,9 +642,19 @@ class BundleInstallService:
                         version_mismatch=local["version"] != market_ref["version"],
                     )
                     continue
+                # 存量包可能内嵌了文件：那时键空间仍属于父版本，只有真正从依赖
+                # 清单补出来的条目才改指向依赖自己的版本文件包。
+                embedded = all(entry.get("files") for entry in entries)
                 entries = self._enrich_skill_entries(entries, market_ref, missing)
                 if not entries:
                     continue
+                if not embedded:
+                    file_source = (
+                        "skill_package",
+                        str(market_ref["resource_id"]),
+                        str(market_ref["version"]),
+                        _FILE_SOURCE_CONTEXT_DEPENDENCY,
+                    )
             # 顶层的独立技能可以逐项改名/改描述/改调用名称；插件只到插件级
             # （`meta` 留空，名称与描述走下面的 `plugin_name` / `plugin_description`）。
             member_meta = (
@@ -607,7 +664,10 @@ class BundleInstallService:
             )
             try:
                 archive = self._build_skill_zip(
-                    entries, nested=bool(plugin_ref), member_refs=member_refs
+                    entries,
+                    nested=bool(plugin_ref),
+                    member_refs=member_refs,
+                    file_source=file_source,
                 )
                 plugin_row = plugin_meta.get(plugin_ref) if plugin_ref else None
                 response = SkillPackageService.import_package(
@@ -662,6 +722,7 @@ class BundleInstallService:
             *,
             nested: bool,
             member_refs: dict[str, dict[str, Any]],
+            file_source: tuple[str, str, str, str] | None,
     ) -> bytes:
         """Rebuild a standard pack zip from the bundle's `files[]` object keys."""
 
@@ -683,23 +744,103 @@ class BundleInstallService:
                     )
                 for file_entry in files:
                     rel_path = str(file_entry.get("path") or "")
-                    content = self._read_object(file_entry.get("object_key"))
+                    content = self._read_file(
+                        file_entry.get("object_key"),
+                        file_source=file_source,
+                        expected_sha256=file_entry.get("sha256"),
+                    )
                     info = zipfile.ZipInfo(f"{root}{rel_path}", date_time=(2026, 1, 1, 0, 0, 0))
                     info.flag_bits |= 0x800
                     info.compress_type = zipfile.ZIP_DEFLATED
                     archive.writestr(info, content)
         return buffer.getvalue()
 
-    @staticmethod
-    def _read_object(object_key: Any) -> bytes:
+    def _origin_file_source(self) -> tuple[str, str, str, str] | None:
+        """父包版本的文件来源；不是市场安装（没有 origin）时返回 None。"""
+
+        origin = self._origin or {}
+        resource_id = origin.get("resource_id")
+        version = origin.get("version")
+        if not resource_id or not version or not self._origin_resource_type:
+            return None
+        return (
+            self._origin_resource_type,
+            str(resource_id),
+            str(version),
+            self._origin_context,
+        )
+
+    def _read_file(
+            self,
+            object_key: Any,
+            *,
+            file_source: tuple[str, str, str, str] | None,
+            expected_sha256: Any = None,
+    ) -> bytes:
+        """有市场文件回调时按版本 zip 取字节，否则退回直读共享桶。
+
+        `market-uploads/` 键是内容寻址的，但 zip 走内网传输，仍按清单里的
+        `sha256` 重算比对：不一致说明字节与审核过的清单不同源，装进去就是错包。
+        """
+
         key = str(object_key or "")
         if not key:
             raise BusinessException(
                 "技能文件缺少 object_key", BizCode.EXTERNAL_CATALOG_INVALID,
                 data={"reason": "SKILL_FILES_MISSING"},
             )
-        storage = StorageFactory.get_storage()
-        return _run_async(lambda: storage.download(key))
+        if self._dependency_files_fetcher is not None and file_source is not None:
+            payload = self._read_market_file(key, file_source)
+        else:
+            storage = StorageFactory.get_storage()
+            payload = _run_async(lambda: storage.download(key))
+        expected = str(expected_sha256 or "")
+        if expected and hashlib.sha256(payload).hexdigest() != expected:
+            raise BusinessException(
+                "技能文件与清单哈希不一致", BizCode.EXTERNAL_CATALOG_INVALID,
+                data={"reason": "SKILL_FILES_INVALID", "object_key": key[:200]},
+            )
+        return payload
+
+    def _read_market_file(
+            self, object_key: str, file_source: tuple[str, str, str, str]
+    ) -> bytes:
+        member = _zip_member_name(object_key)
+        archive = self._file_archive(file_source)
+        try:
+            return archive.read(member)
+        except KeyError as error:
+            raise BusinessException(
+                "技能文件不在市场的版本文件包中", BizCode.EXTERNAL_CATALOG_INVALID,
+                data={"reason": "SKILL_FILES_MISSING", "object_key": object_key[:200]},
+            ) from error
+
+    def _file_archive(
+            self, file_source: tuple[str, str, str, str]
+    ) -> zipfile.ZipFile:
+        """按版本拉一次整包 zip 并缓存；同一版本被多次引用时只发一次请求。"""
+
+        archive = self._file_archives.get(file_source)
+        if archive is not None:
+            return archive
+        try:
+            payload = self._dependency_files_fetcher(*file_source)  # type: ignore[misc]
+        except BusinessException:
+            raise
+        except Exception as error:  # noqa: BLE001 —— 传输故障降级为一条 missing
+            raise BusinessException(
+                "市场文件包获取失败", BizCode.EXTERNAL_CATALOG_UNAVAILABLE,
+                data={"reason": "MARKET_FILES_UNAVAILABLE"},
+            ) from error
+        try:
+            archive = zipfile.ZipFile(io.BytesIO(payload))
+        except zipfile.BadZipFile as error:
+            raise BusinessException(
+                "市场文件包格式非法", BizCode.EXTERNAL_CATALOG_INVALID,
+                data={"reason": "INVALID_FILES_ARCHIVE"},
+            ) from error
+        self._file_archives[file_source] = archive
+        return archive
 
     # ==================== ② tools ====================
 
