@@ -8,6 +8,7 @@ routes' existing bridge.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import logging
 import time
 import uuid
@@ -48,6 +49,10 @@ logger = logging.getLogger(__name__)
 
 _IDEMPOTENCY_KEY_MIN = 8
 _IDEMPOTENCY_KEY_MAX = 128
+# 未传 `Idempotency-Key` 时的兜底窗口（秒）。与 enterprise 侧安装/导入路由一致：
+# 同一份请求体过一会儿再提交一次是允许的（落地成 `xx (2)`），所以只挡传输层
+# 重放与手抖连点，不能用 24h 窗口把它误判成重复。
+_FALLBACK_IDEMPOTENCY_TTL_SECONDS = 60
 _LATEST_PUBLICATION_STATUSES = frozenset(
     {"pending", "approved", "rejected", "withdrawn"}
 )
@@ -388,17 +393,19 @@ class ExternalCatalogService:
         tenant_id: uuid.UUID,
         actor_id: uuid.UUID,
         request: InstallRequest,
-        idempotency_key: str,
+        idempotency_key: str | None,
     ) -> InstallResponse:
         self._ensure_enabled()
-        self._validate_idempotency_key(idempotency_key)
         if self.idempotency is None:
             raise RuntimeError("idempotency store is not configured")
         fingerprint = canonical_request_fingerprint(
             request.model_dump(mode="json", exclude_none=True)
         )
-        reservation = self.idempotency.begin(
-            "install", str(tenant_id), str(actor_id), idempotency_key, fingerprint
+        key, store = self._resolve_idempotency(
+            self.idempotency, idempotency_key, fingerprint
+        )
+        reservation = store.begin(
+            "install", str(tenant_id), str(actor_id), key, fingerprint
         )
         if reservation.state == "replay":
             response = InstallResponse.model_validate(reservation.response)
@@ -459,11 +466,11 @@ class ExternalCatalogService:
                 self.db.commit()
             committed = True
             try:
-                self.idempotency.complete(
+                store.complete(
                     "install",
                     str(tenant_id),
                     str(actor_id),
-                    idempotency_key,
+                    key,
                     fingerprint,
                     response.model_dump(mode="json"),
                 )
@@ -479,11 +486,11 @@ class ExternalCatalogService:
             return response
         except Exception:
             if not committed:
-                self.idempotency.abort(
+                store.abort(
                     "install",
                     str(tenant_id),
                     str(actor_id),
-                    idempotency_key,
+                    key,
                     fingerprint,
                 )
             raise
@@ -595,6 +602,27 @@ class ExternalCatalogService:
         except Exception as exc:
             logger.warning("market installation registration failed: %s", exc)
             return False
+
+    @staticmethod
+    def _resolve_idempotency(
+        store: IdempotencyStore,
+        key: str | None,
+        fingerprint: str,
+    ) -> tuple[str, IdempotencyStore]:
+        """`Idempotency-Key` 是可选的：没传就用请求指纹派生一个键。
+
+        前端从不发送这个头，强制必填会让每个安装请求都失败。带键时沿用调用方
+        的语义（24h 内回放首次结果）；不带键时改用一个短窗口的 store，见
+        `_FALLBACK_IDEMPOTENCY_TTL_SECONDS` 的说明。
+        """
+
+        if key:
+            ExternalCatalogService._validate_idempotency_key(key)
+            return key, store
+        derived = "auto:" + hashlib.sha256(fingerprint.encode()).hexdigest()[:32]
+        return derived, IdempotencyStore(
+            store.redis, ttl_seconds=_FALLBACK_IDEMPOTENCY_TTL_SECONDS
+        )
 
     @staticmethod
     def _validate_idempotency_key(key: str) -> None:

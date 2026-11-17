@@ -214,11 +214,26 @@ class DifyConverter(BaseConverter):
             "array[object]": VariableType.ARRAY_OBJECT,
             "array[file]": VariableType.ARRAY_FILE,
             "select": VariableType.STRING,
+            "secret": VariableType.STRING,
         }
-        var_type = type_map.get(source_type, source_type)
-        return var_type
+        if not source_type:
+            return None
+        if source_type in type_map:
+            return type_map[source_type]
+        # Dify's SegmentType keeps growing; accept any name that is a native
+        # VariableType (any / array_nest ...) and report the rest as unsupported
+        # instead of letting a raw string break pydantic validation downstream.
+        try:
+            return VariableType(source_type)
+        except ValueError:
+            return None
 
-    def convert_variable_type(self, target_type: VariableType, origin_value: Any):
+    def convert_variable_type(self, target_type: VariableType | None, origin_value: Any):
+        # `variable_type_map` 对不认识的 Dify 类型返回 None。空常量会让
+        # `DEFAULT_VALUE(None)` 抛 TypeError 而中止整份导入，原始值反而更适合
+        # 兜底：非空时下面的 `case _` 原样返回，空时退回空串。
+        if target_type is None:
+            return origin_value if origin_value else ""
         if not origin_value:
             return DEFAULT_VALUE(target_type)
         try:
@@ -401,7 +416,9 @@ class DifyConverter(BaseConverter):
             UnknownModelWarning(
                 node_id=node["id"],
                 node_name=node_data["title"],
-                model_name=node_data["model"].get("name")
+                # `model` 在 Dify 里可以是缺失或 null（节点未选模型就导出），
+                # 裸下标会让整份 DSL 导入失败，而这里只需要一条 warning。
+                model_name=self._get_dify_model_name(node_data)
             )
         )
         categories = []
@@ -419,7 +436,8 @@ class DifyConverter(BaseConverter):
         ) if vision else None
 
         result = QuestionClassifierNodeConfig.model_construct(
-            input_variable=self._process_list_variable_literal(node_data.get("query_variable_selector")),
+            model_id=None,
+            input_variable=self._process_list_variable_literal(node_data.get("query_variable_selector")) or "",
             user_supplement_prompt=self.trans_variable_format(node_data.get("instructions", "")),
             categories=categories,
             vision=vision,
@@ -560,10 +578,13 @@ class DifyConverter(BaseConverter):
         model_config = self._get_dify_model_config(node_data)
         model_params = self._convert_dify_completion_params(model_config.get("completion_params"))
         context = self._process_list_variable_literal(node_data["context"]["variable_selector"])
+        # Dify 在记忆关闭时会给出 `memory: null`，所以嵌套取数必须容忍 None。
+        raw_memory = node_data.get("memory") or {}
+        raw_window = raw_memory.get("window") or {}
         memory = MemoryWindowSetting(
-            enable=bool(node_data.get("memory")),
-            enable_window=bool(node_data.get("memory", {}).get("window", {}).get("enabled", False)),
-            window_size=int(node_data.get("memory", {}).get("window", {}).get("size", 20))
+            enable=bool(raw_memory),
+            enable_window=bool(raw_window.get("enabled", False)),
+            window_size=int(raw_window.get("size", 20))
         )
         messages = []
         for message in node_data["prompt_template"]:
@@ -578,7 +599,7 @@ class DifyConverter(BaseConverter):
                 MessageConfig(
                     role="user",
                     content=self.trans_variable_format(
-                        node_data["memory"].get("query_prompt_template") or "{{#sys.query#}}"
+                        raw_memory.get("query_prompt_template") or "{{#sys.query#}}"
                     )
                 )
             )
@@ -705,11 +726,14 @@ class DifyConverter(BaseConverter):
     def convert_iteration_node_config(self, node: dict) -> dict:
         node_data = node["data"]
         result = IterationNodeConfig.model_construct(
-            input=self._process_list_variable_literal(node_data["iterator_selector"]),
+            input=self._process_list_variable_literal(node_data["iterator_selector"]) or "",
             parallel=node_data.get("is_parallel", False),
             parallel_count=node_data.get("parallel_nums", 4),
-            output=self._process_list_variable_literal(node_data["output_selector"]),
-            output_type=self.variable_type_map(node_data.get("output_type")),
+            output=self._process_list_variable_literal(node_data["output_selector"]) or "",
+            # Dify's IterationNodeData carries no `output_type` (only iterator_selector /
+            # output_selector), so reading one always yields None. Leaving it None makes
+            # the runtime fall back to VariableType.ANY instead of failing validation.
+            output_type=None,
             flatten=node_data.get("flatten_output", False),
         ).model_dump()
 
@@ -796,10 +820,12 @@ class DifyConverter(BaseConverter):
         else:
             auth_config = HttpAuthConfig()
 
-        content_type = self.convert_http_content_type(node_data["body"]["type"])
+        body = node_data.get("body") or {}
+        body_type = body.get("type") or "none"
+        content_type = self.convert_http_content_type(body_type)
         if content_type == HttpContentType.FROM_DATA:
             body_content = []
-            for content in node_data["body"]["data"]:
+            for content in body.get("data") or []:
                 body_content.append(
                     HttpFormData(
                         key=self.trans_variable_format(content["key"]),
@@ -809,13 +835,13 @@ class DifyConverter(BaseConverter):
                 )
         elif content_type == HttpContentType.WWW_FORM:
             body_content = {}
-            for content in node_data["body"]["data"]:
+            for content in body.get("data") or []:
                 body_content[
                     self.trans_variable_format(content["key"])
                 ] = self.trans_variable_format(content["value"])
         else:
-            if node_data["body"]["data"]:
-                data_entry = node_data["body"]["data"][0]
+            if body.get("data"):
+                data_entry = body["data"][0]
                 body_content = data_entry.get("value")
                 if not body_content and data_entry.get("file"):
                     body_content = self._process_list_variable_literal(data_entry.get("file"))
@@ -884,27 +910,31 @@ class DifyConverter(BaseConverter):
                 status_code=default_status_code,
             )
 
+        # Dify 1.9 declares `timeout` as optional and names its keys connect/read/write;
+        # older DSLs used max_*_timeout. Support both, defaulting to the node defaults.
+        raw_timeout = node_data.get("timeout") or {}
+        raw_retry = node_data.get("retry_config") or {}
         self.error_branch_node_cache.append(node['id'])
         result = HttpRequestNodeConfig.model_construct(
             method=node_data["method"].upper(),
             url=node_data["url"],
             auth=auth_config,
             body=HttpContentTypeConfig.model_construct(
-                content_type=self.convert_http_content_type(node_data["body"]["type"]),
+                content_type=self.convert_http_content_type(body_type),
                 data=body_content,
             ),
             headers=headers,
             params=params,
             verify_ssl=node_data.get("ssl_verify", False),
             timeouts=HttpTimeOutConfig.model_construct(
-                connect_timeout=node_data["timeout"]["max_connect_timeout"] or 5,
-                read_timeout=node_data["timeout"]["max_read_timeout"] or 5,
-                write_timeout=node_data["timeout"]["max_write_timeout"] or 5,
+                connect_timeout=raw_timeout.get("connect") or raw_timeout.get("max_connect_timeout") or 5,
+                read_timeout=raw_timeout.get("read") or raw_timeout.get("max_read_timeout") or 5,
+                write_timeout=raw_timeout.get("write") or raw_timeout.get("max_write_timeout") or 5,
             ),
             retry=HttpRetryConfig.model_construct(
-                enable=node_data["retry_config"]["retry_enabled"],
-                max_attempts=node_data["retry_config"]["max_retries"],
-                retry_interval=node_data["retry_config"]["retry_interval"],
+                enable=raw_retry.get("retry_enabled", False),
+                max_attempts=raw_retry.get("max_retries", 1),
+                retry_interval=raw_retry.get("retry_interval", 100),
             ),
             error_handle=HttpErrorHandleConfig.model_construct(
                 method=error_handle_type,
@@ -939,7 +969,7 @@ class DifyConverter(BaseConverter):
             detail=f"Please reconfigure the Knowledge Retrieval node.",
         ))
         result = KnowledgeRetrievalNodeConfig.model_construct(
-            query=self._process_list_variable_literal(node_data["query_variable_selector"]),
+            query=self._process_list_variable_literal(node_data["query_variable_selector"]) or "",
         ).model_dump()
 
         self.config_validate(node["id"], node["data"]["title"], KnowledgeRetrievalNodeConfig, result)
@@ -951,7 +981,7 @@ class DifyConverter(BaseConverter):
             UnknownModelWarning(
                 node_id=node["id"],
                 node_name=node_data["title"],
-                model_name=node_data["model"].get("name")
+                model_name=self._get_dify_model_name(node_data)
             )
         )
         params = []
@@ -961,13 +991,16 @@ class DifyConverter(BaseConverter):
                     name=param["name"],
                     desc=param["description"],
                     required=param["required"],
-                    type=param["type"],
+                    # Dify accepts legacy names `bool` / `select` and normalises them
+                    # to SegmentType.BOOLEAN / STRING (see ParameterConfig._validate_type).
+                    type={"bool": "boolean", "select": "string"}.get(param["type"], param["type"]),
                 )
             )
         result = ParameterExtractorNodeConfig.model_construct(
-            text=self._process_list_variable_literal(node_data["query"]),
+            model_id=None,
+            text=self._process_list_variable_literal(node_data["query"]) or "",
             params=params,
-            prompt=node_data.get("instruction"),
+            prompt=node_data.get("instruction") or "",
             inference_mode="prompt",
         ).model_dump()
 
@@ -1114,11 +1147,14 @@ class DifyConverter(BaseConverter):
         else:
             strategy = dify_strategy_label_raw or "react"
 
-        # 记忆配置（与 LLM 节点转换一致）
+        # 记忆配置（与 LLM 节点转换一致）。Dify 在记忆关闭时会给出 `memory: null`，
+        # 所以嵌套取数必须容忍 None。
+        raw_memory = node_data.get("memory") or {}
+        raw_window = raw_memory.get("window") or {}
         memory = MemoryWindowSetting(
-            enable=bool(node_data.get("memory")),
-            enable_window=bool(node_data.get("memory", {}).get("window", {}).get("enabled", False)),
-            window_size=int(node_data.get("memory", {}).get("window", {}).get("size", 20))
+            enable=bool(raw_memory),
+            enable_window=bool(raw_window.get("enabled", False)),
+            window_size=int(raw_window.get("size", 20))
         )
 
         context = ""

@@ -253,6 +253,22 @@ class IterationRuntime:
             tasks.append(self.run_task(item, idx + i))
         return tasks
 
+    def _failure_placeholder(self) -> Any:
+        """Placeholder appended for a failed item under `CONTINUE_ON_ERROR`.
+
+        The declared `output_type` is only honoured when it is actually known. Dify's
+        IterationNodeData has no `output_type`, so imports leave it None — falling back
+        to `VariableType.NUMBER` would push a literal `0` into an iteration whose real
+        items are strings or objects. `None` keeps the list length aligned without
+        pretending the value is of any type. `ANY` has no default either
+        (`DEFAULT_VALUE` raises).
+        """
+
+        output_type = self.typed_config.output_type
+        if output_type is None or output_type == VariableType.ANY:
+            return None
+        return DEFAULT_VALUE(output_type)
+
     async def run(self):
         """
         Execute the loop over the input array according to configuration.
@@ -287,7 +303,7 @@ class IterationRuntime:
                         if error_mode == IterationErrorHandleMode.TERMINATED:
                             raise RuntimeError(f"Iteration node {self.node_id}: iteration failed, terminating")
                         elif error_mode == IterationErrorHandleMode.CONTINUE_ON_ERROR:
-                            self.result.append(DEFAULT_VALUE(self.typed_config.output_type or VariableType.NUMBER))
+                            self.result.append(self._failure_placeholder())
                         # REMOVE_ABNORMAL_OUTPUT: skip appending
                         continue
                     if isinstance(output, list) and self.typed_config.flatten:
@@ -309,7 +325,7 @@ class IterationRuntime:
                     if error_mode == IterationErrorHandleMode.TERMINATED:
                         raise RuntimeError(f"Iteration node {self.node_id}: iteration failed, terminating")
                     elif error_mode == IterationErrorHandleMode.CONTINUE_ON_ERROR:
-                        self.result.append(DEFAULT_VALUE(self.typed_config.output_type or VariableType.NUMBER))
+                        self.result.append(self._failure_placeholder())
                     # REMOVE_ABNORMAL_OUTPUT: skip appending
                     idx += 1
                     continue
