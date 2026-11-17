@@ -146,12 +146,12 @@ class MemoryConfigHandler:
     ) -> ApiResponse[list[SimpleSceneData]] | JSONResponse:
         try:
             data = await self.query.simple_scenes(principal.tenant_id)
-        except Exception as exc:
+        except Exception:
             logger.exception("list_simple_scenes failed")
             return error_response(
                 request,
                 200,
-                failure(BizCode.INTERNAL_ERROR, "查询失败", str(exc)),
+                failure(BizCode.INTERNAL_ERROR, "查询失败", "场景查询失败，请稍后重试"),
             )
         return success(data, "查询成功")
 
