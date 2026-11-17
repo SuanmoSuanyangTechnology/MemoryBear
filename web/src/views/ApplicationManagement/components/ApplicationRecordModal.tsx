@@ -13,6 +13,8 @@ import { appExternalCatalog } from '@/api/application';
 import type { ApplicationRecordModalRef, PublicationEvent, PublicationRecordData } from '../types';
 import { formatDateTime } from '@/utils/format'
 import Empty from '@/components/Empty'
+import { formatVersion } from '@/utils/format';
+import styles from './ApplicationRecordModal.module.css';
 
 const eventTypeColorMap: Record<string, string> = {
   submitted: '#3b82f6',
@@ -129,6 +131,7 @@ const ApplicationRecordModal = forwardRef<ApplicationRecordModalRef>((_props, re
         </Flex>
         <Timeline
           mode="left"
+          className={styles.timeline}
           items={events.map((event) => {
             const timeInfo = formatDateTime(event.occurred_at);
             return {
@@ -137,7 +140,7 @@ const ApplicationRecordModal = forwardRef<ApplicationRecordModalRef>((_props, re
               children: (
                 <Flex vertical gap={4}>
                   <Flex align="center" gap={8}>
-                    <span className="rb:font-medium">v{event.version}</span>
+                    <span className="rb:font-medium">{formatVersion(event.version)}</span>
                     <span className="rb:text-[13px] rb:text-gray-600">
                       {event.event_label || t(`application.recordEvent_${event.event_type}`)}
                     </span>
