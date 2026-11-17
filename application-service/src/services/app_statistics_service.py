@@ -11,15 +11,16 @@ statistics). Cross-domain tables (``api_keys`` / ``api_key_logs`` /
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import Any
 
-from sqlalchemy import Date, and_, cast, func
+from sqlalchemy import and_, func
 from sqlalchemy.orm import Session
 
 from ..models.conversation_model import Conversation
 from ..models.end_user_model import EndUser
 from ..repositories import cross_domain_read
+from ..utils.statistics_window import day_bucket, fill_days, utc_window
 
 # App types (agent, multi_agent, workflow) — host ApiKeyType values; services counted separately
 APP_KEY_TYPES = ("agent", "multi_agent", "workflow")
@@ -38,7 +39,8 @@ class AppStatisticsService:
         workspace_id: uuid.UUID,
         tenant_id: uuid.UUID,
         start_date: int,
-        end_date: int
+        end_date: int,
+        timezone_name: str = "UTC",
     ) -> dict[str, Any]:
         """Get app statistics.
 
@@ -53,22 +55,21 @@ class AppStatisticsService:
             Statistics dict
         """
         # Convert millisecond timestamps to datetime
-        start_dt = datetime.fromtimestamp(start_date / 1000)
-        end_dt = datetime.fromtimestamp(end_date / 1000) + timedelta(days=1)
+        start_dt, end_dt = utc_window(start_date, end_date)
 
         # 1. Conversation statistics
         conversations_stats = self._get_conversations_statistics(
-            app_id, workspace_id, start_dt, end_dt
+            app_id, workspace_id, start_dt, end_dt, timezone_name
         )
 
         # 2. New-user statistics
-        users_stats = self._get_new_users_statistics(app_id, start_dt, end_dt)
+        users_stats = self._get_new_users_statistics(app_id, start_dt, end_dt, timezone_name)
 
         # 3. API-call statistics
-        api_stats = self._get_api_calls_statistics(app_id, start_dt, end_dt)
+        api_stats = self._get_api_calls_statistics(app_id, start_dt, end_dt, timezone_name)
 
         # 4. Token-usage statistics
-        token_stats = self._get_token_statistics(tenant_id, app_id, start_dt, end_dt)
+        token_stats = self._get_token_statistics(tenant_id, app_id, start_dt, end_dt, timezone_name)
 
         return {
             "daily_conversations": conversations_stats["daily"],
@@ -78,7 +79,7 @@ class AppStatisticsService:
             "daily_api_calls": api_stats["daily"],
             "total_api_calls": api_stats["total"],
             "daily_tokens": token_stats["daily"],
-            "total_tokens": token_stats["total"]
+            "total_tokens": token_stats["total"],
         }
 
     def _get_conversations_statistics(
@@ -86,23 +87,31 @@ class AppStatisticsService:
         app_id: uuid.UUID,
         workspace_id: uuid.UUID,
         start_dt: datetime,
-        end_dt: datetime
+        end_dt: datetime,
+        timezone_name: str = "UTC",
     ) -> dict[str, Any]:
         """Get conversation statistics."""
         # Daily conversation counts
-        daily_query = self.db.query(
-            cast(Conversation.created_at, Date).label('date'),
-            func.count(Conversation.id).label('count')
-        ).filter(
-            and_(
-                Conversation.app_id == app_id,
-                Conversation.workspace_id == workspace_id,
-                Conversation.created_at >= start_dt,
-                Conversation.created_at < end_dt
+        bucket = day_bucket(Conversation.created_at, timezone_name)
+        daily_query = (
+            self.db.query(
+                bucket.label("date"),
+                func.count(Conversation.id).label("count"),
             )
-        ).group_by(cast(Conversation.created_at, Date)).all()
+            .filter(
+                and_(
+                    Conversation.app_id == app_id,
+                    Conversation.workspace_id == workspace_id,
+                    Conversation.created_at >= start_dt,
+                    Conversation.created_at < end_dt,
+                )
+            )
+            .group_by(bucket)
+            .all()
+        )
 
         daily_data = [{"date": str(row.date), "count": row.count} for row in daily_query]
+        daily_data = fill_days(daily_data, start_dt, end_dt, timezone_name)
         total = sum(row["count"] for row in daily_data)
 
         return {"daily": daily_data, "total": total}
@@ -111,23 +120,31 @@ class AppStatisticsService:
         self,
         app_id: uuid.UUID,
         start_dt: datetime,
-        end_dt: datetime
+        end_dt: datetime,
+        timezone_name: str = "UTC",
     ) -> dict[str, Any]:
         """Get new-user statistics."""
         # Daily new-user counts
-        daily_query = self.db.query(
-            cast(EndUser.created_at, Date).label('date'),
-            func.count(EndUser.id).label('count')
-        ).filter(
-            and_(
-                EndUser.app_id == app_id,
-                EndUser.created_at >= start_dt,
-                EndUser.created_at < end_dt,
-                EndUser.is_active.is_(True),
+        bucket = day_bucket(EndUser.created_at, timezone_name)
+        daily_query = (
+            self.db.query(
+                bucket.label("date"),
+                func.count(EndUser.id).label("count"),
             )
-        ).group_by(cast(EndUser.created_at, Date)).all()
+            .filter(
+                and_(
+                    EndUser.app_id == app_id,
+                    EndUser.created_at >= start_dt,
+                    EndUser.created_at < end_dt,
+                    EndUser.is_active.is_(True),
+                )
+            )
+            .group_by(bucket)
+            .all()
+        )
 
         daily_data = [{"date": str(row.date), "count": row.count} for row in daily_query]
+        daily_data = fill_days(daily_data, start_dt, end_dt, timezone_name)
         total = sum(row["count"] for row in daily_data)
 
         return {"daily": daily_data, "total": total}
@@ -136,13 +153,17 @@ class AppStatisticsService:
         self,
         app_id: uuid.UUID,
         start_dt: datetime,
-        end_dt: datetime
+        end_dt: datetime,
+        timezone_name: str = "UTC",
     ) -> dict[str, Any]:
         """Get API-call statistics."""
         # Daily API-call counts (cross-domain read: api_key_logs joined with the app's api_keys)
-        daily_query = cross_domain_read.get_daily_app_api_calls(self.db, app_id, start_dt, end_dt)
+        daily_query = cross_domain_read.get_daily_app_api_calls(
+            self.db, app_id, start_dt, end_dt, timezone_name
+        )
 
         daily_data = [{"date": str(row.date), "count": row.count} for row in daily_query]
+        daily_data = fill_days(daily_data, start_dt, end_dt, timezone_name)
         total = sum(row["count"] for row in daily_data)
 
         return {"daily": daily_data, "total": total}
@@ -152,7 +173,8 @@ class AppStatisticsService:
         tenant_id: uuid.UUID,
         app_id: uuid.UUID,
         start_dt: datetime,
-        end_dt: datetime
+        end_dt: datetime,
+        timezone_name: str = "UTC",
     ) -> dict[str, Any]:
         """Get token-usage statistics.
 
@@ -163,19 +185,17 @@ class AppStatisticsService:
         """
         # Daily token usage (read exit: model_usage_records attributed by tenant/app/llm)
         daily_query = cross_domain_read.get_daily_token_usage(
-            self.db, tenant_id, app_id, start_dt, end_dt
+            self.db, tenant_id, app_id, start_dt, end_dt, timezone_name
         )
 
         daily_data = [{"date": str(row.date), "count": int(row.tokens)} for row in daily_query]
+        daily_data = fill_days(daily_data, start_dt, end_dt, timezone_name)
         total = sum(row["count"] for row in daily_data)
 
         return {"daily": daily_data, "total": total}
 
     def get_workspace_api_statistics(
-        self,
-        workspace_id: uuid.UUID,
-        start_date: int,
-        end_date: int
+        self, workspace_id: uuid.UUID, start_date: int, end_date: int
     ) -> list[Any]:
         """Get workspace API-call statistics.
 
@@ -212,12 +232,14 @@ class AppStatisticsService:
         for date in all_dates:
             app_count = app_calls_dict.get(date, 0)
             service_count = service_calls_dict.get(date, 0)
-            daily_data.append({
-                "date": date,
-                "total_calls": app_count + service_count,
-                "app_calls": app_count,
-                "service_calls": service_count
-            })
+            daily_data.append(
+                {
+                    "date": date,
+                    "total_calls": app_count + service_count,
+                    "app_calls": app_count,
+                    "service_calls": service_count,
+                }
+            )
 
         return daily_data
 
