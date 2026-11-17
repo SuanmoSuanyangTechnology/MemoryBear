@@ -13,10 +13,8 @@ from fastapi import APIRouter, Depends
 
 from app.core.error_codes import BizCode
 from app.core.logging_config import get_api_logger
-from app.core.memory.models.metadata_models import (
-    LEGACY_METADATA_FIELDS,
-    project_display_profile,
-)
+# TODO：v0.5.7提交
+from app.core.memory.models.metadata_models import project_display_profile
 from app.core.memory.ontology_services.scene_name_resolver import project_end_user_domains_async
 from app.core.response_utils import fail, success
 from app.db import get_async_db_context
@@ -93,20 +91,15 @@ async def get_end_user_info(
 
         # 在 session 活跃期间提取所有需要的字段
         # 顶层：other_name 恒返回，aliases 有值才返回；
-        # meta_data：有值的旧字段原样返回 + 新结构 13 键展示投影（每键最多 10 条）
+        # meta_data：新结构 13 键展示投影（每键最多 10 条）与领域信息。
         raw_meta = info_record.meta_data if isinstance(info_record.meta_data, dict) else {}
 
         selected_top = {"other_name": info_record.other_name}
         if info_record.aliases:
             selected_top["aliases"] = info_record.aliases
 
-        filtered_meta = {
-            field: raw_meta[field]
-            for field in LEGACY_METADATA_FIELDS
-            if raw_meta.get(field)
-        }
-        filtered_meta.update(
-            project_display_profile(raw_meta, limit_per_key=END_USER_INFO_PROFILE_KEY_LIMIT)
+        filtered_meta = project_display_profile(
+            raw_meta, limit_per_key=END_USER_INFO_PROFILE_KEY_LIMIT
         )
 
         filtered_meta["domain_specific_info"] = await project_end_user_domains_async(
