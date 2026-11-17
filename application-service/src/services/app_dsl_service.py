@@ -1816,22 +1816,23 @@ class AppDslService:
                     if mapped:
                         config["tool_id"] = str(mapped)
                     else:
-                        # 包里声明了但目标租户不落地（custom / workflow）：**置空**。
+                        # 包里声明了但目标租户不落地（custom / workflow）：**保留**
+                        # `tool:<名称>` 本地引用，与 Agent 工具列表同一口径。
                         #
-                        # 这里与 Agent 的工具列表处理不同——节点 `tool_id` 是必填
-                        # 的单个 UUID 语义，保留 `tool:<名称>` 有两个后果：
-                        #   1) 运行期 `ToolNode.execute` 走 `get_tool_config_async`
-                        #      拿到 None，直接抛 TOOL_SELECTION_INACTIVE，整条工作流
-                        #      失败；
-                        #   2) 前端节点校验（useWorkflowCheck）把非空字符串当成
-                        #      「已配置」，且取方法列表的请求失败被 catch 吞掉，
-                        #      用户在上线前看不到任何提示。
-                        # 置空则命中前端「工具不能为空」，导入时就要求补配置，
-                        # 与同一函数里非 bundle 路径的处理保持一致。
+                        # 保留而不是置空的原因：置空等于把这条依赖从导入结果里抹掉，
+                        # 用户只看到节点「工具为空」却不知道少的是哪个工具；保留本地
+                        # 引用后，`/api/tools/methods/batch` 必然把它归到
+                        # `missing_tool_ids`（非合法 UUID），前端能按名称渲染
+                        # 「该工具已失效」。
+                        #
+                        # 代价（已知并接受）：运行期 `ToolNode.execute` 走
+                        # `get_tool_config_async` 拿到 None，抛 TOOL_SELECTION_INACTIVE，
+                        # 该节点必须重新选择工具后才能跑；前端节点校验也不会把非空
+                        # 字符串判成错，所以这个失效只在执行/引用展示时暴露。
                         warnings.append(
-                            f"[{node_label}] 工具 '{tool_id}' 未随包携带，已置空，请重新选择"
+                            f"[{node_label}] 工具 '{tool_id}' 未随包携带，需重新选择后才能运行"
                         )
-                        config["tool_id"] = None
+                        config["tool_id"] = tool_id
                         config["tool_parameters"] = {}
                         _mark_deferred(node_id)
                 else:
