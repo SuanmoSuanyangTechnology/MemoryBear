@@ -654,6 +654,7 @@ members: list[str] | None = None,
         overwrite: bool = False,
         conflict_strategy: str = "rename",
         commit: bool = True,
+        isolate_conflicts: bool = False,
     ) -> dict:
         """Import one standard pack from a zip or an allow-listed URL.
 
@@ -666,7 +667,8 @@ members: list[str] | None = None,
         ``members`` selects which members to import (omitted = all); an identifier that is
         not in the bundle is rejected. A selected member that cannot be imported fails the
         whole import — a plugin is never persisted with a missing member. A plugin that
-        already exists is rejected, not re-imported.
+        already exists is rejected by default. Market installs using
+        ``isolate_conflicts=True`` create a renamed, independent plugin instead.
 
         Overwriting is consent-gated: a member whose ``call_name`` already belongs to an
         active skill with **different** content needs ``overwrite=True`` (5001 otherwise).
@@ -792,17 +794,25 @@ members: list[str] | None = None,
         # the preview already shows every overwrite/skip and a plugin row is only
         # created when at least one member is importable (no zero-member shells).
         repo = SkillPackageRepository(db) if db is not None else None
+        if isolate_conflicts and repo is not None:
+            SkillPackageService._isolate_import_members(db, repo, tenant_id, prepared)
         resolved_plugin_name: str | None = None
         if is_plugin:
             resolved_plugin_name = (plugin_name or "").strip() or (
                 SkillPackageService._derive_plugin_name(source_ref)
             )
             if repo is not None and repo.get_plugin_by_name(tenant_id, resolved_plugin_name):
-                raise BusinessException(
-                    f"插件 {resolved_plugin_name} 已存在；插件不支持增量合并成员"
-                    "（如需调整成员请先删除原插件后重新导入）",
-                    BizCode.DUPLICATE_NAME,
-                )
+                if not isolate_conflicts:
+                    raise BusinessException(
+                        f"插件 {resolved_plugin_name} 已存在；插件不支持增量合并成员"
+                        "（如需调整成员请先删除原插件后重新导入）",
+                        BizCode.DUPLICATE_NAME,
+                    )
+                base = resolved_plugin_name[:230]
+                index = 1
+                while repo.get_plugin_by_name(tenant_id, resolved_plugin_name):
+                    resolved_plugin_name = f"{base}-copy-{index}"
+                    index += 1
 
         if repo is not None:
             SkillPackageService._plan_import_members(
@@ -929,6 +939,50 @@ members: list[str] | None = None,
             ],
         }
         return response
+
+    @staticmethod
+    def _isolate_import_members(db, repo, tenant_id, prepared: list[dict]) -> None:
+        """Market installs create independent skills instead of overwriting owners.
+
+        Keep archive member identifiers unchanged so the application reference
+        map still resolves after local names have been disambiguated.
+        """
+        reserved_calls = {item["call_name"] for item in prepared}
+        reserved_packages = {item["pkg_name"] for item in prepared}
+        for item in prepared:
+            original_call, original_name = item["call_name"], item["pkg_name"]
+            item["frontmatter"] = {
+                **item["frontmatter"],
+                "_market_original_call_name": original_call,
+                "_market_original_name": original_name,
+            }
+            digest = item["content_hash"].rsplit(":", 1)[-1][:10]
+            for field, reserved, occupied in (
+                ("call_name", reserved_calls,
+                 lambda name: SkillPackageService._find_active_skill_by_call_name(
+                     db, tenant_id, name)),
+                ("pkg_name", reserved_packages, lambda name: repo.get_by_name(tenant_id, name)
+                 or db.query(Skill.id).filter(
+                     Skill.tenant_id == tenant_id, Skill.name == name).first()),
+            ):
+                original = item[field]
+                candidate = original
+                index = 0
+                while occupied(candidate) or (candidate != original and candidate in reserved):
+                    separator = "-" if field == "pkg_name" else "_"
+                    suffix = f"{separator}{digest}" + (f"{separator}{index}" if index else "")
+                    stem = original[:64 - len(suffix)]
+                    if field == "pkg_name":
+                        stem = stem.rstrip("-")
+                    candidate = stem + suffix
+                    index += 1
+                item[field] = candidate
+                reserved.add(candidate)
+            if item["call_name"] != original_call or item["pkg_name"] != original_name:
+                item["warnings"].append(
+                    f"技能「{item['name']}」与本地技能重名，已安装为独立副本，"
+                    f"调用名称为 {item['call_name']}；原技能保持不变。"
+                )
 
     @staticmethod
     def _derive_plugin_name(source_ref: str | None) -> str:

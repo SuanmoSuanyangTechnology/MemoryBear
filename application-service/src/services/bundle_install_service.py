@@ -67,6 +67,7 @@ from ..models.tool_model import ToolStatus, ToolType
 from ..repositories.skill_package_repository import SkillPackageRepository
 from ..storage import StorageFactory
 from ..utils.datetime_utils import utcnow_naive
+from ..utils.db_locks import acquire_advisory_xact_lock
 from .app_dsl_service import AppDslService
 from .asset_bundle import BundleError, parse_bundle
 from .skill_package_service import SkillPackageService
@@ -234,6 +235,10 @@ class BundleInstallService:
         """
 
         self._origin = market_origin or {}
+        if self._origin:
+            # One lock order per tenant across apps, skills and tools. It covers
+            # both the exact-copy probe and creation until commit/rollback.
+            acquire_advisory_xact_lock(self.db, f"market-install:{tenant_id}")
         self._origin_resource_type = str(manifest.get("resource_type") or "") or None
         self._origin_context = origin_context
         self._submission_index = self._index_dependency_submissions(manifest)
@@ -332,6 +337,10 @@ class BundleInstallService:
         """
 
         self._origin = market_origin or {}
+        if self._origin:
+            # One lock order per tenant across apps, skills and tools. It covers
+            # both the exact-copy probe and creation until commit/rollback.
+            acquire_advisory_xact_lock(self.db, f"market-install:{tenant_id}")
         self._origin_resource_type = str(manifest.get("resource_type") or "") or None
         self._origin_context = origin_context
         try:
@@ -463,8 +472,8 @@ class BundleInstallService:
         """落地后的本地 id 与展示名。
 
         `dep_map` 的值是 `skills` 行 id（Agent 绑定用），而安装响应要的是技能包/
-        插件这一层：技能包按 `(tenant, name)` 回查（落地上一步刚建好它，同租户同
-        name 唯一，`uq_skill_pkg_tenant_name`）；插件必须走 `dep_map` —— 用户在安装
+        插件这一层：技能包与插件优先通过 `dep_map` 回查，避免改名后误取原有包。
+        插件必须走 `dep_map` —— 用户在安装
         弹窗里改过 `display_name` 之后插件行的 `name` 已不是包内原名，按名字回查会
         取不到，安装响应就会带着空的 `local_resource_id` 出去（卸载、needs_config
         全部断掉）。
@@ -490,7 +499,16 @@ class BundleInstallService:
                 return None, None
             return str(plugin.id), plugin.name
 
-        package = repo.get_by_name(tenant_id, str(name or ""))
+        skill_id = next((
+            (dep_map or {}).get(str(entry.get("ref")))
+            for entry in (dependencies or {}).get("skills") or []
+            if (dep_map or {}).get(str(entry.get("ref")))
+        ), None)
+        skill = self.db.get(Skill, uuid.UUID(skill_id)) if skill_id else None
+        package = (
+            repo.get_by_id(skill.package_id, tenant_id) if skill is not None and skill.package_id
+            else repo.get_by_name(tenant_id, str(name or ""))
+        )
         if package is None:
             return None, None
         return str(package.id), (package.display_name or package.name)
@@ -537,7 +555,9 @@ class BundleInstallService:
             market_ref = _market_ref_of(entry, index)
             market_key = (
                 f"{market_ref['resource_id']}@{market_ref['version']}"
-                if market_ref else ""
+                if market_ref else (
+                    "" if plugin_ref else f"embedded:{entry.get('ref') or entry.get('name')}"
+                )
             )
             grouped.setdefault((plugin_ref, market_key), []).append(entry)
         return grouped
@@ -565,12 +585,24 @@ class BundleInstallService:
         if own_market_ref:
             dependencies = _skill_dependencies(payload, dependencies)
 
+        if self._origin:
+            acquire_advisory_xact_lock(self.db, f"market-install:{tenant_id}")
         units = 0
-        for entries in self._group_skill_entries(dependencies, self._submission_index).values():
+        grouped = self._group_skill_entries(dependencies, self._submission_index)
+        for (plugin_ref, _), entries in grouped.items():
             market_ref = _market_ref_of(entries[0], self._submission_index)
-            if market_ref and not own_market_ref:
-                if self._find_market_skill_copy(market_ref, tenant_id, entries) is not None:
-                    continue
+            copy_origin = market_ref or self._origin
+            if copy_origin and not market_ref and not own_market_ref:
+                group = repr((plugin_ref, sorted(str(entry.get("ref")) for entry in entries)))
+                group_key = hashlib.sha256(group.encode("utf-8")).hexdigest()
+                copy_origin = {
+                    "resource_id": f"embedded:{copy_origin['resource_id']}:{group_key}",
+                    "version": copy_origin["version"],
+                }
+            if copy_origin and self._find_market_skill_copy(
+                copy_origin, tenant_id, entries
+            ) is not None:
+                continue
             units += 1
         return units
 
@@ -587,10 +619,8 @@ class BundleInstallService:
     ) -> None:
         """Each plugin lands as one multi-member zip; standalone skills land alone.
 
-        A skill that already exists in the target tenant is *overwritten* when its
-        `call_name` matches (that is the whole idempotency key of the skill
-        runtime); a package-name clash with a different call_name is degraded
-        instead of aborting the install.
+        Market-origin installs disambiguate occupied names and create independent
+        skills. Existing skill IDs and files must never be overwritten by an install.
 
         ``own_market_ref``: 技能包没有 `origin` 列，来源靠 `source_type` /
         `source_ref` 两列表达（§11.2）。 ``True`` 只在「从市场技能/工具 tab 直接
@@ -613,33 +643,40 @@ class BundleInstallService:
             # Every dependency with market_ref is an exact copy of that market
             # version; persist it so a later app publication can reuse it.
             source_type = "market" if origin else "imported"
-            source_ref = (
-                self._market_source_ref(origin)
-                if market_ref or own_market_ref
-                else None
-            )
+            copy_origin = origin
+            embedded = bool(origin and not market_ref and not own_market_ref)
+            if embedded:
+                # An embedded member has no standalone market resource. Give its
+                # group a local-only identity within the immutable parent version.
+                group = repr((plugin_ref, sorted(str(entry.get("ref")) for entry in entries)))
+                group_key = hashlib.sha256(group.encode("utf-8")).hexdigest()
+                copy_origin = {
+                    "resource_id": f"embedded:{origin['resource_id']}:{group_key}",
+                    "version": origin["version"],
+                }
+            source_ref = self._market_source_ref(copy_origin) if copy_origin else None
             # 文件字节的来源默认是父包（顶层安装的那个版本）；按市场引用补全的
             # 依赖改为从那一版依赖自己的文件包取。
             file_source = self._origin_file_source()
-            if market_ref and not own_market_ref:
+            if origin:
                 # 同一市场技能/插件版本已在本租户 → 只补 dep_map，不重复导入。
-                local = self._find_market_skill_copy(market_ref, tenant_id, entries)
+                local = self._find_market_skill_copy(copy_origin, tenant_id, entries)
                 if local is not None:
                     for entry in entries:
-                        skill_id = local["members"].get(
-                            str((entry.get("payload") or {}).get("call_name") or entry.get("name"))
-                        )
+                        skill_id = local["members"].get(str(entry.get("ref")))
                         if skill_id:
                             dep_map[str(entry.get("ref"))] = skill_id
                     if plugin_ref and local["plugin_id"]:
                         dep_map[plugin_ref] = local["plugin_id"]
-                    self._record_dependency(
-                        "skill_package", market_ref,
-                        local["plugin_id"] or local["package_id"],
-                        reused=True,
-                        version_mismatch=local["version"] != market_ref["version"],
-                    )
+                    if not embedded:
+                        self._record_dependency(
+                            "skill_package", origin,
+                            local["plugin_id"] or local["package_id"],
+                            reused=True,
+                            version_mismatch=local["version"] != origin["version"],
+                        )
                     continue
+            if market_ref and not own_market_ref:
                 # 存量包可能内嵌了文件：那时键空间仍属于父版本，只有真正从依赖
                 # 清单补出来的条目才改指向依赖自己的版本文件包。
                 embedded = all(entry.get("files") for entry in entries)
@@ -681,6 +718,7 @@ class BundleInstallService:
                     source_ref=source_ref,
                     conflict_strategy="rename",
                     commit=False,
+                    isolate_conflicts=bool(origin),
                 )
             except BusinessException as error:
                 if strict:
@@ -693,7 +731,7 @@ class BundleInstallService:
                 continue
 
             for member in response.get("members") or []:
-                entry = member_refs.get(str(member.get("call_name")))
+                entry = member_refs.get(str(member.get("identifier")))
                 if entry is None:
                     continue
                 if member.get("package_id"):
@@ -731,8 +769,17 @@ class BundleInstallService:
                 call_name = payload.get("call_name")
                 package_name = _slug(str(entry.get("name") or call_name or "skill"))
                 root = f"{package_name}/" if nested else ""
-                if call_name:
-                    member_refs[str(call_name)] = entry
+                # Import identifiers describe archive members and survive local
+                # call-name isolation; use them to bind the original app ref.
+                identifier = package_name if nested else str(
+                    (payload.get("frontmatter_raw") or {}).get("name") or call_name or ""
+                )
+                if identifier in member_refs:
+                    raise BusinessException(
+                        f"技能归档成员标识重复: {identifier}", BizCode.EXTERNAL_CATALOG_INVALID
+                    )
+                if identifier:
+                    member_refs[identifier] = entry
                 files = entry.get("files") or []
                 if not files:
                     raise BusinessException(
@@ -878,8 +925,8 @@ class BundleInstallService:
             )
 
             if market_ref:
-                # 目标租户已有该市场资源就复用：版本不同也不自动升级（§3.4），
-                # 只是把 `version_mismatch` 报给调用方，避免静默改写用户空间。
+                # Only reuse the exact version; another version gets a separate
+                # local tool so existing applications remain bound to their copy.
                 #
                 # 只对 mcp 复用：custom / workflow 现在一律不落地，若本租户还留着
                 # 改造前安装生成的外部占位行（`is_active=True` 且带
@@ -887,7 +934,9 @@ class BundleInstallService:
                 # 不好的工具替代「缺失」上报。这类历史行按不存在处理，落到下面
                 # 的 custom/workflow 分支报 missing。
                 local = (
-                    self._find_external_tool_copy(market_ref["resource_id"], tenant_id)
+                    self._find_external_tool_copy(
+                        market_ref["resource_id"], tenant_id, market_ref["version"]
+                    )
                     if tool_type == ToolType.MCP.value
                     else None
                 )
@@ -1108,14 +1157,9 @@ class BundleInstallService:
         return str(row.id) if row is not None else None
 
     def _find_external_tool_copy(
-            self, market_resource_id: Any, tenant_id: uuid.UUID
+            self, market_resource_id: Any, tenant_id: uuid.UUID, version: str
     ) -> tuple[str, str] | None:
-        """本租户已落地的同一市场工具（**不限版本**）+ 它当时的版本。
-
-        §3.4 要求「本地已有版本与引用版本不一致时复用本地版本，不自动升级」,
-        所以复用判定只能按 `external_resource_id`，版本差异通过
-        `version_mismatch` 告诉调用方。
-        """
+        """Only reuse the exact requested market tool version; never upgrade another copy."""
 
         if not market_resource_id:
             return None
@@ -1124,6 +1168,7 @@ class BundleInstallService:
             .where(
                 ToolConfig.tenant_id == tenant_id,
                 ToolConfig.external_resource_id == str(market_resource_id),
+                ToolConfig.external_version == str(version),
                 ToolConfig.is_active.is_(True),
             )
             .order_by(ToolConfig.created_at.desc())
@@ -1138,12 +1183,7 @@ class BundleInstallService:
             tenant_id: uuid.UUID,
             entries: list[dict[str, Any]],
     ) -> dict[str, Any] | None:
-        """本租户已落地的同一市场技能/插件（不限版本）。
-
-        技能包没有 `origin` 列，来源记在 `source_type='market'` +
-        `source_ref='<resource_id>@<version>'`（§11.2），所以复用只能按前缀匹配
-        资源 id，版本差异同样只体现在 `version_mismatch`。
-        """
+        """Find a complete local copy of the exact requested market skill version."""
 
         resource_id = market_ref["resource_id"]
         packages = self.db.execute(
@@ -1151,7 +1191,7 @@ class BundleInstallService:
             .where(
                 SkillPackage.tenant_id == tenant_id,
                 SkillPackage.source_type == "market",
-                SkillPackage.source_ref.like(f"{resource_id}@%"),
+                SkillPackage.source_ref == f"{resource_id}@{market_ref['version']}",
                 SkillPackage.is_active.is_(True),
             )
             .order_by(SkillPackage.created_at.desc())
@@ -1159,34 +1199,53 @@ class BundleInstallService:
         if not packages:
             return None
 
-        wanted = {
-            str((entry.get("payload") or {}).get("call_name") or entry.get("name"))
-            for entry in entries
-        }
-        members: dict[str, str] = {}
+        # A plugin consists of multiple packages, but a reusable copy must be
+        # complete within ONE plugin. Standalone packages are separate groups.
+        groups: dict[tuple[str, str], list] = {}
         for package in packages:
-            rows = self.db.execute(
-                select(Skill).where(
+            key = (
+                ("plugin", str(package.plugin_id)) if package.plugin_id
+                else ("package", str(package.id))
+            )
+            groups.setdefault(key, []).append(package)
+        for group in groups.values():
+            by_name: dict[str, set[str]] = {}
+            by_call: dict[str, set[str]] = {}
+            for package in group:
+                metadata = package.frontmatter_raw or {}
+                rows = self.db.execute(select(Skill).where(
                     Skill.package_id == package.id, Skill.is_active.is_(True)
+                )).scalars().all()
+                for row in rows:
+                    name = str(metadata.get("_market_original_name") or row.name)
+                    call = str(
+                        metadata.get("_market_original_call_name") or row.call_name or row.name
+                    )
+                    by_name.setdefault(name, set()).add(str(row.id))
+                    by_call.setdefault(call, set()).add(str(row.id))
+            members: dict[str, str] = {}
+            for entry in entries:
+                # Package names and call names are separate namespaces. Entries
+                # with a package name resolve by that name, never another row's
+                # identically-spelled call name. Ref keys stay unambiguous.
+                name = entry.get("name")
+                call = (entry.get("payload") or {}).get("call_name")
+                candidates = (
+                    by_name.get(str(name), set()) if name else by_call.get(str(call), set())
                 )
-            ).scalars().all()
-            for row in rows:
-                if wanted and str(row.name) not in wanted:
-                    continue
-                members.setdefault(str(row.name), str(row.id))
-        if not members:
-            return None
-
-        first = packages[0]
-        version = ""
-        if first.source_ref and "@" in str(first.source_ref):
-            version = str(first.source_ref).rsplit("@", 1)[1]
-        return {
-            "package_id": str(first.id),
-            "plugin_id": str(first.plugin_id) if first.plugin_id else None,
-            "version": version,
-            "members": members,
-        }
+                if len(candidates) != 1:
+                    break
+                members[str(entry.get("ref"))] = next(iter(candidates))
+            else:
+                if members:
+                    first = group[0]
+                    return {
+                        "package_id": str(first.id),
+                        "plugin_id": str(first.plugin_id) if first.plugin_id else None,
+                        "version": market_ref["version"],
+                        "members": members,
+                    }
+        return None
 
     def _record_dependency(
             self,
