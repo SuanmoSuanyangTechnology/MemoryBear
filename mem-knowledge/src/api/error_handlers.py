@@ -45,6 +45,7 @@ _HTTP_ERRORS = {
 # The actual endpoint identity is independent of router prefixes and query strings.
 # ChunkRetrieve is the only public request schema with rerank fields today.
 _VALIDATION_CONTRACTS = {
+    ("src.api.routes.faq_import", "submit_import"): "KB_HTTP_VALIDATION_ERROR",
     ("src.api.routes.chunk", "retrieve_chunks"): "KB_RETRIEVAL_REQUEST_INVALID",
 }
 _RERANK_FIELDS = frozenset({"rerank_mode", "rerank_weights"})

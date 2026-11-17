@@ -13,7 +13,7 @@ WIKI_TABLE_NAMES = frozenset(
         "wiki_document_page_tasks",
     }
 )
-KNOWLEDGE_TABLE_NAMES = WIKI_TABLE_NAMES | {"knowledge_upload_fingerprints"}
+KNOWLEDGE_TABLE_NAMES = WIKI_TABLE_NAMES | {"knowledge_upload_fingerprints", "wiki_faq_import_jobs"}
 VERSION_TABLE = "alembic_version_knowledge"
 
 

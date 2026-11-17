@@ -36,6 +36,7 @@ def route_through_knowledge_service(
     profile: CallProfile = CallProfile.JSON,
     public: bool = False,
     require_remote: bool = False,
+    request_body_limit: int | None = None,
 ):
     """Use the remote route proxy when the process runtime enabled it."""
 
@@ -67,9 +68,7 @@ def route_through_knowledge_service(
                         from app.core.api_key_auth import get_current_api_key_auth
 
                         api_key_auth = get_current_api_key_auth()
-                    trace_id = (
-                        getattr(request.state, "trace_id", "") or uuid.uuid4().hex
-                    )
+                    trace_id = getattr(request.state, "trace_id", "") or uuid.uuid4().hex
                     context = await get_api_key_knowledge_context(
                         api_key_auth,
                         source=source,
@@ -78,9 +77,7 @@ def route_through_knowledge_service(
                 else:
                     user = kwargs.get("current_user")
                     if user is None:
-                        raise KnowledgeContextError(
-                            "Authenticated knowledge user is required"
-                        )
+                        raise KnowledgeContextError("Authenticated knowledge user is required")
                     principal = KnowledgePrincipal(
                         actor_id=uuid.UUID(str(user.id)),
                         actor_name=getattr(user, "username", None),
@@ -94,6 +91,17 @@ def route_through_knowledge_service(
                     source=source,
                     trace_id=trace_id,
                 )
+            if request_body_limit is not None:
+                from fastapi import HTTPException
+
+                body = bytearray()
+                async for chunk in request.stream():
+                    if len(body) + len(chunk) > request_body_limit:
+                        raise HTTPException(
+                            status_code=413, detail="FAQ import request body too large"
+                        )
+                    body.extend(chunk)
+                request._body = bytes(body)
             request_db = kwargs.get("db")
             close = getattr(request_db, "close", None)
             if close is not None:

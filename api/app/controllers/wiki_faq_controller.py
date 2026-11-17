@@ -5,6 +5,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
+from app.core.config import settings
 from app.dependencies import cur_workspace_access_guard_async, get_current_user_async
 from app.integrations.knowledge.contracts import KnowledgeRetrievalSource
 from app.integrations.knowledge.route_proxy import route_through_knowledge_service
@@ -24,6 +25,33 @@ router = APIRouter(
     tags=["wiki-faq"],
     dependencies=[Depends(get_current_user_async)],
 )
+
+
+@router.post("/import", status_code=202)
+@cur_workspace_access_guard_async()
+@route_through_knowledge_service(
+    source=KnowledgeRetrievalSource.MANAGER_API,
+    require_remote=True,
+    request_body_limit=settings.MAX_FILE_SIZE + 1024 * 1024,
+)
+async def import_faqs(
+    request: Request,
+    kb_id: UUID,
+    current_user: Annotated[User, Depends(get_current_user_async)],
+):
+    raise HTTPException(status_code=503, detail="FAQ import requires mem-knowledge")
+
+
+@router.get("/import/{task_id}")
+@cur_workspace_access_guard_async()
+@route_through_knowledge_service(source=KnowledgeRetrievalSource.MANAGER_API, require_remote=True)
+async def faq_import_progress(
+    request: Request,
+    kb_id: UUID,
+    task_id: UUID,
+    current_user: Annotated[User, Depends(get_current_user_async)],
+):
+    raise HTTPException(status_code=503, detail="FAQ import requires mem-knowledge")
 
 
 @router.get("")
