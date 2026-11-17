@@ -667,7 +667,8 @@ members: list[str] | None = None,
         ``members`` selects which members to import (omitted = all); an identifier that is
         not in the bundle is rejected. A selected member that cannot be imported fails the
         whole import — a plugin is never persisted with a missing member. A plugin that
-        already exists is rejected, not re-imported.
+        already exists is rejected by default. Market installs using
+        ``isolate_conflicts=True`` create a renamed, independent plugin instead.
 
         Overwriting is consent-gated: a member whose ``call_name`` already belongs to an
         active skill with **different** content needs ``overwrite=True`` (5001 otherwise).
@@ -968,8 +969,12 @@ members: list[str] | None = None,
                 candidate = original
                 index = 0
                 while occupied(candidate) or (candidate != original and candidate in reserved):
-                    suffix = f"_{digest}" + (f"_{index}" if index else "")
-                    candidate = original[:64 - len(suffix)] + suffix
+                    separator = "-" if field == "pkg_name" else "_"
+                    suffix = f"{separator}{digest}" + (f"{separator}{index}" if index else "")
+                    stem = original[:64 - len(suffix)]
+                    if field == "pkg_name":
+                        stem = stem.rstrip("-")
+                    candidate = stem + suffix
                     index += 1
                 item[field] = candidate
                 reserved.add(candidate)
