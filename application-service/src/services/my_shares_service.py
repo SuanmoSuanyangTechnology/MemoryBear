@@ -4,9 +4,9 @@
 `docs/应用共享与市场/应用共享与社区市场改造方案.md` §4.4 是权威，本模块只负责取数：
 
 - **资源中心行** ← `app_assets.status = published`（`share_mode` 决定 `editable`）
-- **社区市场行** ← 存在 `market_sync` 行即说明投过稿（`market_sync` 是投稿兜底表，
+- **社区市场行** ← 只展示未失败的 `market_sync` 投稿（失败账只用于重试，
   本地提交成功、市场未收到时也留行），状态分两层：
-  1. 本地 `market_sync.status = pending_sync | sync_failed` 优先（市场还没收到，问它没意义）
+  1. 本地 `market_sync.status = pending_sync` 优先（市场还没收到，问它没意义）
   2. 其余问市场一次（`MarketGateway.publication_status`，一次批量，最多 100 个）
 
 两层之外还有**上架状态**：`share_status` 只表达投稿申请的审核结果，同一个
@@ -291,6 +291,10 @@ class MySharesService:
 
         latest: dict[uuid.UUID, MarketSync] = {}
         for sync in syncs:
+            # Failed submissions never became a market share. Exclude them before
+            # choosing the latest row so they cannot hide an earlier accepted one.
+            if sync.status == MarketSyncStatus.SYNC_FAILED:
+                continue
             current = latest.get(sync.asset_id)
             if current is None or (sync.created_at, sync.id) > (
                     current.created_at, current.id

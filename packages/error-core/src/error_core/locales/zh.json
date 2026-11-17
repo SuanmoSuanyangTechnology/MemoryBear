@@ -86,6 +86,8 @@
     "IDEMPOTENCY_IN_PROGRESS": "相同请求正在处理中，请稍后重试",
     "IDEMPOTENCY_KEY_REUSED": "幂等键已用于不同请求，请更换后重试",
     "MCP_NOT_VERIFIED": "MCP 工具连通性验证未通过",
+    "MARKET_APP_VERSION_EXISTS": "该应用资源的此版本在社区市场已存在，请勿重复共享",
+    "MARKET_RESOURCE_REVIEW_PENDING": "该资源已有其他版本待审核，请先撤回申请或等待审核完成后，再提交新版本",
     "MODEL_CONFIG_INVALID": "模型配置无效",
     "API_KEY_MISSING": "缺少模型 API Key",
     "PROVIDER_NOT_SUPPORTED": "不支持该模型供应商",
