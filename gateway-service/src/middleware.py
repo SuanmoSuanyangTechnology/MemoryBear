@@ -49,13 +49,12 @@ so request.url.scheme reflects the public scheme, same as the monolith.
 
 import logging
 import re
-import time
 import uuid
 from dataclasses import dataclass
 
 from auth_sdk.audit import AuditLogger
 from auth_sdk.ratelimit import ApiKeyRateLimiter
-from auth_sdk.schema import ApiKeyContext, AuditEvent
+from auth_sdk.schema import AuditEvent
 from auth_sdk.snapshot import SnapshotReader
 from auth_sdk.token import LocalTokenIssuer, TokenVerifier
 from fastapi import Request
@@ -283,32 +282,7 @@ class GatewayMiddleware(BaseHTTPMiddleware):
         self._rewrite_headers(request, result.identity_headers)
         if deps.audit is not None and result.audit_event is not None:
             await deps.audit.audit(AuditEvent(**result.audit_event))
-        identity = request.state.identity
-        if not isinstance(identity, ApiKeyContext) or deps.audit is None:
-            return await call_next(request)
-        started = time.perf_counter()
-        status_code = 500
-        try:
-            response = await call_next(request)
-            status_code = response.status_code
-            return response
-        finally:
-            # Persist separately from auth.granted: each accepted API-key request
-            # produces exactly one usage row, including downstream failures.
-            await deps.audit.audit(AuditEvent(
-                event_type="api_key.request",
-                actor_id=identity.user_id,
-                tenant_id=identity.tenant_id,
-                target=f"{request.method} {request.url.path}",
-                result="ok" if status_code < 400 else "error",
-                detail={
-                    "api_key_id": identity.api_key_id,
-                    "endpoint": request.url.path,
-                    "method": request.method,
-                    "status_code": status_code,
-                    "response_time": round((time.perf_counter() - started) * 1000),
-                },
-            ))
+        return await call_next(request)
 
     @staticmethod
     def _rewrite_headers(request: Request, added: dict[str, str]) -> None:

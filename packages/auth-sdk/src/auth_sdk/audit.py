@@ -32,7 +32,7 @@ class AuditLogger:
             "event_id": event_id,
             "event_type": event.event_type, "actor_id": event.actor_id,
             "tenant_id": event.tenant_id, "target": event.target,
-            "result": event.result, "detail": json.dumps(event.detail or {}, ensure_ascii=False),
+            "result": event.result, "detail": event.detail,
             "ts": (event.ts or datetime.now(timezone.utc)).isoformat(),
         }
         try:
