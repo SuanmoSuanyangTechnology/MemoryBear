@@ -951,7 +951,10 @@ class AppDslService:
             id=uuid.uuid4(),
             workspace_id=workspace_id,
             created_by=user_id,
-            name=self._unique_app_name(app_meta.get("name", "导入应用"), workspace_id, app_type),
+            name=self._unique_app_name(
+                app_meta.get("name", "导入应用"), workspace_id, app_type,
+                fullwidth_suffix=(origin_columns or {}).get("external_source") == "community_market",
+            ),
             description=app_meta.get("description"),
             icon=app_meta.get("icon"),
             icon_type=app_meta.get("icon_type"),
@@ -1412,7 +1415,10 @@ class AppDslService:
                         redis_client=redis_client,
                     )
 
-    def _unique_app_name(self, name: str, workspace_id: uuid.UUID, app_type: AppType) -> str:
+    def _unique_app_name(
+        self, name: str, workspace_id: uuid.UUID, app_type: AppType,
+        *, fullwidth_suffix: bool = False,
+    ) -> str:
         """Generate a unique app name, checking own and shared-to-workspace apps."""
         # App names of this workspace
         existing = {r[0] for r in self.db.query(App.name).filter(
@@ -1431,10 +1437,11 @@ class AppDslService:
         existing |= shared_names
         if name not in existing:
             return name
+        left, right = ("（", "）") if fullwidth_suffix else ("(", ")")
         counter = 1
-        while f"{name}({counter})" in existing:
+        while f"{name}{left}{counter}{right}" in existing:
             counter += 1
-        return f"{name}({counter})"
+        return f"{name}{left}{counter}{right}"
 
     def _resolve_model(
         self,
