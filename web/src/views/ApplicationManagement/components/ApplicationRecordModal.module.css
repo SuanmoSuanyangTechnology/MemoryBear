@@ -1,0 +1,19 @@
+.timeline :global(.ant-timeline-item-label) {
+  inset-inline-start: 0 !important;
+  width: 180px !important;
+  text-align: right !important;
+}
+
+.timeline :global(.ant-timeline-item-head) {
+  inset-inline-start: 187px !important;
+  margin-inline-start: 0 !important;
+}
+
+.timeline :global(.ant-timeline-item-tail) {
+  inset-inline-start: 191px !important;
+}
+
+.timeline :global(.ant-timeline-item-content) {
+  inset-inline-start: 209px !important;
+  width: calc(100% - 209px) !important;
+}
