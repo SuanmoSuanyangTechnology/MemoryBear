@@ -6,4 +6,4 @@ export const HOME_ACTIVITY_MOCK = false
 
 
 // Reuse the dashboard's semantic palette for both chart modes.
-export const activityColors = ['#155EEF', '#FFA940', '#8D4EDA', '#91CEFF', '#DFE4ED']
+export const activityColors = ['#155eef', '#ffaa6d', '#9c6fff', '#78a9f5', '#d5dbe5']
