@@ -286,7 +286,12 @@ async def create_knowledge(
         create_data.model_dump(exclude_unset=True), principal, runtime.model_runtime
     )
     async with runtime.database.async_session() as db:
-        knowledge = await knowledge_service.create_knowledge(db, create_data, principal)
+        knowledge = await knowledge_service.create_knowledge(
+            db,
+            create_data,
+            principal,
+            max_folder_depth=runtime.settings.kb_knowledge_folder_max_depth,
+        )
         data = await knowledge_service.knowledge_to_data(db, knowledge)
     if source is KnowledgeRetrievalSource.EXTERNAL_API:
         data = project_public_knowledge_data(data)
@@ -384,21 +389,22 @@ async def update_knowledge(
             knowledge_id,
             update_data,
             principal,
+            max_folder_depth=runtime.settings.kb_knowledge_folder_max_depth,
         )
-    await validate_requested_knowledge_model_availability(
-        update_data.model_dump(exclude_unset=True), principal, runtime.model_runtime
-    )
-    if plan.delete_vector_index and plan.write_input_error is None:
-        await (await runtime.elasticsearch.client()).indices.delete(
-            index=collection_name_for_knowledge(knowledge_id),
-            ignore_unavailable=True,
+        await validate_requested_knowledge_model_availability(
+            update_data.model_dump(exclude_unset=True), principal, runtime.model_runtime
         )
-    async with runtime.database.async_session() as db:
+        if plan.delete_vector_index and plan.write_input_error is None:
+            await (await runtime.elasticsearch.client()).indices.delete(
+                index=collection_name_for_knowledge(knowledge_id),
+                ignore_unavailable=True,
+            )
         outcome = await knowledge_service.apply_knowledge_update(
             db,
             plan,
             principal,
             wiki_backfill_batch_size=runtime.settings.kb_wiki_backfill_batch_size,
+            max_folder_depth=runtime.settings.kb_knowledge_folder_max_depth,
         )
     if outcome.invalidate_workspace_id is not None:
         await knowledge_service.invalidate_storage_type_cache(

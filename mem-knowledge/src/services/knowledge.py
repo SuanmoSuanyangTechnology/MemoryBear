@@ -36,6 +36,7 @@ from ..repositories.knowledge_share import (
 )
 from ..repositories.reference import ReferenceRepository
 from ..utils.datetime_utils import to_timestamp_ms, utcnow_naive
+from .folder_hierarchy import validate_knowledge_hierarchy
 from .knowledge_model_validation import validate_requested_knowledge_models
 from .write_validation import validate_write_fields
 
@@ -570,12 +571,19 @@ async def create_knowledge(
     db: AsyncSession,
     create_data: KnowledgeCreate,
     principal: Principal,
+    *,
+    max_folder_depth: int,
 ) -> Knowledge:
     requested_parent_id = create_data.parent_id
     if requested_parent_id and requested_parent_id != principal.workspace_id:
         parent = await get_knowledge(db, requested_parent_id, principal)
         if parent is None:
             raise _not_found("KB_PARENT_KNOWLEDGE_NOT_FOUND")
+    if create_data.type == KnowledgeType.FOLDER:
+        await db.run_sync(
+            validate_knowledge_hierarchy, principal.workspace_id,
+            create_data.model_dump(exclude_unset=True), max_folder_depth,
+        )
     await validate_requested_knowledge_models(
         db,
         create_data.model_dump(exclude_unset=True),
@@ -660,6 +668,8 @@ async def prepare_knowledge_update(
     knowledge_id: uuid.UUID,
     update_data: KnowledgeUpdate,
     principal: Principal,
+    *,
+    max_folder_depth: int | None = None,
 ) -> KnowledgeUpdatePlan:
     update_dict = update_data.model_dump(exclude_unset=True)
     knowledge = await _resolve_knowledge_update_target(
@@ -670,12 +680,16 @@ async def prepare_knowledge_update(
     )
     if knowledge is None:
         raise _not_found()
-    if "parent_id" in update_dict:
-        parent_id = update_dict["parent_id"]
-        if parent_id is not None and parent_id != principal.workspace_id:
-            parent = await get_knowledge(db, parent_id, principal)
-            if parent is None:
-                raise _not_found("KB_PARENT_KNOWLEDGE_NOT_FOUND")
+    if {"parent_id", "status"} & update_dict.keys():
+        from ..bootstrap import get_settings
+
+        await db.run_sync(
+            validate_knowledge_hierarchy, knowledge.workspace_id, update_dict,
+            max_folder_depth if max_folder_depth is not None
+            else get_settings().kb_knowledge_folder_max_depth,
+            knowledge.id,
+        )
+        await db.refresh(knowledge)
     if "name" in update_dict and update_dict["name"] != knowledge.name:
         if await knowledge_repository.get_knowledge_by_name_async(
             db,
@@ -730,6 +744,7 @@ async def apply_knowledge_update(
     principal: Principal,
     *,
     wiki_backfill_batch_size: int | None = None,
+    max_folder_depth: int | None = None,
 ) -> KnowledgeMutationOutcome:
     knowledge = await _resolve_knowledge_update_target(
         db,
@@ -739,6 +754,16 @@ async def apply_knowledge_update(
     )
     if knowledge is None:
         raise _not_found()
+    if {"parent_id", "status"} & plan.update_fields.keys():
+        from ..bootstrap import get_settings
+
+        await db.run_sync(
+            validate_knowledge_hierarchy, knowledge.workspace_id, plan.update_fields,
+            max_folder_depth if max_folder_depth is not None
+            else get_settings().kb_knowledge_folder_max_depth,
+            knowledge.id,
+        )
+        await db.refresh(knowledge)
     from ..rag.wiki.config import read_wiki_config
 
     if (plan.parser_config_update is not None or "llm_id" in plan.update_fields

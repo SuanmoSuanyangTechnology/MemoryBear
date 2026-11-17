@@ -22,6 +22,13 @@ class KnowledgeSettings(BaseSettings):
 
     service_name: Literal["mem-knowledge"] = "mem-knowledge"
 
+    kb_knowledge_folder_max_depth: int = Field(
+        default=3, ge=1, validation_alias="KB_KNOWLEDGE_FOLDER_MAX_DEPTH",
+    )
+    kb_file_folder_max_depth: int = Field(
+        default=4, ge=1, validation_alias="KB_FILE_FOLDER_MAX_DEPTH",
+    )
+
     # Wiki execution budgets are ceilings, not content truncation policies.
     kb_wiki_segment_tokens: int = Field(default=32768, ge=128,
                                        validation_alias="KB_WIKI_SEGMENT_TOKENS")
