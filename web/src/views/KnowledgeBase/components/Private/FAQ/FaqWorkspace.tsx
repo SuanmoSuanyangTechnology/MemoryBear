@@ -21,6 +21,7 @@ import { formatDateTime } from '@/utils/format'
 import type { FaqItem, FaqStatus, AllFaqStatus, FaqListResponse } from './types';
 import { statusColors } from './constants';
 import Tag from '@/components/Tag';
+import FaqImport, { type FaqImportRef } from './FaqImport';
 
 const statuses: AllFaqStatus[] = ['all', 'pending', 'approved', 'change_pending'];
 
@@ -42,6 +43,7 @@ export default function FaqWorkspace({ knowledgeBaseId, onOpenWikiPage }: {
   const faqReviewModalRef = useRef<FaqReviewModalRef>(null)
   const faqDetailDrawerRef = useRef<FaqDetailDrawerRef>(null)
   const tableRef = useRef<TableRef>(null);
+  const importRef = useRef<FaqImportRef>(null);
 
   const [busy, setBusy] = useState(false);
 
@@ -272,11 +274,13 @@ export default function FaqWorkspace({ knowledgeBaseId, onOpenWikiPage }: {
           >
             {t('knowledgeBase.faq.disable')}
           </Button>
+          <Button onClick={() => importRef.current?.open()}>批量导入</Button>
           <Button type="primary" onClick={() => editModalRef.current?.handleOpen()}>
             {t('knowledgeBase.faq.add')}
           </Button>
         </Space>
       </Flex>
+      <FaqImport ref={importRef} knowledgeBaseId={knowledgeBaseId} total={totalAll} refresh={refresh} />
       <Table<FaqItem>
         ref={tableRef}
         apiUrl={getFaqListUrl(knowledgeBaseId)}
