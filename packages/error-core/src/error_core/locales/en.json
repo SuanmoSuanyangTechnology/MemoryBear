@@ -50,6 +50,7 @@
     "ACL_RULE_NOT_FOUND": "ACL rule not found",
     "USER_SNAPSHOT_NOT_FOUND": "User not found",
     "DUPLICATE_NAME": "Name already exists",
+    "SKILL_PACKAGE_NAME_CONFLICT": "The package name (name in SKILL.md) already exists. Changing only the display name and call name cannot create a copy. Change name in SKILL.md and repackage, or delete the existing skill before importing again.",
     "RESOURCE_ALREADY_EXISTS": "Resource already exists",
     "VERSION_ALREADY_EXISTS": "Version already exists",
     "STATE_CONFLICT": "The current state does not allow this operation",
