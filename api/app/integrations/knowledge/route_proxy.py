@@ -92,13 +92,14 @@ def route_through_knowledge_service(
                     trace_id=trace_id,
                 )
             if request_body_limit is not None:
-                from fastapi import HTTPException
+                from app.core.exceptions import BusinessException
+                from app.core.error_codes import BizCode
 
                 body = bytearray()
                 async for chunk in request.stream():
                     if len(body) + len(chunk) > request_body_limit:
-                        raise HTTPException(
-                            status_code=413, detail="FAQ import request body too large"
+                        raise BusinessException(
+                            "FAQ import request body too large", BizCode.FILE_TOO_LARGE
                         )
                     body.extend(chunk)
                 request._body = bytes(body)
