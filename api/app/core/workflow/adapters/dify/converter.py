@@ -231,9 +231,9 @@ class DifyConverter(BaseConverter):
     def convert_variable_type(self, target_type: VariableType | None, origin_value: Any):
         # `variable_type_map` 对不认识的 Dify 类型返回 None。空常量会让
         # `DEFAULT_VALUE(None)` 抛 TypeError 而中止整份导入，原始值反而更适合
-        # 兜底：非空时下面的 `case _` 原样返回，空时退回空串。
+        # 兜底：仅 None 退回空串，保留 0、False 和空容器等合法值。
         if target_type is None:
-            return origin_value if origin_value else ""
+            return origin_value if origin_value is not None else ""
         if not origin_value:
             return DEFAULT_VALUE(target_type)
         try:
@@ -329,7 +329,12 @@ class DifyConverter(BaseConverter):
             "raw-text": HttpContentType.RAW,
             "binary": HttpContentType.BINARY,
         }
-        return content_type_map.get(content_type, content_type)
+        if content_type in content_type_map:
+            return content_type_map[content_type]
+        try:
+            return HttpContentType(content_type)
+        except (ValueError, TypeError):
+            return HttpContentType.NONE
 
     @staticmethod
     def convert_http_error_handle_type(handle_type):
