@@ -1921,6 +1921,21 @@ class AppDslService:
                         config["mode"] = "inline"
                         config["reference"] = None
 
+                # Inline node tools: the bundle rewrites them to `tool:<名称>`
+                # local refs, so map them through `dep_map` like the top-level
+                # agent config. Only bundle imports carry `dep_map`; console /
+                # YAML imports keep the legacy pass-through. Reference-mode
+                # nodes use the referenced app's tools, so their own list stays
+                # untouched.
+                if (
+                    dep_map is not None
+                    and config.get("mode") != "reference"
+                    and isinstance(config.get("tools"), list)
+                ):
+                    config["tools"] = self._resolve_tools(
+                        config["tools"], tenant_id, warnings, dep_map=dep_map
+                    )
+
                 # Agent nodes embed a KB retrieval tool: resolve KBs and validate Rerank
                 knowledge_retrieval = config.get("knowledge_retrieval")
                 if knowledge_retrieval:

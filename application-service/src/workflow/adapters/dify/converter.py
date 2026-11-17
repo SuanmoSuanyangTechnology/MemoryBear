@@ -231,10 +231,9 @@ class DifyConverter(BaseConverter):
     def convert_variable_type(self, target_type: VariableType | None, origin_value: Any):
         # `variable_type_map` returns None for Dify types we do not know. An empty
         # constant would then hit `DEFAULT_VALUE(None)` and raise TypeError, aborting
-        # the whole import. Keeping the raw value is the safer fallback: non-empty
-        # values pass through `case _` anyway, empty ones degrade to "".
+        # the whole import. Only None falls back to ""; preserve valid falsey values.
         if target_type is None:
-            return origin_value if origin_value else ""
+            return origin_value if origin_value is not None else ""
         if not origin_value:
             return DEFAULT_VALUE(target_type)
         try:
@@ -330,7 +329,12 @@ class DifyConverter(BaseConverter):
             "raw-text": HttpContentType.RAW,
             "binary": HttpContentType.BINARY,
         }
-        return content_type_map.get(content_type, content_type)
+        if content_type in content_type_map:
+            return content_type_map[content_type]
+        try:
+            return HttpContentType(content_type)
+        except (ValueError, TypeError):
+            return HttpContentType.NONE
 
     @staticmethod
     def convert_http_error_handle_type(handle_type):
