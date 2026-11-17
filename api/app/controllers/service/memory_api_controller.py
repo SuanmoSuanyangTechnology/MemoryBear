@@ -23,6 +23,7 @@ from app.core.logging_config import get_business_logger
 from app.core.memory.enums import SearchStrategy
 from app.core.memory.memory_service import MemoryService
 from app.core.memory.models.metadata_models import LEGACY_METADATA_FIELDS
+from app.core.memory.read_services.search_engine.quick_retrieval_dedup import is_user_profile
 from app.core.memory.storage.enums import MemoryNodeType
 from app.core.quota_stub import check_end_user_quota
 from app.core.response_utils import success, fail
@@ -42,7 +43,7 @@ logger = get_business_logger()
 # 裁剪用户节点的旧画像字段内容
 def _serialize_public_memory(memory, end_user_id: str) -> dict:
     item = memory.model_dump()
-    if str(item.get("id")) != str(end_user_id):
+    if not is_user_profile(memory, end_user_id):
         return item
     data = item.get("data")
     if isinstance(data, dict):
@@ -75,7 +76,9 @@ async def read_memory_sync(
     """
     Read memory synchronously.
 
-    Requires API Key with 'memory' scope.
+    Requires API Key with 'memory' scope. The public response removes the eight
+    legacy profile fields only from the terminal-user profile node
+    (id == end_user_id); ordinary memory nodes are returned unchanged.
 
     Supports two modes:
     - Single user (backward-compatible): pass ``end_user_id`` (string).
