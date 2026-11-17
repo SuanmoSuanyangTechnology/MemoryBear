@@ -164,7 +164,7 @@ const ApplicationDetailModal = forwardRef<ApplicationDetailModalRef, Application
                     {item.linked_tools.length
                       ? item.linked_tools.map(tool => (
                         <Flex align="center" gap={8} wrap key={tool.name}>
-                          <ToolIcon />
+                          <ToolIcon iconUrl={tool.icon as string} />
                           {tool.name}
                           <Tag>{tool.tool_type}</Tag>
                         </Flex>
