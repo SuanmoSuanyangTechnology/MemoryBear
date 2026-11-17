@@ -64,7 +64,7 @@ def create(session, scope, actor_id, task_id, mode, payload_key, total):
         .limit(1)
     )
     if active:
-        raise KnowledgeError.from_code("KB_FAQ_JOB_BUSY", status_code=409)
+        raise KnowledgeError.from_code("KB_FAQ_IMPORT_BUSY", status_code=409)
     row = Job(
         id=task_id,
         **scope,

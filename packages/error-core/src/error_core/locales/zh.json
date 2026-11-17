@@ -193,6 +193,7 @@
     "KB_WIKI_SNAPSHOT_UNAVAILABLE": "这次 Wiki 处理使用的来源版本暂不可用，请刷新来源内容后重新处理。",
     "KB_FAQ_REVIEW_REQUIRED": "这条问答尚未审核通过，请完成审核后再启用。",
     "KB_FAQ_JOB_BUSY": "这条问答的生成任务仍在处理中，请勿重复提交，稍后在任务列表查看结果。",
+    "KB_FAQ_IMPORT_BUSY": "当前知识库已有 FAQ 导入任务，请等待完成后再试。",
     "KB_FAQ_JOB_TERMINAL": "这条问答的生成任务已结束，如需继续处理，请重新发起生成任务。",
     "KB_FAQ_INDEX_UNAVAILABLE": "问答内容已保存，但搜索索引尚未就绪。请稍后在问答列表查看这条记录的索引状态。",
     "KB_FAQ_CONTENT_INVALID": "问答内容有误，请检查问题、答案和相似问题后重试。",
