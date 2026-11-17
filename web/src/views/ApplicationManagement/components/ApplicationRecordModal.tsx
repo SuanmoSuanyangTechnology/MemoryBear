@@ -87,7 +87,7 @@ const ApplicationRecordModal = forwardRef<ApplicationRecordModalRef>((_props, re
       confirmLoading={loading}
     >
       <Flex vertical gap={16}>
-        {recordData && recordData.listing_status && (
+        {recordData && recordData.listing_status && recordData.current_version && (
           <div className="rb:p-4 rb:bg-gray-50 rb:rounded-lg rb:border rb:border-gray-200">
             <span className="rb:text-[13px] rb:text-gray-600">
               {t('application.marketStatus')}:

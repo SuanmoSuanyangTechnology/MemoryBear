@@ -4,8 +4,8 @@ One transaction, one order, no half-landed cluster:
 
 ```
 ① plugins / skills   (zip → import_package(commit=False))
-② tools              (mcp rebuilt with cleared credentials; custom →
-                      placeholder row only; workflow → dropped + reported)
+② tools              (only mcp crosses tenants, rebuilt with cleared
+                      credentials; custom / workflow → dropped + reported)
 ③ record local_dep_map: bundle ref → new local id
 ④ apps               (sub-agents / workflow-referenced Agents first, then root,
                       import_dsl(commit=False, dep_map=…,
@@ -25,21 +25,25 @@ Why this shape:
 * **`resolve_cross_app_refs=False`.** Sub-agents are landed moments earlier in
   this same transaction; `_locate_agent_app` would look them up by workspace and
   drop every entry it cannot see, turning a cluster into an empty shell.
-* **Placeholders are rows, not absences.** A `custom` tool carries no
-  configuration across tenants, but the dependency edge must still exist, so the
-  Agent gets a `ToolConfig(status=unconfigured)` to point at instead of losing
-  the tool silently.
-* **`workflow` tools are the opposite.** They are not configuration-free — they
-  are a pointer at one source-tenant workflow (`workflow_tool_configs.app_id` +
-  `release_id`), and the target tenant has no way to fill that in. A row would be
-  permanently unusable, so nothing is created and the reference is reported in
-  `missing` instead.
+**Only `mcp` tools cross a tenant boundary.** The other three are reported, never
+  materialised:
+
+* **`custom`**: no schema / base_url / credentials travel with the bundle, so a
+  row created here could never be configured — it would only show up in the
+  target tenant's tool list as a permanently unusable "待配置" entry. The
+  reference is cleared and the name goes to `missing` instead.
+* **`workflow`**: not configuration-free at all — it is a pointer at one
+  source-tenant workflow (`workflow_tool_configs.app_id` + `release_id`), which
+  the target tenant has no way to fill in. Same treatment.
+* **`builtin`**: ships as `bindings[].kind=builtin_tool`, mapped by `tool_class`.
 """
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import io
 import logging
+import posixpath
 import threading
 import uuid
 import zipfile
@@ -69,15 +73,38 @@ from .skill_package_service import SkillPackageService
 
 logger = logging.getLogger(__name__)
 
-# 只 `custom` 落占位行：`workflow` 是「源租户某个纯工作流」的指针
-# （`workflow_tool_configs.app_id` + `release_id`），目标租户没有可填的落点，
-# 建出来的行永远配不好，所以导出侧就剔除、落地侧只报 `missing`。
-PLACEHOLDER_TOOL_TYPES = frozenset({ToolType.CUSTOM.value})
 
 # `(resource_type, market_resource_id, version) -> manifest`。随包内容不可用时按
 # 引用从市场取那一版（接口文档 §3.4「依赖解析」）。用回调而不是直接持有 gateway，
 # 是为了让本模块保持「不认识市场 HTTP」：企业扩展装配时注入，社区构建不传。
 DependencyFetcher = Callable[[str, str, str], dict[str, Any]]
+
+# `(resource_type, resource_id, version, context) -> zip bytes`。注入理由与
+# `DependencyFetcher` 相同：本模块保持「不认识市场 HTTP」。企业扩展把市场侧的
+# 版本文件包接口接进来；没有注入时（社区构建）退回直读共享桶的老路径。
+DependencyFilesFetcher = Callable[[str, str, str, str], bytes]
+
+# 市场 zip 的成员名 = 规范化后的 `object_key`（`market-service/src/storage.py`
+# 的 `normalise_object_key`）。两个服务各持一份实现，规则必须逐字一致：
+# 反斜杠转 `/`、去掉前导 `/`、`posixpath.normpath` 后不得越界。
+_FILE_SOURCE_CONTEXT_DEPENDENCY = "dependency"
+
+
+def _zip_member_name(object_key: Any) -> str:
+    raw = str(object_key or "")
+    if not raw or any(ord(char) < 0x20 for char in raw):
+        raise BusinessException(
+            "技能文件缺少 object_key", BizCode.EXTERNAL_CATALOG_INVALID,
+            data={"reason": "SKILL_FILES_MISSING"},
+        )
+    key = raw.replace("\\", "/").lstrip("/")
+    normalised = posixpath.normpath(key)
+    if normalised in (".", "") or normalised.startswith("../") or normalised == "..":
+        raise BusinessException(
+            "技能文件的 object_key 非法", BizCode.EXTERNAL_CATALOG_INVALID,
+            data={"reason": "SKILL_FILES_INVALID"},
+        )
+    return normalised
 
 
 def _run_async(coro_factory: Callable[[], Coroutine]):
@@ -113,6 +140,7 @@ class BundleInstallService:
             dsl_service: AppDslService | None = None,
             *,
             dependency_fetcher: DependencyFetcher | None = None,
+            dependency_files_fetcher: DependencyFilesFetcher | None = None,
     ):
         self.db = db
         self.dsl_service = dsl_service or AppDslService(db)
@@ -124,11 +152,19 @@ class BundleInstallService:
         self._redacted_secrets: list[str] = []
         # 按市场引用补依赖内容的回调；社区构建不传 = 只认包内内容。
         self._dependency_fetcher = dependency_fetcher
+        # 按市场引用取整版文件包的回调；不传 = 退回直读共享桶。
+        self._dependency_files_fetcher = dependency_files_fetcher
         # 本次安装解析到的市场依赖，供安装响应的 `dependencies[]` 使用。
         self._resolved_dependencies: list[dict[str, Any]] = []
         # `(resource_type, resource_id@version)` → 展开后的依赖段，避免同一份
         # 依赖被多个子 Agent 引用时重复下载。
         self._dependency_cache: dict[str, dict[str, Any]] = {}
+        # 父包来源（顶层安装的那个版本）：包内内嵌文件从这里取。
+        self._origin_resource_type: str | None = None
+        self._origin_context = "top_level"
+        # `(resource_type, resource_id, version, context)` → 已打开的文件包。
+        # 同一个市场版本只拉一次；安装器按请求构造，关闭交给 GC（BytesIO 无 fd）。
+        self._file_archives: dict[tuple[str, str, str, str], zipfile.ZipFile] = {}
         # 本次安装落地的子 Agent 与它们的待绑定项（§3.4 `pending_agents[]`）。
         self._pending_agents: list[dict[str, Any]] = []
 
@@ -187,6 +223,7 @@ class BundleInstallService:
             user_id: uuid.UUID | None,
             commit: bool = True,
             market_origin: dict[str, str] | None = None,
+            origin_context: str = "top_level",
     ) -> dict[str, Any]:
         """Land every dependency then the application cluster; returns the report.
 
@@ -197,6 +234,8 @@ class BundleInstallService:
         """
 
         self._origin = market_origin or {}
+        self._origin_resource_type = str(manifest.get("resource_type") or "") or None
+        self._origin_context = origin_context
         self._submission_index = self._index_dependency_submissions(manifest)
 
         try:
@@ -283,6 +322,7 @@ class BundleInstallService:
             commit: bool = True,
             market_origin: dict[str, str] | None = None,
             overrides: dict[str, Any] | None = None,
+            origin_context: str = "top_level",
     ) -> dict[str, Any]:
         """Land one **tool / skill_package** bundle (no application involved).
 
@@ -292,6 +332,8 @@ class BundleInstallService:
         """
 
         self._origin = market_origin or {}
+        self._origin_resource_type = str(manifest.get("resource_type") or "") or None
+        self._origin_context = origin_context
         try:
             parse_bundle(manifest)
         except BundleError as error:
@@ -576,6 +618,9 @@ class BundleInstallService:
                 if market_ref or own_market_ref
                 else None
             )
+            # 文件字节的来源默认是父包（顶层安装的那个版本）；按市场引用补全的
+            # 依赖改为从那一版依赖自己的文件包取。
+            file_source = self._origin_file_source()
             if market_ref and not own_market_ref:
                 # 同一市场技能/插件版本已在本租户 → 只补 dep_map，不重复导入。
                 local = self._find_market_skill_copy(market_ref, tenant_id, entries)
@@ -595,9 +640,19 @@ class BundleInstallService:
                         version_mismatch=local["version"] != market_ref["version"],
                     )
                     continue
+                # 存量包可能内嵌了文件：那时键空间仍属于父版本，只有真正从依赖
+                # 清单补出来的条目才改指向依赖自己的版本文件包。
+                embedded = all(entry.get("files") for entry in entries)
                 entries = self._enrich_skill_entries(entries, market_ref, missing)
                 if not entries:
                     continue
+                if not embedded:
+                    file_source = (
+                        "skill_package",
+                        str(market_ref["resource_id"]),
+                        str(market_ref["version"]),
+                        _FILE_SOURCE_CONTEXT_DEPENDENCY,
+                    )
             # 顶层的独立技能可以逐项改名/改描述/改调用名称；插件只到插件级
             # （`meta` 留空，名称与描述走下面的 `plugin_name` / `plugin_description`）。
             member_meta = (
@@ -607,7 +662,10 @@ class BundleInstallService:
             )
             try:
                 archive = self._build_skill_zip(
-                    entries, nested=bool(plugin_ref), member_refs=member_refs
+                    entries,
+                    nested=bool(plugin_ref),
+                    member_refs=member_refs,
+                    file_source=file_source,
                 )
                 plugin_row = plugin_meta.get(plugin_ref) if plugin_ref else None
                 response = SkillPackageService.import_package(
@@ -662,6 +720,7 @@ class BundleInstallService:
             *,
             nested: bool,
             member_refs: dict[str, dict[str, Any]],
+            file_source: tuple[str, str, str, str] | None,
     ) -> bytes:
         """Rebuild a standard pack zip from the bundle's `files[]` object keys."""
 
@@ -683,23 +742,103 @@ class BundleInstallService:
                     )
                 for file_entry in files:
                     rel_path = str(file_entry.get("path") or "")
-                    content = self._read_object(file_entry.get("object_key"))
+                    content = self._read_file(
+                        file_entry.get("object_key"),
+                        file_source=file_source,
+                        expected_sha256=file_entry.get("sha256"),
+                    )
                     info = zipfile.ZipInfo(f"{root}{rel_path}", date_time=(2026, 1, 1, 0, 0, 0))
                     info.flag_bits |= 0x800
                     info.compress_type = zipfile.ZIP_DEFLATED
                     archive.writestr(info, content)
         return buffer.getvalue()
 
-    @staticmethod
-    def _read_object(object_key: Any) -> bytes:
+    def _origin_file_source(self) -> tuple[str, str, str, str] | None:
+        """父包版本的文件来源；不是市场安装（没有 origin）时返回 None。"""
+
+        origin = self._origin or {}
+        resource_id = origin.get("resource_id")
+        version = origin.get("version")
+        if not resource_id or not version or not self._origin_resource_type:
+            return None
+        return (
+            self._origin_resource_type,
+            str(resource_id),
+            str(version),
+            self._origin_context,
+        )
+
+    def _read_file(
+            self,
+            object_key: Any,
+            *,
+            file_source: tuple[str, str, str, str] | None,
+            expected_sha256: Any = None,
+    ) -> bytes:
+        """有市场文件回调时按版本 zip 取字节，否则退回直读共享桶。
+
+        `market-uploads/` 键是内容寻址的，但 zip 走内网传输，仍按清单里的
+        `sha256` 重算比对：不一致说明字节与审核过的清单不同源，装进去就是错包。
+        """
+
         key = str(object_key or "")
         if not key:
             raise BusinessException(
                 "技能文件缺少 object_key", BizCode.EXTERNAL_CATALOG_INVALID,
                 data={"reason": "SKILL_FILES_MISSING"},
             )
-        storage = StorageFactory.get_storage()
-        return _run_async(lambda: storage.download(key))
+        if self._dependency_files_fetcher is not None and file_source is not None:
+            payload = self._read_market_file(key, file_source)
+        else:
+            storage = StorageFactory.get_storage()
+            payload = _run_async(lambda: storage.download(key))
+        expected = str(expected_sha256 or "")
+        if expected and hashlib.sha256(payload).hexdigest() != expected:
+            raise BusinessException(
+                "技能文件与清单哈希不一致", BizCode.EXTERNAL_CATALOG_INVALID,
+                data={"reason": "SKILL_FILES_INVALID", "object_key": key[:200]},
+            )
+        return payload
+
+    def _read_market_file(
+            self, object_key: str, file_source: tuple[str, str, str, str]
+    ) -> bytes:
+        member = _zip_member_name(object_key)
+        archive = self._file_archive(file_source)
+        try:
+            return archive.read(member)
+        except KeyError as error:
+            raise BusinessException(
+                "技能文件不在市场的版本文件包中", BizCode.EXTERNAL_CATALOG_INVALID,
+                data={"reason": "SKILL_FILES_MISSING", "object_key": object_key[:200]},
+            ) from error
+
+    def _file_archive(
+            self, file_source: tuple[str, str, str, str]
+    ) -> zipfile.ZipFile:
+        """按版本拉一次整包 zip 并缓存；同一版本被多次引用时只发一次请求。"""
+
+        archive = self._file_archives.get(file_source)
+        if archive is not None:
+            return archive
+        try:
+            payload = self._dependency_files_fetcher(*file_source)  # type: ignore[misc]
+        except BusinessException:
+            raise
+        except Exception as error:  # noqa: BLE001 —— 传输故障降级为一条 missing
+            raise BusinessException(
+                "市场文件包获取失败", BizCode.EXTERNAL_CATALOG_UNAVAILABLE,
+                data={"reason": "MARKET_FILES_UNAVAILABLE"},
+            ) from error
+        try:
+            archive = zipfile.ZipFile(io.BytesIO(payload))
+        except zipfile.BadZipFile as error:
+            raise BusinessException(
+                "市场文件包格式非法", BizCode.EXTERNAL_CATALOG_INVALID,
+                data={"reason": "INVALID_FILES_ARCHIVE"},
+            ) from error
+        self._file_archives[file_source] = archive
+        return archive
 
     # ==================== ② tools ====================
 
@@ -712,11 +851,22 @@ class BundleInstallService:
             *,
             standalone: bool = False,
     ) -> None:
-        """`mcp` is rebuilt with its nested connection shape (secrets already redacted);
-        `custom` gets a placeholder row.
+        """Only `mcp` is rebuilt (nested connection shape, secrets already redacted).
 
-        `workflow` tools are dropped: they only point at a workflow in the source
-        tenant, so no row is created and the reference is reported as missing.
+        `custom` and `workflow` create **no row at all** — neither can be
+        configured from what the bundle carries, so a row here would only be a
+        permanently unusable entry in the target tenant's tool list. Both record
+        their name in `missing`, and `dep_map[ref] = ""` tells
+        `app_dsl_service._resolve_tools` "declared by the bundle, not landed here":
+        the reference is **kept** as its original `tool:<名称>` local ref (not a
+        valid UUID), so the batch method API reports it in `missing_tool_ids` and
+        the UI can render "该工具已失效".
+
+        Workflow **tool nodes** take the other branch on the same map value —
+        `_resolve_workflow_nodes` **clears** `config.tool_id` to `None`, because a
+        node needs one concrete UUID at runtime (otherwise
+        `ToolNode.execute` raises TOOL_SELECTION_INACTIVE and the whole workflow
+        fails, while the editor's non-empty check passes silently).
         """
 
         for entry in dependencies.get("tools") or []:
@@ -730,8 +880,16 @@ class BundleInstallService:
             if market_ref:
                 # 目标租户已有该市场资源就复用：版本不同也不自动升级（§3.4），
                 # 只是把 `version_mismatch` 报给调用方，避免静默改写用户空间。
-                local = self._find_external_tool_copy(
-                    market_ref["resource_id"], tenant_id
+                #
+                # 只对 mcp 复用：custom / workflow 现在一律不落地，若本租户还留着
+                # 改造前安装生成的外部占位行（`is_active=True` 且带
+                # `external_resource_id`），复用会把它绑定进来，等于让一条永远配
+                # 不好的工具替代「缺失」上报。这类历史行按不存在处理，落到下面
+                # 的 custom/workflow 分支报 missing。
+                local = (
+                    self._find_external_tool_copy(market_ref["resource_id"], tenant_id)
+                    if tool_type == ToolType.MCP.value
+                    else None
                 )
                 if local is not None:
                     local_id, local_version = local
@@ -743,9 +901,12 @@ class BundleInstallService:
                     )
                     continue
                 # B6-b 之后父包只存市场引用，内容得按引用去取；已内嵌内容的存量
-                # 包走原路径，不额外发一次 HTTP。
-                entry = self._enrich_tool_entry(entry, market_ref, missing)
-                tool_type = str(entry.get("tool_type") or tool_type)
+                # 包走原路径，不额外发一次 HTTP。只有 mcp 需要内容（要建行），
+                # custom / workflow 不落地，取回来也没用，还会多写一条
+                # 「依赖包缺少 server_url」的假 missing。
+                if tool_type == ToolType.MCP.value:
+                    entry = self._enrich_tool_entry(entry, market_ref, missing)
+                    tool_type = str(entry.get("tool_type") or tool_type)
 
             if tool_type == ToolType.MCP.value:
                 landed_id = self._land_mcp(
@@ -759,26 +920,40 @@ class BundleInstallService:
                         "tool", market_ref, landed_id,
                         reused=False, version_mismatch=False,
                     )
-            elif tool_type in PLACEHOLDER_TOOL_TYPES:
-                dep_map[ref] = self._land_placeholder(entry, tenant_id)
-            elif tool_type == ToolType.WORKFLOW.value:
-                # 工作流工具没有可填的落点（它指向源租户的某个纯工作流），建占位
-                # 行只会留下一行永远配不好的工具。导出侧已把它从引用里摘掉，
-                # 这里把 dep_map 记成空串，让 `_resolve_tools` 走「不在随包内容中
-                # → 清空引用」那条分支，并让用户知道少了什么。
+            elif tool_type in (ToolType.CUSTOM.value, ToolType.WORKFLOW.value):
+                # 除 mcp 外一律不落地：custom 没有 schema / base_url / 凭据，
+                # workflow 指向源租户的某个纯工作流——两者在目标租户都没有可填的
+                # 落点，建行只会在工具列表里留一条永远配不好的记录。`dep_map` 记
+                # 空串表示「包里声明了、但不落地」，`_resolve_tools` 据此**保留**
+                # 引用（`tool_id` 仍是 `tool:<名称>` 本地 ref，不是合法 UUID），
+                # 让批量方法接口把它报进 `missing_tool_ids`，前端才能渲染「该工具
+                # 已失效」。同时名称进 `missing`，装完当次就能看到少了什么。
                 dep_map[ref] = ""
                 missing.append(
                     _missing(
                         "tool",
-                        entry.get("name"),
-                        "工作流工具不支持跨租户携带，已移除",
+                        # 名称兜底成 ref：正常包内 `name` 恒有（`_collect_tools` 总写
+                        # 这一项），但外部制作的包可能只给 ref，缺失时安装结果里会
+                        # 出现 name=None，用户看不出少了哪个工具。
+                        entry.get("name") or ref,
+                        "自定义工具不支持跨租户携带，已移除"
+                        if tool_type == ToolType.CUSTOM.value
+                        else "工作流工具不支持跨租户携带，已移除",
                     )
                 )
             elif tool_type == ToolType.BUILTIN.value:
                 # builtin 不随包：落地时按 tool_class 在目标租户找同类，找不到就置空
                 continue
             else:
-                missing.append(_missing("tool", entry.get("name"), f"未知工具类型 {tool_type}"))
+                # 类型缺失或未知：同样兜底成 ref，否则 reason 里带一个空类型、
+                # name 也可能是 None，这条 missing 对用户没有任何信息量。
+                missing.append(
+                    _missing(
+                        "tool",
+                        entry.get("name") or ref,
+                        f"未知工具类型 {tool_type or '（包内未声明）'}",
+                    )
+                )
 
     def _land_mcp(
             self,
@@ -872,38 +1047,6 @@ class BundleInstallService:
             if "connection_config" in path or "auth_config" in path:
                 return True
         return False
-
-    def _land_placeholder(self, entry: dict[str, Any], tenant_id: uuid.UUID) -> str:
-        """One `ToolConfig` row, no sub-table: "a tool of this type belongs here".
-
-        No `schema_content` / `base_url` / `auth_config` / `workflow_config_id` is
-        carried: those point at the source tenant's systems and would be dead
-        references. `config_data.placeholder` is what the UI keys the
-        "待配置" badge off (`ToolInfo.is_placeholder`).
-        """
-
-        now = utcnow_naive()
-        tool_type = str(entry.get("tool_type"))
-        row = ToolConfig(
-            id=uuid.uuid4(),
-            name=self._unique_tool_name(
-                str(entry.get("name") or "未配置工具"), tool_type, tenant_id
-            ),
-            description=None,
-            icon=None,
-            tool_type=tool_type,
-            tenant_id=tenant_id,
-            status=ToolStatus.UNCONFIGURED.value,
-            config_data={"placeholder": True},
-            tags=[],
-            is_active=True,
-            created_at=now,
-            updated_at=now,
-            **self._origin_columns(),
-        )
-        self.db.add(row)
-        self.db.flush()
-        return str(row.id)
 
     @staticmethod
     def _market_source_ref(origin: dict[str, str] | None) -> str | None:
@@ -1701,4 +1844,4 @@ def _slug(value: str) -> str:
     return cleaned.strip("-") or "skill"
 
 
-__all__ = ["BundleInstallService", "PLACEHOLDER_TOOL_TYPES"]
+__all__ = ["BundleInstallService"]

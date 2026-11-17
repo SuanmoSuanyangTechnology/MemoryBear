@@ -57,6 +57,23 @@ from .workflow_service import WorkflowService
 
 logger = logging.getLogger(__name__)
 
+# Bundle 里工具引用的本地形式（`tool:<工具名>`）。目标租户无法落地某类工具时
+# 引用会以它原样留在配置里，故意不是合法 UUID：批量方法接口据此把它归到
+# `missing_tool_ids`，前端渲染「该工具已失效」。
+_BUNDLE_TOOL_PREFIX = "tool:"
+
+
+def _tool_name_of(tool_id: Any) -> Any:
+    """`tool:<名称>` 本地引用 → 工具名；其它形态原样返回。
+
+    跨租户安装不想落地的工具（custom / workflow）会把引用保留成这种形式，
+    后续再导出/复制时只能按名称匹配目标环境的同类工具，前缀必须先剥掉。
+    """
+
+    if isinstance(tool_id, str) and tool_id.startswith(_BUNDLE_TOOL_PREFIX):
+        return tool_id[len(_BUNDLE_TOOL_PREFIX):]
+    return tool_id
+
 
 class AppDslService:
 
@@ -291,10 +308,23 @@ class AppDslService:
     def _tool_ref(self, tool_id) -> dict | None:
         if not tool_id:
             return None
-        t = get_tool_config_row(self.db, tool_id)
+        text = str(tool_id)
+        if text.startswith(_BUNDLE_TOOL_PREFIX):
+            # 跨租户安装后保留下来的本地引用（custom / workflow 不落地）：没有
+            # 工具行可查，而且它不是合法 UUID——直接拿去查 `tool_configs.id`
+            # 会抛 DataError，整个导出就失败了。名称就是 ref 的后半段，导出成
+            # `{id, name}` 让导入侧 `_resolve_tool` 按名字重新匹配。
+            return {"id": text, "name": text[len(_BUNDLE_TOOL_PREFIX):]}
+        try:
+            uuid.UUID(text)
+        except (ValueError, TypeError, AttributeError):
+            # 其它非 UUID 形态（历史脏数据）：没有任何行可查，只回名称，避免
+            # 把非法值送进 UUID 主键查询。
+            return {"name": text}
+        t = get_tool_config_row(self.db, text)
         if t:
-            return {"id": str(tool_id), "name": t.name, "tool_type": t.tool_type}
-        return {"id": str(tool_id)}
+            return {"id": text, "name": t.name, "tool_type": t.tool_type}
+        return {"id": text}
 
     def _enrich_knowledge_retrieval(self, kr: dict | None) -> dict | None:
         if not kr:
@@ -1779,15 +1809,27 @@ class AppDslService:
                     config["tool_id"] = None
                     config["tool_parameters"] = {}
                 elif dep_map and isinstance(tool_id, str) and tool_id in dep_map:
-                    # Bundle path: the node reference is a `tool:` local id whose
-                    # row was just created (mcp rebuilt / custom-workflow
-                    # placeholder). Bind it or the edge disappears silently.
+                    # Bundle path: `tool_id` is a `tool:<名称>` local ref. A mapped
+                    # hit means the row (mcp rebuilt) was just created — bind to it
+                    # or the edge disappears silently.
                     mapped = dep_map.get(tool_id)
                     if mapped:
                         config["tool_id"] = str(mapped)
                     else:
+                        # 包里声明了但目标租户不落地（custom / workflow）：**置空**。
+                        #
+                        # 这里与 Agent 的工具列表处理不同——节点 `tool_id` 是必填
+                        # 的单个 UUID 语义，保留 `tool:<名称>` 有两个后果：
+                        #   1) 运行期 `ToolNode.execute` 走 `get_tool_config_async`
+                        #      拿到 None，直接抛 TOOL_SELECTION_INACTIVE，整条工作流
+                        #      失败；
+                        #   2) 前端节点校验（useWorkflowCheck）把非空字符串当成
+                        #      「已配置」，且取方法列表的请求失败被 catch 吞掉，
+                        #      用户在上线前看不到任何提示。
+                        # 置空则命中前端「工具不能为空」，导入时就要求补配置，
+                        # 与同一函数里非 bundle 路径的处理保持一致。
                         warnings.append(
-                            f"[{node_label}] 工具 '{tool_id}' 不在本次随包内容中，已置空"
+                            f"[{node_label}] 工具 '{tool_id}' 未随包携带，已置空，请重新选择"
                         )
                         config["tool_id"] = None
                         config["tool_parameters"] = {}
@@ -1799,9 +1841,9 @@ class AppDslService:
                             uuid.UUID(tool_id)
                             tool_ref["id"] = tool_id
                         except ValueError:
-                            tool_ref["name"] = tool_id
+                            tool_ref["name"] = _tool_name_of(tool_id)
                     else:
-                        tool_ref["name"] = tool_id
+                        tool_ref["name"] = _tool_name_of(tool_id)
                     resolved_tool_id = self._resolve_tool(tool_ref, tenant_id, [])
                     if resolved_tool_id:
                         config["tool_id"] = resolved_tool_id
@@ -2055,9 +2097,22 @@ class AppDslService:
                     entry["tool_id"] = str(mapped)
                     result.append(entry)
                 else:
-                    warnings.append(f"工具 '{raw_id}' 不在本次随包内容中，已清空")
+                    # 包里声明了但目标租户不落地（custom / workflow）：**保留**
+                    # 引用而不是清空。`tool_id` 维持包内的 `tool:<名称>` local ref
+                    # ——它不是合法 UUID，于是批量方法接口必然把它归到
+                    # `missing_tool_ids`，前端据此渲染「该工具已失效」。清空的话
+                    # 用户只看到工具凭空消失，连少了什么都不知道。
+                    entry["tool_id"] = raw_id
+                    if not entry.get("name") and raw_id.startswith(_BUNDLE_TOOL_PREFIX):
+                        entry["name"] = raw_id[len(_BUNDLE_TOOL_PREFIX):]
+                    result.append(entry)
                 continue
-            ref = t.get("_ref") or ({"name": t.get("tool_id")} if t.get("tool_id") else None)
+            ref = t.get("_ref") or (
+                # 非 bundle 路径：`tool_id` 可能是 `tool:<名称>` 本地引用（跨租户
+                # 装过、之后又被导出/复制），按工具名匹配前必须剥掉前缀，否则
+                # 永远对不上库里真实的工具名。
+                {"name": _tool_name_of(t.get("tool_id"))} if t.get("tool_id") else None
+            )
             entry = {k: v for k, v in t.items() if k != "_ref"}
             # Keep the exported name as the reference's snapshot (see
             # `tool_selection_validator`): after landing, a tool that later gets
