@@ -6,7 +6,6 @@ from types import SimpleNamespace
 from typing import Annotated
 from typing import Optional, List, Tuple, Dict, Any
 
-import json_repair
 from fastapi import Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
@@ -1570,8 +1569,8 @@ class ConversationService:
 
         Notes:
             - If conversation details exist and are recent, they are returned directly.
-            - LLM generation uses system and user prompt templates from the filesystem.
-            - JSON repair is applied to ensure model outputs can be safely parsed.
+            - LLM generation uses structured output (``call_structured``) against
+              :class:`ConversationOut`; unsupported providers degrade to ainvoke + JSON repair.
             - Commits the new conversation detail only if it is generated or outdated.
         """
         logger.info(f"Fetching conversation detail for conversation_id={conversation_id}, workspace_id={workspace_id}")
@@ -1640,26 +1639,19 @@ class ConversationService:
             (RoleType.USER, rendered_user_message),
         ]
         logger.info(f"Invoking LLM for conversation_id={conversation_id}")
-        model_resp = await llm.ainvoke(messages)
-
         try:
-            if isinstance(model_resp.content, str):
-                result = json_repair.repair_json(model_resp.content, return_objects=True)
-            elif isinstance(model_resp.content, list):
-                result = json_repair.repair_json(model_resp.content[0].get("text"), return_objects=True)
-            elif isinstance(model_resp.content, dict):
-                result = model_resp.content
-            else:
-                raise BusinessException("Unexpect model output", code=BizCode.LLM_ERROR)
+            # 结构化输出：主路径 with_structured_output（工具约束），失败降级 ainvoke +
+            # StructResponse（json_repair 兜底），与旧 ainvoke + json_repair 同口径
+            result: ConversationOut = await llm.call_structured(messages, ConversationOut)
         except Exception as e:
             logger.exception(f"Failed to parse LLM response for conversation_id={conversation_id}")
             raise BusinessException("Failed to parse LLM response", code=BizCode.LLM_ERROR) from e
 
-        summary = result.get('summary', "")
-        theme = result.get('theme', "")
-        question = result.get("question") or []
-        takeaways = result.get("takeaways") or []
-        info_score = result.get("info_score", 50)
+        summary = result.summary or ""
+        theme = result.theme or ""
+        question = result.question or []
+        takeaways = result.takeaways or []
+        info_score = result.info_score
 
         if not is_stable:
             if not conversation_detail:
