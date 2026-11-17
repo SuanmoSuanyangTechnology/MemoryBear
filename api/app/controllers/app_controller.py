@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from typing import Optional, Annotated, Literal
 
 import yaml
-from fastapi import APIRouter, Depends, Path, Form, UploadFile, File, Query
+from fastapi import APIRouter, Depends, Path, Form, UploadFile, File, Query, Header
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import StreamingResponse, Response
 from sqlalchemy import select, text
@@ -1792,6 +1792,7 @@ def get_app_statistics(
         end_date: int,
         db: Session = Depends(get_db),
         current_user=Depends(get_current_user),
+        timezone_name: str = Header("UTC", alias="X-Timezone"),
 ):
     """获取应用统计数据
 
@@ -1812,6 +1813,14 @@ def get_app_statistics(
         - daily_tokens: 每日token消耗
         - total_tokens: 总token消耗
     """
+    from app.core.utils.datetime_utils import resolve_iana_timezone
+    try:
+        _, timezone_name = resolve_iana_timezone(timezone_name)
+        if end_date < start_date:
+            raise ValueError("end_date must be greater than or equal to start_date")
+    except ValueError as exc:
+        raise BusinessException(str(exc), BizCode.INVALID_PARAMETER) from exc
+
     workspace_id = current_user.current_workspace_id
     app_service = AppService(db)
     app = app_service._get_app_or_404(app_id)
@@ -1824,7 +1833,8 @@ def get_app_statistics(
         workspace_id=workspace_id,
         tenant_id=current_user.tenant_id,
         start_date=start_date,
-        end_date=end_date
+        end_date=end_date,
+        timezone_name=timezone_name,
     )
 
     return success(data=result)
