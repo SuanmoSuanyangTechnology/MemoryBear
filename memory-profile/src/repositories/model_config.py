@@ -80,6 +80,42 @@ class ModelConfigRepository:
             rows = (await session.execute(statement)).mappings().all()
         return {row["id"]: dict(row) for row in rows}
 
+
+    async def get_slot_view(
+        self, model_id: UUID, tenant_id: UUID | None = None
+    ) -> dict[str, Any] | None:
+        """One ``model_configs`` row projected to the perceptual gates.
+
+        The projection is deliberately non-decrypted: callers only need the
+        provider/modality/capability gates, never an API key or channel row.
+        Visibility matches :meth:`get_models`: the tenant's own rows plus public.
+        """
+
+        statement = select(
+            ModelConfig.id,
+            ModelConfig.name,
+            ModelConfig.type,
+            ModelConfig.provider,
+            ModelConfig.tenant_id,
+            ModelConfig.is_active,
+            ModelConfig.is_public,
+            ModelConfig.capability,
+            ModelConfig.is_omni,
+            ModelConfig.input_modalities,
+            ModelConfig.output_modalities,
+            ModelConfig.features,
+        ).where(ModelConfig.id == model_id)
+        if tenant_id is not None:
+            statement = statement.where(
+                or_(
+                    ModelConfig.tenant_id == tenant_id,
+                    ModelConfig.is_public.is_(True),
+                )
+            )
+        async with self.postgres.session() as session:
+            row = (await session.execute(statement)).mappings().one_or_none()
+        return dict(row) if row is not None else None
+
     async def resolve_model(
         self,
         *,

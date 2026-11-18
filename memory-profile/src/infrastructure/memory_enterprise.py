@@ -28,6 +28,10 @@ from src.config import ProfileSettings
 MEMORY_LIMITS_PATH = "/internal/v1/quota/tenants/{tenant_id}/memory-limits"
 
 
+#: Bounded metadata-scope endpoint (the enterprise service owns the tables).
+METADATA_SCOPE_PATH = "/internal/v1/ontology/metadata-scope"
+
+
 class MemoryEnterpriseManager:
     """Lazily own the enterprise-service HTTP pool."""
 
@@ -91,3 +95,39 @@ class MemoryEnterpriseManager:
         self._loop = None
         if client is not None:
             await client.aclose()
+    async def metadata_scope(
+        self, *, app_id: UUID, end_user_id: UUID
+    ) -> dict[str, Any] | None:
+        """Resolve one app's ontology boundary for an end user.
+
+        Returns ``None`` when the service has no binding for the pair; transport
+        or payload failures raise so the caller can fall back to default_only.
+        """
+
+        response = await (await self.client()).get(
+            METADATA_SCOPE_PATH,
+            params={"app_id": str(app_id), "end_user_id": str(end_user_id)},
+        )
+        response.raise_for_status()
+        payload = response.json()
+        if not isinstance(payload, dict):
+            raise ValueError("memory-enterprise returned an invalid metadata scope")
+        scope = payload.get("scope")
+        return scope if isinstance(scope, dict) else None
+
+    async def scene_names(
+        self, *, tenant_id: UUID, scene_ids: list[str]
+    ) -> dict[str, str]:
+        """Scene id → name for the tenant's visible scenes (enterprise-owned)."""
+
+        if not scene_ids:
+            return {}
+        response = await (await self.client()).post(
+            "/internal/v1/ontology/scene-names",
+            headers={"X-Tenant-Id": str(tenant_id)},
+            json={"scene_ids": scene_ids},
+        )
+        response.raise_for_status()
+        payload = response.json()
+        names = payload.get("names") if isinstance(payload, dict) else None
+        return {str(key): str(value) for key, value in (names or {}).items()}
