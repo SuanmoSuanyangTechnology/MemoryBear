@@ -1,5 +1,15 @@
 {
   "codes": {
+    "KB_SHARE_SOURCE_NOT_FOUND": "源知识库不存在。",
+    "KB_SHARE_TARGET_NOT_FOUND": "目标工作空间不存在。",
+    "KB_SHARE_CROSS_TENANT": "只能在调用方所属租户内共享知识库。",
+    "KB_SHARE_SOURCE_NOT_ALLOWED": "仅支持共享原始知识库，不支持目录、共享引用或记忆库。",
+    "KB_SHARE_SOURCE_UNAVAILABLE": "源知识库或源工作空间已停用或删除。",
+    "KB_SHARE_TARGET_UNAVAILABLE": "目标工作空间已停用。",
+    "KB_SHARE_SAME_WORKSPACE": "目标工作空间必须不同于源工作空间。",
+    "KB_SHARE_REFERENCE_UNAVAILABLE": "已有共享引用已停用、删除或关系不完整，请先处理该共享。",
+    "KB_SHARE_DUPLICATE": "该源库与目标空间存在多条有效共享，请先处理历史冲突。",
+    "KB_SHARE_SOURCE_OUTSIDE_WORKSPACE": "源知识库不属于 API Key 所在工作空间。",
     "KB_FILE_DUPLICATE": "检测到库中已存在相同文件",
     "OK": "成功",
     "BAD_REQUEST": "请求无效",
