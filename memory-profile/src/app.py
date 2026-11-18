@@ -27,6 +27,7 @@ from src.middleware.request_logging import RequestLoggingMiddleware
 from src.middleware.trace import TraceIdMiddleware
 from src.modules import router as modules_router
 from src.runtime import ProfileRuntime
+from src.storage.bootstrap import ensure_storage_indexes
 
 logger = logging.getLogger(__name__)
 
@@ -80,6 +81,10 @@ def create_app(
                 await gateway_auth.start()
             except Exception:
                 logger.exception("memory gateway auth refresh start failed")
+        if resolved_settings.storage_index_bootstrap:
+            # Host parity (api ``main.py``): confirm/upgrade the search indexes at
+            # boot. Never fatal — an unreachable cluster must not block serving.
+            await ensure_storage_indexes(process_runtime)
         try:
             yield
         finally:
