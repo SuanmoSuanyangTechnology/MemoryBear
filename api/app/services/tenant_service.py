@@ -57,7 +57,10 @@ class TenantService:
             
             business_logger.info(f"创建租户并分配用户成功: {tenant.name}")
             return tenant
-            
+
+        except BusinessException:
+            self.db.rollback()
+            raise
         except Exception as e:
             business_logger.error(f"创建租户和分配用户失败: {str(e)}")
             self.db.rollback()
@@ -138,7 +141,9 @@ class TenantService:
                 # 决策 #11 修订：租户禁用发通知（identity 侧当前 no-op，TTL 兜底；为校正任务预留）
                 notify_tenant_sync(str(tenant_id))
             return success
-            
+
+        except BusinessException:
+            raise
         except Exception as e:
             business_logger.error(f"删除租户失败: {str(e)}")
             raise BusinessException(f"删除租户失败：{str(e)}", code=BizCode.DB_ERROR)

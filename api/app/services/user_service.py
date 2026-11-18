@@ -66,6 +66,9 @@ def create_initial_superuser(db: Session):
         db.refresh(superuser)
         business_logger.info(f"初始超级用户创建成功: {superuser.username} (ID: {superuser.id})")
         return superuser
+    except BusinessException:
+        db.rollback()
+        raise
     except Exception as e:
         business_logger.error(f"初始超级用户创建失败: {str(e)}")
         db.rollback()
@@ -87,8 +90,8 @@ def create_user(db: Session, user: UserCreate, workspace: Workspace) -> User:
         if db_user_by_email:
             business_logger.warning(f"邮箱已注册: {user.email}")
             raise BusinessException(
-                "邮箱已注册", 
-                code=BizCode.DUPLICATE_NAME,
+                "邮箱已注册",
+                code=BizCode.USER_EMAIL_ALREADY_EXISTS,
                 context={"email": user.email, "username": user.username}
             )
 
@@ -107,6 +110,9 @@ def create_user(db: Session, user: UserCreate, workspace: Workspace) -> User:
         # 决策 #11 修订：用户状态变更发通知，identity 重建快照（快照失效分级：user 级）
         notify_user_sync(str(new_user.id))
         return new_user
+    except BusinessException:
+        db.rollback()
+        raise
     except Exception as e:
         business_logger.error(f"用户创建失败: {user.username} - {str(e)}")
         db.rollback()
@@ -149,10 +155,10 @@ def create_superuser(db: Session, user: UserCreate, current_user: User) -> User:
         if db_user_by_email:
             business_logger.warning(f"邮箱已注册: {user.email}")
             raise BusinessException(
-                "邮箱已注册", 
-                code=BizCode.DUPLICATE_NAME,
+                "邮箱已注册",
+                code=BizCode.USER_EMAIL_ALREADY_EXISTS,
                 context={
-                    "email": user.email, 
+                    "email": user.email,
                     "username": user.username,
                     "created_by": str(current_user.id)
                 }
@@ -171,6 +177,9 @@ def create_superuser(db: Session, user: UserCreate, current_user: User) -> User:
         db.refresh(new_user)
         business_logger.info(f"超级管理员创建成功: {new_user.username} (ID: {new_user.id}), 已加入租户: {current_user.tenant_id}")
         return new_user
+    except BusinessException:
+        db.rollback()
+        raise
     except Exception as e:
         business_logger.error(f"超级管理员创建失败: {user.username} - {str(e)}")
         db.rollback()
@@ -309,6 +318,9 @@ def activate_user(db: Session, user_id_to_activate: uuid.UUID, current_user: Use
         # 决策 #11 修订：用户状态变更发通知，identity 重建快照（快照失效分级：user 级）
         notify_user_sync(str(user_id_to_activate))
         return db_user
+    except BusinessException:
+        db.rollback()
+        raise
     except Exception as e:
         business_logger.error(f"用户激活失败: user_id={user_id_to_activate} - {str(e)}")
         db.rollback()
@@ -346,6 +358,8 @@ def get_user(db: Session, user_id: uuid.UUID, current_user: User) -> User:
         # 返回用户信息
         business_logger.debug(f"返回用户信息: {db_user.username} (ID: {user_id})")
         return db_user
+    except BusinessException:
+        raise
     except Exception as e:
         business_logger.error(f"获取用户信息失败: user_id={user_id} - {str(e)}")
         raise BusinessException(f"获取用户信息失败: user_id={user_id} - {str(e)}", code=BizCode.DB_ERROR)
@@ -385,7 +399,9 @@ def get_tenant_superusers(db: Session, current_user: User, include_inactive: boo
         
         business_logger.info(f"租户超管查询成功: tenant_id={current_user.tenant_id}, count={len(superusers)}")
         return superusers
-        
+
+    except BusinessException:
+        raise
     except Exception as e:
         business_logger.error(f"获取租户超管列表失败: tenant_id={current_user.tenant_id} - {str(e)}")
         raise BusinessException(f"获取租户超管列表失败: tenant_id={current_user.tenant_id} - {str(e)}", code=BizCode.DB_ERROR)
@@ -454,6 +470,9 @@ async def change_password(db: Session, user_id: uuid.UUID, old_password: str, ne
         await notify_user_async(str(user_id))
         return db_user
         
+    except BusinessException:
+        db.rollback()
+        raise
     except Exception as e:
         business_logger.error(f"修改用户密码失败: user_id={user_id} - {str(e)}")
         db.rollback()
@@ -519,6 +538,9 @@ async def admin_change_password(db: Session, target_user_id: uuid.UUID, new_pass
         await notify_user_async(str(target_user_id))
         return target_user, actual_password
         
+    except BusinessException:
+        db.rollback()
+        raise
     except Exception as e:
         business_logger.error(f"管理员修改用户密码失败: admin={current_user.id}, target_user={target_user_id} - {str(e)}")
         db.rollback()
@@ -579,7 +601,7 @@ async def send_email_code_method(db: Session, email: EmailStr, user_id: uuid.UUI
     # 检查新邮箱是否已被使用
     existing_user = user_repository.get_user_by_email(db=db, email=email)
     if existing_user and existing_user.id != user_id:
-        raise BusinessException("邮箱已被使用", code=BizCode.DUPLICATE_NAME)
+        raise BusinessException("邮箱已被使用", code=BizCode.USER_EMAIL_ALREADY_EXISTS)
 
     if existing_user and existing_user.id == user_id:
         raise BusinessException("新邮箱与当前邮箱相同", code=BizCode.DUPLICATE_NAME)
