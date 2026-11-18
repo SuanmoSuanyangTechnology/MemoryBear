@@ -16,17 +16,45 @@ import Empty from '@/components/Empty'
 import { formatVersion } from '@/utils/format';
 import styles from './ApplicationRecordModal.module.css';
 
-const eventTypeColorMap: Record<string, string> = {
-  submitted: '#3b82f6',
-  pending: '#f97316',
-  approved: '#22c55e',
-  rejected: '#ef4444',
-  withdrawn: '#9ca3af',
-};
+const DEFAULT_EVENT_COLOR = '#9ca3af';
+const ERROR_EVENT_COLOR = '#ef4444';
+const PROGRESSING_EVENT_COLOR = '#3b82f6';
+const SUCCESS_EVENT_COLOR = '#22c55e';
+const WARNING_EVENT_COLOR = '#f97316';
+
+/**
+ * Single source of truth for publication events: legend items, timeline copy and colors.
+ * Copy is resolved from source + action (the API no longer returns `event_label`).
+ * See 设计文档/接口文档/社区市场 · 申请与操作记录.md.
+ */
+const publicationEventConfigs: Array<{
+  source: PublicationEvent['source'];
+  action: PublicationEvent['event_type'];
+  labelKey: string;
+  color: string;
+}> = [
+  { source: 'publisher', action: 'submitted', labelKey: 'application.recordEvent_submitted', color: PROGRESSING_EVENT_COLOR },
+  { source: 'platform', action: 'rejected', labelKey: 'application.recordEvent_rejected', color: ERROR_EVENT_COLOR },
+  { source: 'publisher', action: 'withdrawn', labelKey: 'application.recordEvent_withdrawn', color: DEFAULT_EVENT_COLOR },
+  { source: 'platform', action: 'approved', labelKey: 'application.recordEvent_approved', color: SUCCESS_EVENT_COLOR },
+  { source: 'publisher', action: 'relisted', labelKey: 'application.recordEvent_publisher_relisted', color: SUCCESS_EVENT_COLOR },
+  { source: 'platform', action: 'relisted', labelKey: 'application.recordEvent_platform_relisted', color: SUCCESS_EVENT_COLOR },
+  { source: 'platform', action: 'listed', labelKey: 'application.recordEvent_platform_listed', color: SUCCESS_EVENT_COLOR },
+  { source: 'publisher', action: 'pending', labelKey: 'application.recordEvent_pending', color: WARNING_EVENT_COLOR },
+  { source: 'publisher', action: 'delisted', labelKey: 'application.recordEvent_publisher_delisted', color: WARNING_EVENT_COLOR },
+  { source: 'platform', action: 'delisted', labelKey: 'application.recordEvent_platform_delisted', color: WARNING_EVENT_COLOR },
+];
 
 const listingStatusLabelMap: Record<string, string> = {
   listed: 'application.marketStatus_listed',
   unlisted: 'application.marketStatus_unlisted',
+};
+
+/** Falls back to a same-action config (e.g. platform.pending uses the pending copy). */
+const getEventConfig = (event: PublicationEvent) => {
+  const action = event.action || event.event_type;
+  return publicationEventConfigs.find(item => item.source === event.source && item.action === action)
+    || publicationEventConfigs.find(item => item.action === action);
 };
 
 /**
@@ -92,8 +120,7 @@ const ApplicationRecordModal = forwardRef<ApplicationRecordModalRef>((_props, re
         {recordData && recordData.listing_status && recordData.current_version && (
           <div className="rb:p-4 rb:bg-gray-50 rb:rounded-lg rb:border rb:border-gray-200">
             <span className="rb:text-[13px] rb:text-gray-600">
-              {t('application.marketStatus')}:
-              {t(listingStatusLabelMap[recordData.listing_status] || 'application.marketStatus_unlisted')}
+              {t('application.marketStatus')}: {t(listingStatusLabelMap[recordData.listing_status] || 'application.marketStatus_unlisted')}
               {' · '}
               {t('application.shareVersion')}: {recordData.current_version || '-'}
             </span>
@@ -107,42 +134,33 @@ const ApplicationRecordModal = forwardRef<ApplicationRecordModalRef>((_props, re
             )}
           </div>
         )}
-        <Flex gap={16} className="rb:mb-4! rb:pb-4! rb:border-b rb:border-gray-200">
-          <Flex align="center" gap={4}>
-            <span className="rb:inline-block rb:size-2 rb:rounded-full" style={{ backgroundColor: eventTypeColorMap.submitted }} />
-            <span className="rb:text-[13px]">{t('application.recordEvent_submitted')}</span>
-          </Flex>
-          <Flex align="center" gap={4}>
-            <span className="rb:inline-block rb:size-2 rb:rounded-full" style={{ backgroundColor: eventTypeColorMap.pending }} />
-            <span className="rb:text-[13px]">{t('application.recordEvent_pending')}</span>
-          </Flex>
-          <Flex align="center" gap={4}>
-            <span className="rb:inline-block rb:size-2 rb:rounded-full" style={{ backgroundColor: eventTypeColorMap.approved }} />
-            <span className="rb:text-[13px]">{t('application.recordEvent_approved')}</span>
-          </Flex>
-          <Flex align="center" gap={4}>
-            <span className="rb:inline-block rb:size-2 rb:rounded-full" style={{ backgroundColor: eventTypeColorMap.rejected }} />
-            <span className="rb:text-[13px]">{t('application.recordEvent_rejected')}</span>
-          </Flex>
-          <Flex align="center" gap={4}>
-            <span className="rb:inline-block rb:size-2 rb:rounded-full" style={{ backgroundColor: eventTypeColorMap.withdrawn }} />
-            <span className="rb:text-[13px]">{t('application.recordEvent_withdrawn')}</span>
-          </Flex>
+        <Flex wrap="wrap" gap={12} className="rb:mb-4! rb:pb-4! rb:border-b rb:border-gray-200">
+          {publicationEventConfigs.map((item) => (
+            <Flex key={item.labelKey} align="center" gap={4}>
+              <span
+                className="rb:inline-block rb:size-2 rb:rounded-full"
+                style={{ backgroundColor: item.color }}
+              />
+              <span className="rb:text-[13px]">{t(item.labelKey)}</span>
+            </Flex>
+          ))}
         </Flex>
         <Timeline
           mode="left"
           className={styles.timeline}
           items={events.map((event) => {
             const timeInfo = formatDateTime(event.occurred_at);
+            const action = event.action || event.event_type;
+            const eventConfig = getEventConfig(event);
             return {
-              color: eventTypeColorMap[event.event_type] || eventTypeColorMap.withdrawn,
+              color: eventConfig?.color || DEFAULT_EVENT_COLOR,
               label: <div className="rb:text-gray-600 rb:wrap-break-word">{timeInfo}</div>,
               children: (
                 <Flex vertical gap={4}>
                   <Flex align="center" gap={8}>
-                    <span className="rb:font-medium">{formatVersion(event.version)}</span>
+                    {event.version && <span className="rb:font-medium">{formatVersion(event.version || undefined)}</span>}
                     <span className="rb:text-[13px] rb:text-gray-600">
-                      {event.event_label || t(`application.recordEvent_${event.event_type}`)}
+                      {t(eventConfig?.labelKey || `application.recordEvent_${action}`, { defaultValue: action })}
                     </span>
                   </Flex>
                   {event.reason && (
