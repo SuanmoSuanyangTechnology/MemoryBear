@@ -12,7 +12,7 @@ from collections.abc import Iterable
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import String, and_, case, cast, desc, select, true
+from sqlalchemy import String, cast, desc, select, true
 
 from src.infrastructure.postgres import PostgresManager
 from src.models.references import (
@@ -228,16 +228,14 @@ class MemoryConfigReadRepository:
         """One configuration joined with the workspace facts a read needs.
 
         Shapes the row like the host's ``load_memory_config_async`` source: the
-        configuration identity plus the workspace's tenant, name, default flag and
-        per-slot model columns. This schema has no singleton preset table, so the
-        workspace's own columns are authoritative and the preset fields stay NULL
-        (the adapter then resolves ``workspace_{slot}``).
+        configuration identity, the workspace's tenant/name/default flag, its own
+        per-slot columns (``workspace_{slot}``) and the singleton preset's per-slot
+        columns (``{slot}_model_config_id``). The adapter ports the host's
+        ``_effective_workspace_models`` over both families — a default-config
+        workspace follows the preset, everything else its own columns — so this
+        projection must publish both, never fold one into the other.
         """
 
-        use_preset = and_(
-            Workspace.is_default_config.is_(True),
-            WorkspaceDefaultModelPreset.id.is_not(None),
-        )
         columns = (
             MemoryConfigRow.config_id,
             MemoryConfigRow.config_name,
@@ -247,30 +245,30 @@ class MemoryConfigReadRepository:
             Workspace.storage_type,
             Workspace.is_default_config,
             WorkspaceDefaultModelPreset.id.label("preset_id"),
-            case(
-                (use_preset, cast(WorkspaceDefaultModelPreset.llm_model_config_id, String)),
-                else_=Workspace.llm,
-            ).label("workspace_llm"),
-            case(
-                (use_preset, cast(WorkspaceDefaultModelPreset.embedding_model_config_id, String)),
-                else_=Workspace.embedding,
-            ).label("workspace_embedding"),
-            case(
-                (use_preset, cast(WorkspaceDefaultModelPreset.rerank_model_config_id, String)),
-                else_=Workspace.rerank,
-            ).label("workspace_rerank"),
-            case(
-                (use_preset, cast(WorkspaceDefaultModelPreset.vision_model_config_id, String)),
-                else_=Workspace.vision,
-            ).label("workspace_vision"),
-            case(
-                (use_preset, cast(WorkspaceDefaultModelPreset.audio_model_config_id, String)),
-                else_=Workspace.audio,
-            ).label("workspace_audio"),
-            case(
-                (use_preset, cast(WorkspaceDefaultModelPreset.video_model_config_id, String)),
-                else_=Workspace.video,
-            ).label("workspace_video"),
+            Workspace.llm.label("workspace_llm"),
+            Workspace.embedding.label("workspace_embedding"),
+            Workspace.rerank.label("workspace_rerank"),
+            Workspace.vision.label("workspace_vision"),
+            Workspace.audio.label("workspace_audio"),
+            Workspace.video.label("workspace_video"),
+            cast(
+                WorkspaceDefaultModelPreset.llm_model_config_id, String
+            ).label("llm_model_config_id"),
+            cast(
+                WorkspaceDefaultModelPreset.embedding_model_config_id, String
+            ).label("embedding_model_config_id"),
+            cast(
+                WorkspaceDefaultModelPreset.rerank_model_config_id, String
+            ).label("rerank_model_config_id"),
+            cast(
+                WorkspaceDefaultModelPreset.vision_model_config_id, String
+            ).label("vision_model_config_id"),
+            cast(
+                WorkspaceDefaultModelPreset.audio_model_config_id, String
+            ).label("audio_model_config_id"),
+            cast(
+                WorkspaceDefaultModelPreset.video_model_config_id, String
+            ).label("video_model_config_id"),
         )
         async with self.postgres.session() as session:
             row = (
