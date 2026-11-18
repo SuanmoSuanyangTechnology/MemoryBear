@@ -20,6 +20,7 @@ from src.models.references.memory_statistics_model import (
     ShortTermMemory,
 )
 from src.models.references.ontology_scene_model import OntologySceneRow
+from src.models.references.ontology_scene_type_model import OntologySceneType
 from src.models.references.workspace_model import Workspace
 
 __all__ = [
@@ -28,6 +29,7 @@ __all__ = [
     "EndUserInfo",
     "MemoryConfigRow",
     "OntologySceneRow",
+    "OntologySceneType",
     "ModelConfig",
     "WorkspaceDefaultModelPreset",
     "EndUserMerge",

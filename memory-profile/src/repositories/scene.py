@@ -2,18 +2,10 @@ from __future__ import annotations
 
 from uuid import UUID
 
-from sqlalchemy import UUID as SQLAlchemyUUID
-from sqlalchemy import Boolean, String, and_, case, column, or_, select, table
+from sqlalchemy import and_, case, or_, select
 
 from src.infrastructure.postgres import PostgresManager
-
-_ontology_scene_type = table(
-    "ontology_scene_type",
-    column("scene_type_id", SQLAlchemyUUID(as_uuid=True)),
-    column("tenant_id", SQLAlchemyUUID(as_uuid=True)),
-    column("scene_name", String),
-    column("is_system_default", Boolean),
-)
+from src.models.references import OntologySceneType
 
 
 class SceneRepository:
@@ -23,24 +15,24 @@ class SceneRepository:
     async def list_visible_simple_scenes(self, tenant_id: UUID) -> list[dict[str, object]]:
         visible = or_(
             and_(
-                _ontology_scene_type.c.tenant_id.is_(None),
-                _ontology_scene_type.c.is_system_default.is_(True),
+                OntologySceneType.tenant_id.is_(None),
+                OntologySceneType.is_system_default.is_(True),
             ),
             and_(
-                _ontology_scene_type.c.tenant_id == tenant_id,
-                _ontology_scene_type.c.is_system_default.is_(False),
+                OntologySceneType.tenant_id == tenant_id,
+                OntologySceneType.is_system_default.is_(False),
             ),
         )
         statement = (
             select(
-                _ontology_scene_type.c.scene_type_id,
-                _ontology_scene_type.c.scene_name,
+                OntologySceneType.scene_type_id,
+                OntologySceneType.scene_name,
             )
             .where(visible)
             .order_by(
-                case((_ontology_scene_type.c.tenant_id.is_(None), 0), else_=1),
-                _ontology_scene_type.c.scene_name.asc(),
-                _ontology_scene_type.c.scene_type_id.asc(),
+                case((OntologySceneType.tenant_id.is_(None), 0), else_=1),
+                OntologySceneType.scene_name.asc(),
+                OntologySceneType.scene_type_id.asc(),
             )
         )
         async with self.postgres.session() as session:
