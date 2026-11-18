@@ -138,12 +138,16 @@ def entry_failure(index, item, stage, reason):
     }
 
 
+class ImportModelChanged(Exception):
+    """提交阶段锁内再次确认的模型已变化。"""
+
+
 def commit_faqs(session, task_id, token, items, model_id):
     job = owned(session, task_id, token)
     scope = scope_of(job)
     kb, _ = lock_knowledge(session, job.kb_id, scope)
     if kb.embedding_id != model_id:
-        raise RuntimeError("FAQ_IMPORT_MODEL_CHANGED")
+        raise ImportModelChanged("FAQ_IMPORT_MODEL_CHANGED")
     old_ids = (
         list(
             session.scalars(
@@ -236,10 +240,26 @@ def commit_faqs(session, task_id, token, items, model_id):
     return snapshot(job)
 
 
+def cancel_pending_dispatch(session, task_id):
+    row = session.scalar(select(Job).where(Job.id == task_id).with_for_update())
+    if row is None:
+        raise KnowledgeError.from_code("KB_RESOURCE_NOT_FOUND", status_code=404)
+    if row.status != "pending":
+        return None
+    return _mark_failed(session, row, "导入任务派发失败，本批未导入。")
+
+
 def fail(session, task_id, token, message):
     row = session.scalar(select(Job).where(Job.id == task_id).with_for_update())
-    if row is None or row.status in TERMINAL or (token and row.execution_token != token):
+    if row is None or row.status in TERMINAL:
         return snapshot(row) if row else None
+    # 提交方只可撤销尚未被 Worker 领取的任务，迟到的派发回执不能覆盖执行结果。
+    if (token is None and row.status != "pending") or row.execution_token != token:
+        return snapshot(row)
+    return _mark_failed(session, row, message)
+
+
+def _mark_failed(session, row, message):
     total = session.scalar(
         select(func.count())
         .select_from(WikiFAQ)
@@ -268,6 +288,15 @@ def cleaned(session, task_id):
     row = session.get(Job, task_id)
     if row and row.status in TERMINAL:
         row.candidates, row.cleanup_ids = [], []
+
+
+def release_after_db_error(session, task_id, token):
+    # 上次 commit 的结果可能已生效。只释放本次执行令牌，不修改进度或终态。
+    session.execute(
+        update(Job)
+        .where(Job.id == task_id, Job.execution_token == token, Job.status == "running")
+        .values(execution_token=None, lease_expires_at=None)
+    )
 
 
 def release_for_reindex(session, task_id, token):

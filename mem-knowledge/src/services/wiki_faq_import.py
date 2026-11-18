@@ -6,13 +6,14 @@ import logging
 import uuid
 
 from sqlalchemy import select
+from sqlalchemy.exc import InterfaceError, OperationalError
 
 from ..errors import KnowledgeError
 from ..models.owned import Knowledge
 from ..rag.faq.index import delete_projection, is_indexed, write_projection
 from ..rag.wiki.diagnostics import diagnostic_json, exception_details
 from ..repositories.wiki_faq import import_jobs as jobs
-from ..tasks.dispatch import TaskDispatcher, TaskNotPublishedError
+from ..tasks.dispatch import TaskDispatcher
 from .knowledge_file_storage import KnowledgeFileStorage
 from .wiki.runtime import transaction
 from .wiki_faq_retrieval import _target_for_sync
@@ -57,11 +58,13 @@ async def submit(runtime, scope, actor_id, payload):
             task_id=str(task_id),
             connect_before_publish=True,
         )
-    except TaskNotPublishedError:
-        finished = await db_call(
-            runtime, jobs.fail, task_id, None, "导入任务派发失败，本批未导入。"
-        )
-        await cleanup(runtime, finished)
+    except KnowledgeError:
+        logger.exception("FAQ 导入派发异常 task_id=%s stage=dispatch", task_id)
+        job = await db_call(runtime, jobs.cancel_pending_dispatch, task_id)
+        if job is None:
+            # 消息已被领取或执行完成，返回任务句柄供调用方查询真实结果。
+            return {"task_id": str(task_id), "status": "pending"}
+        await cleanup(runtime, job)
         raise
     return {"task_id": str(task_id), "status": "pending"}
 
@@ -140,7 +143,7 @@ def embedding_snapshot(session, scope):
     return {"embedding_id": kb.embedding_id}
 
 
-async def cleanup(runtime, job):
+async def cleanup(runtime, job, *, retry_on_error=False):
     if not job or job["status"] not in jobs.TERMINAL:
         return
     scope = {key: job[key] for key in ("kb_id", "workspace_id", "tenant_id")}
@@ -161,6 +164,12 @@ async def cleanup(runtime, job):
             job["id"],
             diagnostic_json(exception_details(exc)),
         )
+        if retry_on_error:
+            raise ImportCleanupRetry(str(job["id"])) from exc
+
+
+class ImportCleanupRetry(Exception):
+    """业务已结束，重投只执行幂等清理。"""
 
 
 async def execute(runtime, task_id):
@@ -169,7 +178,7 @@ async def execute(runtime, task_id):
         runtime, jobs.claim, task_id, token, runtime.settings.kb_task_time_limit_seconds
     )
     if job is None:
-        await cleanup(runtime, await db_call(runtime, jobs.load, task_id))
+        await cleanup(runtime, await db_call(runtime, jobs.load, task_id), retry_on_error=True)
         return False
     if job.get("busy"):
         return True
@@ -236,6 +245,13 @@ async def execute(runtime, task_id):
         finished = await db_call(
             runtime, jobs.commit_faqs, task_id, token, items, model["embedding_id"]
         )
+    except jobs.ImportModelChanged:
+        await db_call(runtime, jobs.release_for_reindex, task_id, token)
+        return True
+    except (InterfaceError, OperationalError):
+        logger.exception("FAQ 导入数据库暂不可用 task_id=%s stage=execute", task_id)
+        await db_call(runtime, jobs.release_after_db_error, task_id, token)
+        raise
     except Exception as exc:
         logger.exception(
             "FAQ 导入任务失败 task_id=%s stage=execute details=%s",
@@ -246,5 +262,5 @@ async def execute(runtime, task_id):
         finished = await db_call(
             runtime, jobs.fail, task_id, token, "导入执行失败，本批未写入；请检查任务日志。"
         )
-    await cleanup(runtime, finished)
+    await cleanup(runtime, finished, retry_on_error=True)
     return False
