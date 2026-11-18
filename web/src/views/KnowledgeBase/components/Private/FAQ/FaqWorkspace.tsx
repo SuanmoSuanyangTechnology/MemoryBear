@@ -1,5 +1,5 @@
 import { useRef, useState, type Key } from 'react';
-import { App, Button, Flex, Form, Select, Space, Switch } from 'antd';
+import { App, Button, Flex, Form, Select, Space, Switch, Tooltip } from 'antd';
 import { useTranslation } from 'react-i18next';
 import type { ColumnsType } from 'antd/es/table';
 import type { TableProps } from 'antd';
@@ -10,6 +10,7 @@ import {
   deleteFaq,
   batchEnabledFaq,
   batchApproveFaq,
+  exportAllFaq,
 } from '@/api/kbWiki';
 import SearchInput from '@/components/SearchInput';
 import Table, { type TableRef } from '@/components/Table';
@@ -44,6 +45,7 @@ export default function FaqWorkspace({ knowledgeBaseId, onOpenWikiPage }: {
   const tableRef = useRef<TableRef>(null);
 
   const [busy, setBusy] = useState(false);
+  const [exporting, setExporting] = useState(false);
 
   const rowSelection: TableProps<FaqItem>['rowSelection'] = {
     selectedRowKeys: selected,
@@ -131,6 +133,21 @@ export default function FaqWorkspace({ knowledgeBaseId, onOpenWikiPage }: {
     setTotalAll(res.total_all)
   }
 
+  const handleExportAll = async () => {
+    setExporting(true)
+    try {
+      await exportAllFaq(knowledgeBaseId)
+      message.success(t('knowledgeBase.faq.exportAllSuccess'))
+    } finally {
+      setExporting(false)
+    }
+  }
+
+  const handleCancelSelection = () => {
+    setSelected([])
+    setSelectedList([])
+  }
+
   const column: ColumnsType<FaqItem> = [
     {
       title: t('knowledgeBase.faq.question&answer'),
@@ -213,11 +230,9 @@ export default function FaqWorkspace({ knowledgeBaseId, onOpenWikiPage }: {
     },
   ]
 
-  console.log('selectedList', selectedList, busy)
-
   return (
     <Flex vertical gap={12} className="rb:pt-3! rb:pr-3! rb:h-full rb:overflow-auto">
-      <Flex justify="space-between" gap={16} wrap>
+      <Flex justify="space-between" gap={16} wrap className="rb:shrink-0!">
         <Form
           form={form}
           initialValues={{ review_status: null, is_enabled: null }}
@@ -253,40 +268,74 @@ export default function FaqWorkspace({ knowledgeBaseId, onOpenWikiPage }: {
             />
           </Form.Item>
         </Form>
-        <Space size={12} wrap>
-          <Button
-            disabled={selectedList.filter(vo => ['pending', 'change_pending'].includes(vo.review_status)).length < 1 || busy}
-            onClick={handleBatchApprove}
-          >
-            {t('knowledgeBase.faq.reviewApprove')}
-          </Button>
-          <Button
-            disabled={selectedList.filter(vo => !vo.is_enabled && !['pending', 'change_pending'].includes(vo.review_status)).length < 1 || busy}
-            onClick={() => handleBatchSwitch(true)}
-          >
-            {t('knowledgeBase.faq.enable')}
-          </Button>
-          <Button
-            disabled={selectedList.filter(vo => vo.is_enabled && !['pending', 'change_pending'].includes(vo.review_status)).length < 1 || busy}
-            onClick={() => handleBatchSwitch(false)}
-          >
-            {t('knowledgeBase.faq.disable')}
-          </Button>
+        <Space size={12} className="rb:shrink-0">
+          <Tooltip title={t('knowledgeBase.faq.exportAll')}>
+            <Button
+              disabled={exporting || totalAll < 1 || busy}
+              className="rb:group rb:px-2!"
+              onClick={handleExportAll}
+            >
+              <div className="rb:size-4.5 rb:bg-cover rb:bg-[url('@/assets/images/application/import.svg')] rb:group-hover:bg-[url('@/assets/images/application/import_blue.svg')]" />
+            </Button>
+          </Tooltip>
           <Button type="primary" onClick={() => editModalRef.current?.handleOpen()}>
             {t('knowledgeBase.faq.add')}
           </Button>
         </Space>
       </Flex>
-      <Table<FaqItem>
-        ref={tableRef}
-        apiUrl={getFaqListUrl(knowledgeBaseId)}
-        apiParams={values}
-        rowKey="id"
-        fillHeight={true}
-        rowSelection={rowSelection}
-        columns={column}
-        onLoad={onLoad}
-      />
+      <Flex vertical className="rb:flex-1!">
+        {selected.length > 0 && (
+          <Flex align="center" gap={12} className="rb:bg-[#f7f9ff] rb:border-b rb:border-b-[#e8edf9] rb:px-3! rb:py-1!">
+            <span className="rb:text-[12px] rb:text-gray-600">{t('knowledgeBase.faq.selectedCount', { count: selected.length })}</span>
+            <Button
+              type="link"
+              size="small"
+              className="rb:text-[12px]! rb:px-0!"
+              disabled={selectedList.filter(vo => ['pending', 'change_pending'].includes(vo.review_status)).length < 1 || busy}
+              onClick={handleBatchApprove}
+            >
+              {t('knowledgeBase.faq.reviewApprove')}
+            </Button>
+            <Button
+              type="link"
+              size="small"
+              className="rb:text-[12px]! rb:px-0!"
+              disabled={selectedList.filter(vo => !vo.is_enabled && !['pending', 'change_pending'].includes(vo.review_status)).length < 1 || busy}
+              onClick={() => handleBatchSwitch(true)}
+            >
+              {t('knowledgeBase.faq.enable')}
+            </Button>
+            <Button
+              type="link"
+              size="small"
+              className="rb:text-[12px]! rb:px-0!"
+              disabled={selectedList.filter(vo => vo.is_enabled && !['pending', 'change_pending'].includes(vo.review_status)).length < 1 || busy}
+              onClick={() => handleBatchSwitch(false)}
+            >
+              {t('knowledgeBase.faq.disable')}
+            </Button>
+            <Button
+              type="link"
+              size="small"
+              className="rb:text-[12px]! rb:px-0!"
+              disabled={busy}
+              onClick={handleCancelSelection}
+            >
+              {t('knowledgeBase.faq.cancelSelection')}
+            </Button>
+          </Flex>
+        )}
+        <Table<FaqItem>
+          ref={tableRef}
+          apiUrl={getFaqListUrl(knowledgeBaseId)}
+          apiParams={values}
+          rowKey="id"
+          fillHeight={true}
+          rowSelection={rowSelection}
+          columns={column}
+          onLoad={onLoad}
+        />
+      </Flex>
       <FaqEditModal
         ref={editModalRef}
         knowledgeBaseId={knowledgeBaseId}

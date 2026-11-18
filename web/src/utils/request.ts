@@ -12,11 +12,19 @@
  */
 
 import axios from 'axios';
-import type { AxiosRequestConfig, InternalAxiosRequestConfig } from 'axios';
+import type { AxiosRequestConfig, AxiosResponse, InternalAxiosRequestConfig } from 'axios';
 import { clearAuthData } from './auth';
 import { message } from 'antd';
 import { refreshTokenUrl, refreshToken, loginUrl, logoutUrl } from '@/api/user'
 import i18n from '@/i18n'
+
+/**
+ * 需要读取原始响应头时使用（如按 Content-Disposition 命名的文件下载）。
+ * 开启后响应拦截器不做业务数据解包，直接返回 AxiosResponse。
+ */
+export interface RawResponseConfig extends AxiosRequestConfig {
+  rawResponse?: boolean;
+}
 
 /**
  * Handle logout: clear auth data, show warning message, redirect to login page
@@ -218,6 +226,10 @@ service.interceptors.response.use(
     const traceId = response.headers?.['x-trace-id'] || response.headers?.['X-Trace-Id']
     if (traceId) lastTraceId = traceId
 
+    if ((response.config as RawResponseConfig)?.rawResponse) {
+      return response;
+    }
+
     const { data: responseData } = response;
 
     if (!responseData || typeof responseData !== 'object') {
@@ -280,24 +292,26 @@ service.interceptors.response.use(
     if (errTraceId) lastTraceId = errTraceId
 
     let msg = error.response?.data?.msg || error.response?.msg || error.msg;
+    let errorData = error.response?.data;
 
-    if (error.response?.data instanceof Blob) {
+    // blob 下载的错误响应体也是 Blob，需解析后才能沿用按业务码分支的刷新/登出逻辑
+    if (errorData instanceof Blob) {
       try {
-        const text = await error.response.data.text();
-        const errorData = JSON.parse(text);
-        msg = errorData.msg || msg;
+        const text = await errorData.text();
+        errorData = JSON.parse(text);
+        msg = errorData?.msg || msg;
       } catch {
         msg = msg || i18n.t('common.unknownError');
       }
     }
     const status = error?.response ? error.response.status : error;
-    const errorCode = error.response?.data?.code;
+    const errorCode = errorData?.code;
     const isPublic = isPublicApi(error.config?.url);
     switch (status) {
       case 401:
         if (error.config?.url === refreshTokenUrl) {
           if (errorCode === 2001) {
-            message.warning(error.response?.data?.msg || i18n.t('common.serviceUpgrading'));
+            message.warning(errorData?.msg || i18n.t('common.serviceUpgrading'));
             return Promise.reject(error);
           }
           handleLogout(error.response?.data?.msg || i18n.t('common.loginExpired'));
@@ -355,8 +369,8 @@ service.interceptors.response.use(
         msg = msg || i18n.t('common.serviceUpgrading');
         break;
       default:
-        if (!msg && Array.isArray(error.response?.data?.detail)) {
-          msg = error.response?.data?.detail?.map((item: { msg: string }) => item.msg).join(';')
+        if (!msg && Array.isArray(errorData?.detail)) {
+          msg = errorData?.detail?.map((item: { msg: string }) => item.msg).join(';')
         } else {
           msg = msg || i18n.t('common.unknownError');
         }
@@ -508,6 +522,14 @@ export const request = {
       withCredentials: false,
       ...config
     }));
+  },
+  /** 返回完整响应（含 headers）的 blob 请求，适用于按 Content-Disposition 命名的下载 */
+  getBlobResponse<T = Blob>(url: string, config?: RawResponseConfig): Promise<AxiosResponse<T>> {
+    return service.get(url, {
+      ...config,
+      responseType: 'blob',
+      rawResponse: true,
+    } as AxiosRequestConfig) as unknown as Promise<AxiosResponse<T>>;
   },
   downloadFile(url: string, fileName: string, data?: unknown, callback?: () => void) {
     service.post(url, data, {

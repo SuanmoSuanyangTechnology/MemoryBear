@@ -17,13 +17,17 @@ interface IconButtonProps {
   className?: string;
   badge?: number;
   hideTooltip?: boolean;
+  disabled?: boolean;
 }
 
-const IconBtn: FC<IconButtonProps> = ({ icon, onClick, className, badge }) => (
+const IconBtn: FC<IconButtonProps> = ({ icon, onClick, className, badge, disabled = false }) => (
   <Flex
     align="center"
     justify="center"
-    className={clsx("rb:relative rb:size-7.5 rb:cursor-pointer rb:rounded-lg rb:hover:bg-[#F6F6F6] rb:overflow-visible", className)}
+    className={clsx("rb:relative rb:size-7.5 rb:rounded-lg rb:hover:bg-gray-100 rb:overflow-visible", className, {
+      'rb:opacity-65 rb:cursor-not-allowed': disabled,
+      'rb:cursor-pointer': !disabled
+    })}
     onClick={onClick}
   >
     {badge !== undefined && badge !== null ? (
