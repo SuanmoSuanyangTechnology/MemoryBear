@@ -180,13 +180,10 @@ class MySharesService:
             status = self._market_row_status(sync, state.get("status"))
             rows.append({
                 **legacy,
-                "version": market_version.version_name,
+                # 列表展示与重新上架共用 version；尚无公开版本时保持空值。
+                "version": state.get("current_version"),
                 "version_number": market_version.version,
-                # 与市场 versions 接口的 item.release_id 同源（都是 `AppRelease.id`），
-                # 前端据此把「我的共享」这一行对到该资源的版本记录上。不能按
-                # `version` 字符串匹配：市场只列已通过版本，本行取最近一次投稿，
-                # 审核中的那一版在版本记录里根本不存在；而 `version_name` 本身
-                # 在 `app_releases` 上也没有唯一约束。
+                # 本地发布序号与 release_id 跟随最近一次投稿，供查询投稿记录。
                 "release_id": str(sync.release_id),
                 "scope": SCOPE_COMMUNITY_MARKET,
                 "share_status": status,
@@ -413,6 +410,7 @@ class MySharesService:
             delist_actor = _record_get(record, "delist_actor")
             folded[str(key)] = {
                 "status": status,
+                "current_version": _record_get(record, "current_version"),
                 "listing_status": listing_status,
                 "delist_actor": delist_actor,
                 "can_delist": _can_delist(record, listing_status),
