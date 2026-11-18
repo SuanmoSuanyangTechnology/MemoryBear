@@ -37,6 +37,7 @@ from src.schemas.memory_config import (
     ReflectionMutationData,
     SceneCommunityConfigData,
     SceneConfigData,
+    SimpleSceneData,
     ValidateConfigResult,
 )
 from src.schemas.memory_config_requests import (
@@ -70,6 +71,15 @@ def _handler(request: Request) -> MemoryConfigHandler:
 
 
 # ── Reads ────────────────────────────────────────────────────────────────────
+
+
+@router.get("/scenes/simple", response_model=ApiResponse[list[SimpleSceneData]])
+@external_api
+async def list_simple_scenes(
+    request: Request,
+    context: Context,
+) -> ApiResponse[list[SimpleSceneData]] | JSONResponse:
+    return await _handler(request).list_simple_scenes(context, request)
 
 
 @router.get(

@@ -142,6 +142,16 @@ async def _verify_config_ownership_async(config_id: str, workspace_id: uuid.UUID
 #     logger.info(f"Listed {result['total']} configs for workspace: {api_key_auth.workspace_id}")
 #     return success(data=ListConfigsResponse(**result).model_dump(), msg="Configs listed successfully")
 
+@router.get("/scenes/simple")
+@require_api_key_self_db(scopes=["memory"])
+@memory_profile_proxy(
+    preserve_status=True,
+)
+async def list_simple_scenes(request: Request):
+    """List scenes through the memory-profile API."""
+    return None
+
+
 @router.get("/read_all_config")
 @require_api_key_self_db(scopes=["memory"])
 @memory_profile_proxy(
