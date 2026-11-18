@@ -8,6 +8,7 @@ from .contracts import FolderAssignments, IdentityMatches
 from .identity import same_name_target
 from .model import request_tokens, tokens
 from .pipeline import require_refs
+from .resolution import resolve_against_pages
 
 IDENTITY_CANDIDATE_LIMIT = 5
 IDENTITY_SIMILARITY_THRESHOLD = 0.5
@@ -22,14 +23,21 @@ def reconcile(model, snapshot, topics, context):
     pages = context["pages"]
     cases, shortlists = [], {}
     for topic in topics:
+        if topic.get("semantic_type") and resolve_against_pages(model, snapshot, topic, pages):
+            continue
+        compatible = [
+            page for page in pages
+            if not page.get("semantic_type") or not topic.get("semantic_type")
+            or page["semantic_type"] == topic["semantic_type"]
+        ]
         target = same_name_target(
-            topic, pages, kb_id=snapshot["kb_id"], document_id=snapshot["document_id"],
+            topic, compatible, kb_id=snapshot["kb_id"], document_id=snapshot["document_id"],
         )
         if target is not None:
             topic["existing_page_id"] = target["page_id"]
             continue
         names = _names(topic)
-        available = [p for p in pages if p["kind"] == topic["kind"]]
+        available = [p for p in compatible if p["kind"] == topic["kind"]]
         exact = [p for p in available if names & _names(p)
                  and normalize_name(p["scope"]) == normalize_name(topic["scope"])]
         if len(exact) == 1:
@@ -87,6 +95,8 @@ def _taxonomy_subject(topic):
         "name": topic.get("name") or topic.get("title"), "kind": topic["kind"],
         "scope": topic.get("scope", ""), "aliases": topic.get("aliases", []),
         "description": topic.get("description", "")[:TAXONOMY_DESCRIPTION_CHARS],
+        **({"semantic_type": semantic_type}
+           if (semantic_type := topic.get("semantic_type")) else {}),
     }
 
 

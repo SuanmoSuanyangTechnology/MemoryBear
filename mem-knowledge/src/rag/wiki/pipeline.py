@@ -14,6 +14,7 @@ from .contracts import Candidates, Compacted, EvidencePage
 from .diagnostics import diagnostic_json
 from .identity import merge_candidate, topic_identity
 from .model import request_tokens, tokens
+from .ontology import TYPES, candidate_identity, with_verified_type
 
 logger = logging.getLogger(__name__)
 
@@ -114,11 +115,12 @@ def model_topics(topics):
 
 def extract_candidates(model, snapshot, segments):
     def extract(segment):
-        source_ids = {s["ref"] for s in segment}
+        source_text = {s["ref"]: s["text"] for s in segment}
 
-        def validate(value, source_ids=source_ids):
-            for candidate in value["candidates"]:
-                require_refs(candidate["source_refs"], source_ids)
+        def validate(value):
+            for index, candidate in enumerate(value["candidates"]):
+                require_refs(candidate["source_refs"], source_text)
+                value["candidates"][index] = with_verified_type(candidate, source_text)
 
         result = model.call(
             "wiki_candidates_v1",
@@ -138,7 +140,7 @@ def extract_candidates(model, snapshot, segments):
     candidates = {}
     for segment_index, result in enumerate(results, start=1):
         for item in result["candidates"]:
-            key = topic_identity(item["kind"], item["name"])
+            key = topic_identity(candidate_identity(item), item["name"])
             if key in candidates:
                 logger.info("Wiki 分段主题归并 %s", diagnostic_json({
                     "stage": "wiki_candidates_v1", "task_id": current_parent_task_id(),
@@ -160,9 +162,6 @@ def extract_candidates(model, snapshot, segments):
             len(candidates),
             model.settings.kb_wiki_max_topics,
         )
-        if (model.settings.kb_wiki_max_topics
-                and len(candidates) > model.settings.kb_wiki_max_topics):
-            raise WikiError("WIKI_TOPIC_BUDGET_EXCEEDED", retryable=False)
     return list(candidates.values())
 
 
@@ -416,7 +415,11 @@ def generate_page(model, snapshot):
         previous = "\n".join(line for line in previous.splitlines() if line.startswith("#"))
     data = {
             "language": snapshot["language"],
-            "page": {"title": snapshot["title"], "type": snapshot["page_type"]},
+            "page": {
+                "title": snapshot["title"], "type": snapshot["page_type"],
+                **({"semantic_type": semantic_type, "type_definition": TYPES[semantic_type][1]}
+                   if (semantic_type := snapshot.get("semantic_type")) else {}),
+            },
             "previous_content": previous,
             "document_context": optional_items(contexts, model.settings.kb_wiki_input_tokens // 8),
             "evidence": [],

@@ -12,6 +12,7 @@ from ...rag.wiki.document import bind_materials, prepare_document
 from ...rag.wiki.input import read_sources, segment_sources
 from ...rag.wiki.pipeline import extract_candidates, generate_page
 from ...rag.wiki.planning import reconcile, taxonomy
+from ...rag.wiki.resolution import resolve_candidates
 from ...repositories.wiki import pages, state
 from ...repositories.wiki.common import lock_document, lock_knowledge
 from ...tasks.dispatch import TaskDispatcher
@@ -67,6 +68,10 @@ def _plan_topics(runtime, model, snapshot, draft, delivery, input_hash, ensure_m
     ensure_map_owned()
     with taxonomy_lease(runtime.redis.sync_client(), delivery["kb_id"]) as ensure_owned:
         context = transaction(runtime, pages.load_planning_context, delivery)
+        draft["topics"] = resolve_candidates(model, snapshot, draft["topics"])
+        limit = model.settings.kb_wiki_max_topics
+        if limit and len(draft["topics"]) > limit:
+            raise WikiError("WIKI_TOPIC_BUDGET_EXCEEDED", retryable=False)
         candidates = reconcile(model, snapshot, draft["topics"], context)
         ensure_map_owned()
         candidates = taxonomy(model, snapshot, candidates, context)
