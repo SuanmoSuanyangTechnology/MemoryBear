@@ -379,17 +379,27 @@ export interface MySharedOutItem {
 /**
  * Community market publication event types
  */
-export type PublicationEventType = 'submitted' | 'pending' | 'approved' | 'rejected' | 'withdrawn';
+export type PublicationEventType =
+    | 'submitted'
+    | 'pending'
+    | 'approved'
+    | 'rejected'
+    | 'withdrawn'
+    | 'listed'
+    | 'delisted'
+    | 'relisted';
 
 /**
  * Community market publication event
+ * `event_label` is no longer returned by the API: copy is resolved from source + action.
  */
 export interface PublicationEvent {
     event_id: string;
     event_type: PublicationEventType;
-    event_label: string;
-    version: string;
-    publication_id: string;
+    action: PublicationEventType;
+    source: 'publisher' | 'platform';
+    version: string | null;
+    publication_id: string | null;
     occurred_at: number;
     reason: string | null;
 }

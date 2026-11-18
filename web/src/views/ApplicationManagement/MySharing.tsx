@@ -182,14 +182,14 @@ const MySharing = forwardRef<MySharingRef, { switchOntology: (item: Application)
       width: 160,
       render: (_: unknown, record: MySharedOutItem) => {
         const reviewStatus = record.share_status;
-        const reviewVersion = record.version;
+        const reviewVersion = record.review_version ? formatVersion(record.review_version) : undefined;
         if (!reviewStatus || reviewStatus === 'shared' || reviewStatus === 'unknown') {
           return <span>-</span>;
         }
         return (
           <Space>
             <Tag color={statusColorMap[reviewStatus] || 'default'}>
-              {[reviewVersion, t(statusLabelMap[reviewStatus] || 'application.statusUnknown')].join(' · ')}
+              {[reviewVersion, t(statusLabelMap[reviewStatus] || 'application.statusUnknown')].filter(Boolean).join(' · ')}
             </Tag>
           </Space>
         );
