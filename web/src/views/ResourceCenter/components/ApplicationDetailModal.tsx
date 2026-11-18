@@ -106,6 +106,13 @@ const ApplicationDetailModal = forwardRef<ApplicationDetailModalRef, Application
         }
         onCancel={close}
         footer={null}
+        classNames={{
+          content: 'rb:flex! rb:flex-col! rb:max-h-[calc(100vh-64px)]! rb:overflow-hidden!',
+          header: 'rb:shrink-0!',
+          body: 'rb:flex-1! rb:overflow-auto!',
+          footer: 'rb:shrink-0!',
+        }}
+        needWrapper={false}
       >
         <Spin spinning={loading}>
           {item && (
@@ -127,7 +134,7 @@ const ApplicationDetailModal = forwardRef<ApplicationDetailModalRef, Application
                   {type === 'multi_agent' && (
                     <ClusterPreview payload={item.display_payload?.cluster} name={item.source_app_name as string} />
                   )}
-                  {type === 'agent' && item.usage_examples.length > 0 && (
+                  {(type === 'agent' || type === 'multi_agent') && item.usage_examples.length > 0 && (
                     <section>
                       <h3 className="rb:font-semibold">{t('resourceCenter.examples')}</h3>
                       {item.usage_examples.map((example, index) => (
@@ -166,7 +173,7 @@ const ApplicationDetailModal = forwardRef<ApplicationDetailModalRef, Application
                         <Flex align="center" gap={8} wrap key={tool.name}>
                           <ToolIcon iconUrl={tool.icon as string} />
                           {tool.name}
-                          <Tag>{tool.tool_type}</Tag>
+                          <Tag>{t(`tool.${tool.tool_type}`)}</Tag>
                         </Flex>
                       ))
                       : <Empty size={88} />

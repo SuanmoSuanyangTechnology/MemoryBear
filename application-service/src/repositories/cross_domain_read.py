@@ -44,6 +44,13 @@ from ..utils.statistics_window import day_bucket
 
 cross_domain_metadata = MetaData()
 
+tenants = Table(
+    "tenants",
+    cross_domain_metadata,
+    Column("id", PgUUID(as_uuid=True), primary_key=True),
+    Column("name", String),
+)
+
 workspaces = Table(
     "workspaces",
     cross_domain_metadata,
@@ -436,6 +443,14 @@ def get_user_display_names_by_ids(db: Session, user_ids: set[UUID]) -> dict[UUID
         select(users.c.id, users.c.username, users.c.email).where(users.c.id.in_(user_ids))
     ).all()
     return {row.id: row.username or row.email for row in rows}
+
+
+def get_tenant_name(db: Session, tenant_id: UUID) -> str | None:
+    """Tenant display name for community-market publisher metadata."""
+
+    return db.execute(
+        select(tenants.c.name).where(tenants.c.id == tenant_id)
+    ).scalar_one_or_none()
 
 
 def get_workspace_tenant_id(db: Session, workspace_id: UUID) -> UUID | None:
@@ -921,6 +936,7 @@ __all__ = [
     "get_resource_pack_rows",
     "get_skill_row",
     "get_tenant_user_ids",
+    "get_tenant_name",
     "get_tool_config_row",
     "get_user",
     "get_user_display_names_by_ids",

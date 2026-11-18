@@ -2511,6 +2511,7 @@ class ToolService:
             # Prefer the tool's own connection check when it exposes one
             if hasattr(tool_instance, 'test_connection'):
                 result = await tool_instance.test_connection()
+                self._persist_builtin_test_status(config, result)
                 return result
             else:
                 # Check whether configuration is required
@@ -2526,7 +2527,30 @@ class ToolService:
 
         except Exception as e:
             logger.error(f"测试内置工具失败: {config.id}, 错误: {e}")
+            self._persist_builtin_test_status(
+                config, {"success": False, "message": str(e)}
+            )
             return {"success": False, "message": f"测试失败: {str(e)}"}
+
+    def _persist_builtin_test_status(
+        self, config: ToolConfig, result: dict[str, Any]
+    ) -> None:
+        """Persist a builtin connection-test outcome for config-required tools."""
+        try:
+            builtin_config = self.builtin_repo.find_by_tool_id(config.id)
+            if not builtin_config or not builtin_config.requires_config:
+                return
+            if result.get("success"):
+                config.status = (
+                    ToolStatus.AVAILABLE.value
+                    if builtin_config.is_enabled
+                    else ToolStatus.CONFIGURED_DISABLED.value
+                )
+            else:
+                config.status = ToolStatus.ERROR.value
+            self.db.commit()
+        except SQLAlchemyError as e:
+            logger.error(f"更新内置工具状态失败: {config.id}, 错误: {e}")
 
     async def _test_mcp_connection_by_config(self, config: dict[str, Any]) -> dict[str, Any]:
         """Test an MCP connection directly from config (called before creating the tool record)."""

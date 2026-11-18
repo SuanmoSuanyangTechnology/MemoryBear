@@ -1220,8 +1220,10 @@ members: list[str] | None = None,
             if clash_pkg is not None:
                 owner_kind = "其他插件" if clash_pkg.plugin_id is not None else "独立技能"
                 reason = (
-                    f"技能名 '{item['pkg_name']}' 已被{owner_kind}占用，但其调用名称不同，"
-                    "无法覆盖（将跳过）；如需并入请先调整调用名称或删除原技能"
+                    f"SKILL.md 中的名称 '{item['pkg_name']}' 已被{owner_kind}占用，"
+                    "且本次调用名称与已有技能不同，无法创建副本；"
+                    "仅修改页面中的技能名称和调用名称不会修改包内名称。"
+                    "请修改 SKILL.md 中的 name 后重新打包导入，或删除已有技能后重新导入"
                 )
                 item["skipped"] = True
                 item["skip_reason"] = reason
@@ -1230,8 +1232,9 @@ members: list[str] | None = None,
 
         if prepared and len(skipped) == len(prepared):
             prepared[0]["warnings"].append(
-                "所有成员均因名称被占用而跳过，未创建任何技能或插件；"
-                "请先删除占用名称的技能/插件，或统一调用名称后再导入。"
+                "所有成员均因包内名称冲突而跳过，未创建任何技能或插件；"
+                "请修改各成员 SKILL.md 中的 name 后重新打包导入，"
+                "或删除已有技能后重新导入。"
             )
 
         return skipped
@@ -1255,12 +1258,13 @@ members: list[str] | None = None,
 
         skipped = [item for item in prepared if item.get("skipped")]
         if skipped:
-            names = "、".join(item["name"] for item in skipped)
+            names = "、".join(item["pkg_name"] for item in skipped)
             scope = "插件" if is_plugin else "技能"
             raise BusinessException(
-                f"{scope}无法完整导入：成员 {names} 的技能名已被其他技能占用，"
-                "请调整调用名称或先删除占用的技能后重新导入",
-                BizCode.DUPLICATE_NAME,
+                f"{scope}无法完整导入：SKILL.md 中的名称 {names} 已存在。"
+                "仅修改页面中的技能名称和调用名称不会修改包内名称。"
+                "请修改 SKILL.md 中的 name 后重新打包导入，或删除已有技能后重新导入",
+                BizCode.SKILL_PACKAGE_NAME_CONFLICT,
             )
 
         if overwrite:

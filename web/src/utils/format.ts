@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-02 16:34:43 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-06-17 17:17:56
+ * @Last Modified time: 2026-11-17 20:21:07
  */
 /**
  * Format Utility
@@ -47,3 +47,5 @@ export const formatDateTime = (
   
   return dayjs(value).tz(currentTimeZone).format(format);
 };
+
+export const formatVersion = (version?: string) => version?.startsWith('v') ? version : version ? `v${version}` : '-'

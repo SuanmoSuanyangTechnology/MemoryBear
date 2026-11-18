@@ -1,8 +1,8 @@
 /*
  * @Author: ZhaoYing 
  * @Date: 2026-02-02 15:23:01 
- * @Last Modified by:   ZhaoYing 
- * @Last Modified time: 2026-02-02 15:23:01 
+ * @Last Modified by: ZhaoYing
+ * @Last Modified time: 2026-11-18 11:27:47
  */
 /**
  * RbModal Component
@@ -23,12 +23,17 @@ import { useTranslation } from 'react-i18next'
 
 import './index.css'
 
+interface RbModalProps extends ModalProps {
+  needWrapper?: boolean;
+}
+
 /** Custom modal component wrapper with default configurations */
-const RbModal: FC<ModalProps> = ({
+const RbModal: FC<RbModalProps> = ({
   onOk,
   onCancel,
   children,
   className,
+  needWrapper = true,
   ...props
 }) => {
   const { t } = useTranslation()
@@ -44,9 +49,14 @@ const RbModal: FC<ModalProps> = ({
       {...props}
     >
       {/* Scrollable content container */}
-      <div className='rb:max-h-[calc(100vh-202px)] rb:overflow-y-auto rb:overflow-x-hidden'>
-        {children}
-      </div>
+      {needWrapper
+        ? (
+          <div className='rb:max-h-[calc(100vh-202px)] rb:overflow-y-auto rb:overflow-x-hidden'>
+            {children}
+          </div>
+        )
+        : children
+      }
     </Modal>
   )
 }
