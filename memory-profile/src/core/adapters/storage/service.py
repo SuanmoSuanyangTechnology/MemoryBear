@@ -437,6 +437,7 @@ def _parse_hits(
     operation: str,
     *,
     score_transform: Any = None,
+    source_required: bool = False,
 ) -> StorageReadResult:
     _raise_on_response_failures(response, operation)
     hits_container = response.get("hits")
@@ -450,8 +451,16 @@ def _parse_hits(
             raise RuntimeError(
                 f"Elasticsearch {operation} returned invalid hit at index {index}"
             )
-        source = hit.get("_source")
-        source = source if isinstance(source, Mapping) else {}
+        source_value = hit.get("_source")
+        if source_value is None and not source_required:
+            # A body with ``_source: false`` legitimately answers without source.
+            source: Mapping[str, Any] = {}
+        elif isinstance(source_value, Mapping):
+            source = source_value
+        else:
+            raise RuntimeError(
+                f"Elasticsearch {operation} returned invalid _source at index {index}"
+            )
         virtual_fields: dict[str, Any] = {}
         if include_score:
             raw_score = hit.get("_score")
@@ -469,6 +478,28 @@ def _parse_hits(
             )
         )
     return StorageReadResult.from_items(items, label=spec.label, backend="elastic")
+
+
+def _msearch_source_options(
+    projection: NodeProjection | None,
+) -> tuple[dict[str, Any], bool]:
+    """Port of the host ``_compile_msearch_source_options``.
+
+    Inside an ``_msearch`` search body the projection must travel as ``_source``:
+    ``source_includes`` is a ``_search`` query parameter and an ``_msearch`` body
+    carrying it (or ``allow_partial_search_results``) is rejected with a 400
+    ``parsing_exception``. ``source_required`` tells the hit parser whether a
+    missing ``_source`` is expected (``_source: false``) or a protocol error.
+    """
+
+    source_fields = compile_elasticsearch_projection(
+        projection, virtual_fields={VIRTUAL_SCORE_FIELD}
+    )
+    if source_fields is None:
+        return {}, True
+    if source_fields:
+        return {"_source": source_fields}, True
+    return {"_source": False}, False
 
 
 def _resolve_embedding_field(label: str, dimension: int) -> str:
@@ -495,25 +526,74 @@ class ElasticReadClient:
         text: str,
         limit: int,
     ) -> dict[str, StorageReadResult]:
-        """One fulltext search per label, issued concurrently (host parity).
+        """One ES ``_msearch`` for every label (host ``search_many_by_fulltext``).
 
-        The host's fulltext provider issues one ``search`` per label and passes
-        ``allow_partial_search_results`` as a *query* parameter. ``_msearch`` has
-        no per-request query parameters, and putting the flag (or
-        ``source_includes``) inside the search body is rejected by Elasticsearch
-        with a 400 ``parsing_exception`` — the batch therefore bought a round trip
-        at the cost of an invalid request. The single-search shape keeps the flag
-        and the ``_source`` projection valid; gathering keeps the latency.
+        Each label contributes a header line plus a standard search body. The
+        ``allow_partial_search_results`` flag rides on the header line (``_msearch``
+        exposes no such request option through the client) and the projection
+        travels as ``_source`` — the query-style spellings of both
+        (``allow_partial_search_results`` / ``source_includes`` as body keys) are
+        what made Elasticsearch answer 400 ``parsing_exception``.
         """
 
-        if not specs:
-            return {}
-        results = await asyncio.gather(
-            *(self.search_by_fulltext(spec, text, limit) for spec in specs)
-        )
-        return {
-            spec.label: result for spec, result in zip(specs, results, strict=True)
+        normalized = text.strip()
+        if not normalized:
+            return {
+                spec.label: StorageReadResult(backend=self.backend) for spec in specs
+            }
+        searches: list[dict[str, Any]] = []
+        requested: list[tuple[NodeSearchSpec, bool]] = []
+        for spec in specs:
+            index = ES_INDEX_ALIAS.get(spec.label)
+            fields = ES_FULLTEXT_FIELDS.get(spec.label)
+            if index is None or fields is None:
+                continue
+            source_options, requires_source = _msearch_source_options(spec.projection)
+            requested.append((spec, requires_source))
+            searches.append(
+                {"index": index, "allow_partial_search_results": False}
+            )
+            searches.append(
+                {
+                    "query": {
+                        "bool": {
+                            "must": [
+                                {
+                                    "multi_match": {
+                                        "query": normalized,
+                                        "fields": list(fields),
+                                    }
+                                }
+                            ],
+                            "filter": [compile_elasticsearch_filter(spec.node_filter)],
+                        }
+                    },
+                    "size": limit,
+                    **source_options,
+                }
+            )
+        results: dict[str, StorageReadResult] = {
+            spec.label: StorageReadResult(backend=self.backend) for spec in specs
         }
+        if not requested:
+            return results
+        client = await self._client()
+        response = await client.msearch(
+            searches=searches, max_concurrent_searches=len(requested)
+        )
+        responses = response.get("responses") if isinstance(response, Mapping) else None
+        if not isinstance(responses, (list, tuple)) or len(responses) != len(requested):
+            raise RuntimeError("Elasticsearch msearch returned an invalid response list")
+        for (spec, requires_source), item in zip(requested, responses, strict=True):
+            if not isinstance(item, Mapping):
+                raise RuntimeError("Elasticsearch msearch returned an invalid response")
+            results[spec.label] = _parse_hits(
+                item,
+                spec,
+                f"fulltext search for {spec.label}",
+                source_required=requires_source,
+            )
+        return results
 
     async def search_by_fulltext(
         self,
