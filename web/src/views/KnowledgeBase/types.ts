@@ -325,7 +325,8 @@ export interface ListQuery {
   orderby?: string;
   desc?: boolean;
   keywords?: string;
-  [key: string]: unknown;
+  status?: 1 | 0;
+  kb_ids?: string;
 }
 
 // API Key 信息
@@ -468,6 +469,7 @@ export interface PathQuery extends ListQuery {
   kb_id?: string;
   parent_id?: string;
   workspace_id?: string;
+  document_id?: string;
 }
 
 // 
