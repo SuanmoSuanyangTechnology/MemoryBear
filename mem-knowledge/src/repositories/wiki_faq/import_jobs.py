@@ -129,8 +129,10 @@ def entry_failure(index, item, stage, reason):
     return {
         "item_index": index + 1,
         "source_position": item["source_position"],
+        # PostgreSQL JSONB 无法存储 NUL；仅替换失败明细里的原始问题。
         "standard_question": item["standard_question"]
         .strip()
+        .replace("\x00", "\ufffd")
         .encode("utf-8", errors="replace")
         .decode("utf-8"),
         "stage": stage,
