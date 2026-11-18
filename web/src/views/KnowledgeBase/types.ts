@@ -201,6 +201,7 @@ export interface KnowledgeBaseDocumentData { // 知识库文档数据
   qa_prompt?: string; // 提示词
   metadata?: Record<string, any>; // 文档元数据
   parent_child_mode?: boolean; // 是否开启父子模式
+  wiki_count?: number; // 关联的 Wiki 页面数（需 include_wiki_count=true）
 }
 export interface DocumentModalRef {
   handleOpen: (file?: KnowledgeBaseDocumentData | null) => void;
