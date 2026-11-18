@@ -182,6 +182,11 @@ class MySharesService:
                 **legacy,
                 # 列表展示与重新上架共用 version；尚无公开版本时保持空值。
                 "version": state.get("current_version"),
+                "review_version": (
+                    market_version.version_name
+                    if status == MarketSyncStatus.PENDING_SYNC
+                    else state.get("latest_version") or market_version.version_name
+                ),
                 "version_number": market_version.version,
                 # 本地发布序号与 release_id 跟随最近一次投稿，供查询投稿记录。
                 "release_id": str(sync.release_id),
@@ -411,6 +416,7 @@ class MySharesService:
             folded[str(key)] = {
                 "status": status,
                 "current_version": _record_get(record, "current_version"),
+                "latest_version": _record_get(record, "latest_version"),
                 "listing_status": listing_status,
                 "delist_actor": delist_actor,
                 "can_delist": _can_delist(record, listing_status),
