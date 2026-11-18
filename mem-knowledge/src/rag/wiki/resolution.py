@@ -144,5 +144,5 @@ def planned_ontology(candidate):
         "ontology_version": ONTOLOGY_VERSION if candidate["semantic_type"] else None,
         "kind": candidate["kind"],
         "correct_type": candidate.get("correct_type", False),
-        "type_evidence": candidate.get("type_evidence", []),
+        "type_evidence": list(candidate.get("type_evidence", [])),
     }

@@ -167,7 +167,8 @@ evidence actually used by this page, without visible citations. A subset of evid
 is valid: do not enumerate unused sources merely to cover the catalog. Never invent source handles.
 Do not repeat the top-level page title. Never output a patch or drop evidence to fit the budget.""",
     "wiki_candidates_v1": CANDIDATE_RULES + """Extract candidates from the supplied sources.
-Return kind, name, aliases, scope, description and source_refs for each qualifying subject.
+Return each qualifying subject using the candidate schema above, including semantic_type and
+type_evidence.
 Return {"candidates": [...]}; an empty list is valid when no standalone topic is evidenced.""",
     "wiki_materials_v1": MARKDOWN_RULES + """Extract facts for exactly the confirmed_topics.
 Return each topic_ref exactly once, with facts containing text, qualifiers and source_refs.
