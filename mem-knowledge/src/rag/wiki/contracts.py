@@ -4,18 +4,33 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from .ontology import OntologyType
+
 
 class Output(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
+class TypeEvidence(Output):
+    source_ref: str
+    quote: str = Field(min_length=1, max_length=300)
+
+
 class Candidate(Output):
-    kind: Literal["entity", "concept"]
+    semantic_type: OntologyType
+    type_evidence: list[TypeEvidence] = Field(min_length=1, max_length=4)
     name: str = Field(min_length=1, max_length=400)
     aliases: list[str]
     scope: str = Field(min_length=1, max_length=2000)
     description: str = Field(min_length=1)
     source_refs: list[str] = Field(min_length=1)
+
+
+class LocalIdentityDecision(Output):
+    decision: Literal["same_object", "different_objects", "insufficient"]
+    preferred: Literal["left", "right"] | None = None
+    left_label: str | None = Field(default=None, max_length=70)
+    right_label: str | None = Field(default=None, max_length=70)
 
 
 class Candidates(Output):
