@@ -101,7 +101,13 @@ class ModelAnswerGenerator:
 
 
 def _response_text(response: Any) -> str:
-    """Host extraction: a string content, else the first text part."""
+    """Host extraction: a string content, else the first text part, else empty.
+
+    A response without usable text answers ``""`` so both faces keep the host's
+    outcome: ``summarize`` falls back to its fixed sentence and the community
+    face reports an answer-generation failure. Coercing it with ``str(content)``
+    would turn a missing content into the literal answer ``"None"``.
+    """
 
     content = getattr(response, "content", response)
     if isinstance(content, str):
@@ -112,7 +118,7 @@ def _response_text(response: Any) -> str:
             return str(first.get("text") or "")
         if isinstance(first, str):
             return first
-    return str(content)
+    return ""
 
 
 def build_answer_generator(

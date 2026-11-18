@@ -13,8 +13,11 @@ from typing import Any
 QUERY_MAX_LENGTH = 200
 SUMMARY_MAX_LENGTH = 200
 ENTITY_MAX_LENGTH = 100
+#: Community display cards carry scene topic scopes instead of summary content.
+TOPIC_SCOPE_MAX_LENGTH = 100
 MAX_SUMMARY_COUNT = 3
 MAX_ENTITY_COUNT = 3
+MAX_TOPIC_SCOPE_COUNT = 3
 
 _TRUNCATE_SUFFIX = "…"
 _FILE_SUMMARY_TAG_RE = re.compile(
@@ -50,8 +53,10 @@ __all__ = [
     "ENTITY_MAX_LENGTH",
     "MAX_ENTITY_COUNT",
     "MAX_SUMMARY_COUNT",
+    "MAX_TOPIC_SCOPE_COUNT",
     "QUERY_MAX_LENGTH",
     "SUMMARY_MAX_LENGTH",
+    "TOPIC_SCOPE_MAX_LENGTH",
     "clean_query_for_display",
     "normalize_display_text",
 ]

@@ -12,6 +12,7 @@ asks this module for a :class:`MemoryReadModule` and calls its use cases.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
@@ -34,6 +35,32 @@ class MemoryReadModule:
 
     read_memory: ReadMemory
     stream_read: StreamRead
+
+
+#: Bound on the shutdown drain of detached display-card writes, matching the
+#: host ``MemoryRetrievalDisplayQueue.stop`` timeout.
+DISPLAY_SHUTDOWN_TIMEOUT_SECONDS = 10.0
+
+
+async def flush_read_side_effects() -> None:
+    """Drain pending display-card writes before the process closes its pool.
+
+    The read path never waits for a card (a dropped card is acceptable), so the
+    only chance to land the ones already scheduled is shutdown. The host drains
+    its display queue with the same bound; a write that outlives it is logged and
+    dropped instead of blocking the process exit.
+    """
+
+    from src.core.adapters.read.side_effects import flush_pending_display_writes
+
+    try:
+        async with asyncio.timeout(DISPLAY_SHUTDOWN_TIMEOUT_SECONDS):
+            await flush_pending_display_writes()
+    except TimeoutError:
+        logger.warning(
+            "read side effects: display-card drain exceeded %.1fs; dropping the rest",
+            DISPLAY_SHUTDOWN_TIMEOUT_SECONDS,
+        )
 
 
 def _build_end_users(runtime: ProfileRuntime) -> Any:
@@ -164,4 +191,9 @@ def build_memory_read_module(
     )
 
 
-__all__ = ["MemoryReadModule", "build_memory_read_module"]
+__all__ = [
+    "DISPLAY_SHUTDOWN_TIMEOUT_SECONDS",
+    "MemoryReadModule",
+    "build_memory_read_module",
+    "flush_read_side_effects",
+]

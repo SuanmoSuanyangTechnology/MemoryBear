@@ -32,13 +32,15 @@ from uuid import UUID, uuid4
 
 from src.common.timing import utcnow_naive
 from src.core.domain.enums import MemorySource
-from src.core.domain.models import MemoryItem, ReadResult
+from src.core.domain.models import CommunityRetrievalTrace, MemoryItem, ReadResult
 from src.core.domain.ports import ReadSideEffectsPort
 from src.core.domain.text import (
     ENTITY_MAX_LENGTH,
     MAX_ENTITY_COUNT,
     MAX_SUMMARY_COUNT,
+    MAX_TOPIC_SCOPE_COUNT,
     SUMMARY_MAX_LENGTH,
+    TOPIC_SCOPE_MAX_LENGTH,
     clean_query_for_display,
     normalize_display_text,
 )
@@ -52,9 +54,10 @@ if TYPE_CHECKING:  # pragma: no cover - type-only import
 
 logger = logging.getLogger(__name__)
 
-#: Only user-visible retrieval modes produce a display card; ``recent`` / ``meta``
-#: are outside the host's ``RETRIEVE_SEARCH_MODES`` whitelist.
-RETRIEVE_SEARCH_MODES = frozenset({"deep", "normal", "quick", "express"})
+#: Every mode that can produce a display card, mirroring the host's
+#: ``RetrieveSearchMode`` literal (``deep``/``normal``/``quick``/``express``/
+#: ``community``). ``recent`` / ``meta`` stay outside the whitelist.
+RETRIEVE_SEARCH_MODES = frozenset({"deep", "normal", "quick", "express", "community"})
 
 #: The host skips the short-term memo when the answer carries no real summary.
 INSUFFICIENT_INFORMATION_MARKER = "信息不足"
@@ -94,19 +97,57 @@ def aggregate_display_content(
     return "\n".join(parts)
 
 
+def community_topic_scopes(trace: CommunityRetrievalTrace) -> list[str]:
+    """Topic scopes of the packed community evidence, in evidence order.
+
+    Port of the host's ``_community_topic_scopes``: the card body of a community
+    read is the scene topic scopes it grounded its answer on, de-duplicated and
+    capped at three.
+    """
+
+    scope_by_id = {
+        scene.get("id"): scene.get("topic_scope")
+        for member in trace.members
+        for scene in member.get("candidates", ())
+    }
+    scopes: dict[str, None] = {}
+    for evidence_id in trace.evidence_ids:
+        scope = normalize_display_text(
+            scope_by_id.get(evidence_id), TOPIC_SCOPE_MAX_LENGTH
+        )
+        if scope:
+            scopes[scope] = None
+            if len(scopes) == MAX_TOPIC_SCOPE_COUNT:
+                break
+    return list(scopes)
+
+
 def build_retrieve_snapshot(
     result: ReadResult,
     query: str,
     language: str,
+    *,
+    search_mode: str | None = None,
 ) -> dict[str, str] | None:
     """Project one read result into a display snapshot (``query`` + ``content``).
 
-    Only ``MemorySummary`` and ``ExtractedEntity`` nodes are displayable. The
-    best score wins per ``(source, id)`` so a node that appears several times
+    Community reads answer from scene evidence, so their card is built from the
+    packed topic scopes; every other mode shows the summarised facts and entity
+    names. Only ``MemorySummary`` and ``ExtractedEntity`` nodes are displayable.
+    The best score wins per ``(source, id)`` so a node that appears several times
     under different labels is not lost or double-counted; entities are selected
     and de-duplicated by their normalized name, with at most three of each kind.
     ``None`` means the read produced nothing worth a card.
     """
+
+    if search_mode == "community":
+        trace = result.community_trace
+        if trace is None:
+            return None
+        content = aggregate_display_content(
+            community_topic_scopes(trace), [], language
+        )
+        return {"query": query, "content": content} if content else None
 
     memories = result.memories or []
 
@@ -274,6 +315,7 @@ class PostgresReadSideEffects:
                 result=result,
                 query=clean_query_for_display(query),
                 language=language,
+                search_mode=search_mode,
             )
             if snapshot is None:
                 logger.debug(
@@ -358,5 +400,6 @@ __all__ = [
     "aggregate_display_content",
     "build_retrieve_snapshot",
     "build_side_effects",
+    "community_topic_scopes",
     "flush_pending_display_writes",
 ]

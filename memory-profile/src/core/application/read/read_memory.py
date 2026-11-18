@@ -166,7 +166,7 @@ class ReadMemory:
                     exc_info=True,
                 )
 
-        if options.record_display and command.search_switch != SearchStrategy.COMMUNITY:
+        if options.record_display:
             display_query = clean_query_for_display(
                 process_query(command.message)
             )

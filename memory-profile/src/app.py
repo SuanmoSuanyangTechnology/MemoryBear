@@ -14,6 +14,7 @@ from src.common.observability import setup_logging
 from src.common.observability.runtime_metrics import start_tracemalloc
 from src.common.redis_cache import clear_redis_cache, configure_redis_cache
 from src.config import ProfileSettings
+from src.core.composition import flush_read_side_effects
 from src.error_handlers import register_error_handlers
 from src.i18n import LanguageMiddleware, clear_i18n, configure_i18n
 from src.middleware.auth import (
@@ -85,6 +86,9 @@ def create_app(
             # Stop the subscription task before the redis pool closes.
             if gateway_auth is not None and hasattr(gateway_auth, "aclose"):
                 await gateway_auth.aclose()
+            # Detached display-card writes are the read path's only non-awaited
+            # work: drain them while the PostgreSQL pool is still open.
+            await flush_read_side_effects()
             clear_redis_cache()
             clear_i18n()
             await process_runtime.aclose()
