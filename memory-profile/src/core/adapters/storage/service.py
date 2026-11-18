@@ -1,41 +1,51 @@
-"""Read-only Neo4j / Elasticsearch access: the storage service of the read DSL.
+"""Read-only Neo4j / Elasticsearch access through the ported host storage layer.
 
-This is the single storage substrate for memory-profile read services. It owns
-the read DSL execution (filters + projections + routing) and every client call;
-nothing above it talks to the drivers directly.
+This module used to *be* the storage substrate: it carried the filter/projection
+compilers, a hand-written Elasticsearch client and a hand-written Neo4j client.
+Those now live in :mod:`src.storage` (a byte-faithful port of the host
+``api/app/core/memory/storage`` package, write surface removed) and this module is
+the thin seam that keeps the read engine's interface stable:
 
-Every query goes through :class:`src.infrastructure.neo4j.Neo4jManager`
-(``read_query``) or :class:`src.infrastructure.elasticsearch.ElasticsearchManager`
-(``client``): this module creates no pool and never issues a write. The read
-backend mirrors the host ``MEMORY_READ_BACKEND`` switch (``ELASTIC`` by default);
-RAG memory lives only in Elasticsearch and is therefore always read from ES.
+* :class:`ReadStorage` resolves the two process-owned clients once — the Neo4j
+  driver and the Elasticsearch client of the runtime, so no second pool is opened
+  — hands them to the ported :class:`~src.storage.provider.factory.BackendFactory`
+  and reads through :class:`~src.storage.router.read_router.ReadRouter` (node
+  lookups, relationship traversals) and the clients' batched search APIs
+  (``search_many_by_fulltext`` / ``search_many_by_embedding``), exactly like the
+  host's ``read_router._run_grouped_search``;
+* the core DSL stays in :mod:`.filters` / :mod:`.projection` (the application layer
+  builds its criteria with it) and is translated by :mod:`.dsl_bridge`; results
+  come back as :class:`~src.core.adapters.storage.results.StorageReadResult`.
 
-:func:`build_read_storage` is the composition entry point used by the retrieval
-adapter (and available to any other read service that consumes the DSL).
+Behaviour kept from the previous implementation:
 
-Known gap: the host fans a multi-label full-text/vector search out with one ES
-``msearch`` per branch; this port keeps the same result set but issues one search
-request per label.
+* ``MEMORY_READ_BACKEND`` selects the graph read backend (``ELASTIC`` default) and
+  the RAG memory label always reads from Elasticsearch;
+* a label without an index on the routed backend yields an empty result instead of
+  raising (the ported clients raise ``UnsupportedQueryError`` for such labels);
+* labels keep their per-label projections, so one multi-label call is still one
+  Elasticsearch ``_msearch`` per client.
 """
 
 from __future__ import annotations
 
 import asyncio
-import heapq
 import logging
-import math
 import os
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any
 
-import numpy as np
-
-from src.core.adapters.storage.filters import (
-    NodeFilter,
-    compile_elasticsearch_filter,
-    compile_neo4j_filter,
+from src.core.adapters.storage.dsl_bridge import (
+    to_backend_filter,
+    to_backend_label,
+    to_backend_projection,
+    to_backend_relationship_filter,
+    to_backend_relationship_pattern,
+    to_backend_relationship_projection,
+    to_core_result,
 )
+from src.core.adapters.storage.filters import NodeFilter
 from src.core.adapters.storage.indexes import (
     ES_FULLTEXT_FIELDS,
     ES_INDEX_ALIAS,
@@ -46,63 +56,29 @@ from src.core.adapters.storage.indexes import (
 from src.core.adapters.storage.projection import (
     NodeProjection,
     RelationshipProjectionField,
-    apply_elasticsearch_projection,
-    compile_elasticsearch_projection,
-    compile_neo4j_projection,
-    compile_neo4j_relationship_projection,
     projection_for,
-    score_output_names,
 )
+from src.core.adapters.storage.results import (
+    StorageItem,
+    StorageReadResult,
+    merge_read_results,
+)
+from src.storage.enums import BackendType, MemoryNodeType, StorageBackendType
+from src.storage.models import NodeSearchSpec
+from src.storage.provider.base import BaseClient
+from src.storage.provider.elasticsearch.client import ElasticClient
 from src.storage.provider.factory import BackendFactory
+from src.storage.provider.neo4j.client import Neo4jClient, configure_neo4j_manager
+from src.storage.router.read_router import ReadRouter
 
 logger = logging.getLogger(__name__)
 
 DEFAULT_READ_BACKEND = "ELASTIC"
 
-#: One embedding-scan page; matches the host ``Neo4jClient`` batch query.
-EMBEDDING_SCAN_BATCH = 1000
-#: Single-page cap for lookups on the Elasticsearch backend.
-ES_LOOKUP_PAGE_SIZE = 1000
-ES_MAX_SEARCH_LIMIT = 10_000
-ES_MIN_KNN_CANDIDATES = 100
-ES_KNN_CANDIDATE_MULTIPLIER = 10
-VIRTUAL_SCORE_FIELD = "score"
-
 
 # ────────────────────────────────────────────────────────────────
-# Result value objects (host ``storage.models.dto``)
+# Core-side input value objects (the application layer builds these)
 # ────────────────────────────────────────────────────────────────
-
-
-@dataclass(frozen=True, slots=True)
-class StorageItem:
-    label: str
-    data: dict[str, Any] = field(default_factory=dict)
-
-
-@dataclass(frozen=True, slots=True)
-class StorageReadResult:
-    items: Sequence[StorageItem] = field(default_factory=list)
-    backend: str | None = None
-    total: int = 0
-
-    @classmethod
-    def from_items(
-        cls,
-        items: Sequence[dict[str, Any]],
-        *,
-        label: str,
-        backend: str,
-    ) -> StorageReadResult:
-        materialized = [StorageItem(label=label, data=item) for item in items]
-        return cls(items=materialized, backend=backend, total=len(materialized))
-
-
-@dataclass(frozen=True, slots=True)
-class NodeSearchSpec:
-    label: str
-    node_filter: NodeFilter
-    projection: NodeProjection | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -124,676 +100,31 @@ class RelationshipFilter:
     relationship: NodeFilter | None = None
 
 
-def merge_read_results(results: Sequence[StorageReadResult]) -> StorageReadResult:
-    """Merge per-label results; the backend is only reported when uniform."""
-
-    items = [item for result in results for item in result.items]
-    backend = (
-        results[0].backend
-        if results
-        and results[0].backend is not None
-        and all(result.backend == results[0].backend for result in results)
-        else None
-    )
-    return StorageReadResult(
-        items=items,
-        backend=backend,
-        total=sum(result.total for result in results),
-    )
-
-
-def _search_specs(
-    node_filters: Mapping[str, NodeFilter],
-    projections: Mapping[str, NodeProjection],
-    client_for: Any,
-) -> list[tuple[Any, NodeSearchSpec]]:
-    """Pair every label filter with its client and projection (host default)."""
-
-    specs: list[tuple[Any, NodeSearchSpec]] = []
-    for label, node_filter in node_filters.items():
-        projection = projections.get(label)
-        if projection is None:
-            try:
-                projection = projection_for(label)
-            except KeyError:
-                projection = None
-        specs.append(
-            (
-                client_for(label),
-                NodeSearchSpec(
-                    label=label,
-                    node_filter=node_filter,
-                    projection=projection,
-                ),
-            )
-        )
-    return specs
-
-
 # ────────────────────────────────────────────────────────────────
-# Neo4j
+# Routing
 # ────────────────────────────────────────────────────────────────
 
 
-class Neo4jReadClient:
-    """Read-only Cypher over ``Neo4jManager.read_query``."""
+class _ReadFactory(BackendFactory):
+    """``BackendFactory`` with the profile-owned clients injected.
 
-    backend = "neo4j"
-
-    def __init__(self, neo4j: Any) -> None:
-        self._neo4j = neo4j
-
-    async def _query(self, cypher: str, **parameters: Any) -> list[dict[str, Any]]:
-        return await self._neo4j.read_query(cypher, **parameters)
-
-    async def search_by_fulltext(
-        self,
-        spec: NodeSearchSpec,
-        text: str,
-        limit: int,
-    ) -> StorageReadResult:
-        index = NEO4J_FULLTEXT_INDEX.get(spec.label)
-        if index is None:
-            return StorageReadResult(backend=self.backend)
-        normalized = text.strip()
-        if not normalized:
-            return StorageReadResult(backend=self.backend)
-        predicate, filter_parameters = compile_neo4j_filter(spec.node_filter)
-        return_expression, projection_parameters = compile_neo4j_projection(
-            spec.projection,
-            virtual_fields={VIRTUAL_SCORE_FIELD: VIRTUAL_SCORE_FIELD},
-        )
-        cypher = f"""
-        CALL db.index.fulltext.queryNodes($idx, $text) YIELD node as n, score
-        WHERE {predicate}
-        ORDER BY score DESC
-        RETURN {return_expression}
-        LIMIT $limit
-        """
-        rows = await self._query(
-            cypher,
-            idx=index,
-            text=normalized,
-            limit=limit,
-            **filter_parameters,
-            **projection_parameters,
-        )
-        items = [row["n"] for row in rows if isinstance(row.get("n"), dict)]
-        return StorageReadResult.from_items(items, label=spec.label, backend=self.backend)
-
-    async def search_by_embedding(
-        self,
-        spec: NodeSearchSpec,
-        embedding: Sequence[float],
-        limit: int,
-    ) -> StorageReadResult:
-        field_name = NEO4J_EMBEDDING_FIELD.get(spec.label)
-        if field_name is None:
-            return StorageReadResult(backend=self.backend)
-        query_vector = np.asarray(embedding, dtype=np.float64)
-        query_norm = float(np.linalg.norm(query_vector))
-        if not math.isfinite(query_norm) or query_norm == 0:
-            return StorageReadResult(backend=self.backend)
-        query_vector = query_vector / query_norm
-        predicate, filter_parameters = compile_neo4j_filter(spec.node_filter)
-
-        top_heap: list[tuple[float, str]] = []
-        last_id = ""
-        scan = f"""
-        MATCH (n:`{spec.label}`)
-        WHERE {predicate} AND n.id > $last_id
-        RETURN n.id AS id,
-               n.`{field_name}` AS embedding
-        ORDER BY n.id
-        LIMIT {EMBEDDING_SCAN_BATCH}
-        """
-        while True:
-            try:
-                batch = await self._query(
-                    scan, **filter_parameters, last_id=last_id
-                )
-            except Exception:
-                logger.warning(
-                    "[Retrieval] embedding scan failed for %s; returning partial result",
-                    spec.label,
-                    exc_info=True,
-                )
-                break
-            if not batch:
-                break
-            vectors: list[list[float]] = []
-            ids: list[str] = []
-            for record in batch:
-                vector = record.get("embedding")
-                if vector is None or record.get("id") is None:
-                    continue
-                vectors.append(list(vector))
-                ids.append(str(record["id"]))
-            if vectors:
-                similarities = await asyncio.to_thread(
-                    _cosine_similarities, vectors, query_vector
-                )
-                for node_id, similarity in zip(ids, similarities, strict=True):
-                    value = float(similarity)
-                    if len(top_heap) < limit:
-                        heapq.heappush(top_heap, (value, node_id))
-                    elif value > top_heap[0][0]:
-                        heapq.heapreplace(top_heap, (value, node_id))
-            if len(batch) < EMBEDDING_SCAN_BATCH:
-                break
-            last_id = str(batch[-1]["id"])
-
-        if not top_heap:
-            return StorageReadResult(backend=self.backend)
-
-        top_heap.sort(key=lambda pair: pair[0], reverse=True)
-        top_ids = [node_id for _, node_id in top_heap]
-        similarity_map = {node_id: score for score, node_id in top_heap}
-        return_expression, projection_parameters = compile_neo4j_projection(
-            spec.projection,
-            virtual_fields={VIRTUAL_SCORE_FIELD: "0"},
-        )
-        cypher = f"""
-        MATCH (n: `{spec.label}`)
-        WHERE n.id IN $ids
-        RETURN {return_expression}, n.id AS __search_id
-        """
-        try:
-            rows = await self._query(cypher, ids=top_ids, **projection_parameters)
-            rank_map = {node_id: index for index, node_id in enumerate(top_ids)}
-            projected = [
-                (row["n"], str(row["__search_id"]))
-                for row in rows
-                if isinstance(row.get("n"), dict) and row.get("__search_id") is not None
-            ]
-            projected.sort(key=lambda pair: rank_map.get(pair[1], len(rank_map)))
-            score_names = score_output_names(spec.projection)
-            items: list[dict[str, Any]] = []
-            for node, node_id in projected:
-                for field_name in score_names:
-                    node[field_name] = similarity_map.get(node_id, 0)
-                items.append(node)
-        except Exception:
-            # The host degrades a failed projection fetch to an empty vector
-            # branch instead of failing the whole hybrid search.
-            logger.warning(
-                "[Retrieval] embedding projection fetch failed for %s",
-                spec.label,
-                exc_info=True,
-            )
-            return StorageReadResult(backend=self.backend)
-        return StorageReadResult.from_items(items, label=spec.label, backend=self.backend)
-
-    async def get_node(
-        self,
-        label: str,
-        node_filter: NodeFilter,
-        projection: NodeProjection | None,
-    ) -> StorageReadResult:
-        predicate, parameters = compile_neo4j_filter(node_filter)
-        return_expression, projection_parameters = compile_neo4j_projection(
-            projection,
-            virtual_fields={VIRTUAL_SCORE_FIELD: "0"},
-        )
-        cypher = f"""
-        MATCH (n:`{label}`)
-        WHERE {predicate}
-        RETURN {return_expression}
-        """
-        rows = await self._query(
-            cypher, **parameters, **projection_parameters
-        )
-        items = [row["n"] for row in rows if isinstance(row.get("n"), dict)]
-        return StorageReadResult.from_items(items, label=label, backend=self.backend)
-
-    async def search_relationships(
-        self,
-        pattern: RelationshipPattern,
-        rel_filter: RelationshipFilter,
-        projection: tuple[RelationshipProjectionField, ...] | None,
-    ) -> StorageReadResult:
-        relationship_pattern = (
-            f"[r:`{pattern.relationship_type}`]"
-            if pattern.relationship_type
-            else "[r]"
-        )
-        edge = (
-            f"-{relationship_pattern}->" if pattern.directed else f"-{relationship_pattern}-"
-        )
-        source = f"(source:`{pattern.source_label}`)"
-        target = f"(target:`{pattern.target_label}`)"
-        predicates: list[str] = []
-        parameters: dict[str, Any] = {}
-        for scope, variable, node_filter in (
-            ("source", "source", rel_filter.source),
-            ("target", "target", rel_filter.target),
-            ("relationship", "r", rel_filter.relationship),
-        ):
-            if node_filter is None:
-                continue
-            predicate, scoped_parameters = compile_neo4j_filter(
-                node_filter,
-                variable=variable,
-                parameter_prefix=f"relationship_filter_{scope}",
-            )
-            predicates.append(f"({predicate})")
-            parameters.update(scoped_parameters)
-        where_clause = f"WHERE {' AND '.join(predicates)}" if predicates else ""
-        return_expression = compile_neo4j_relationship_projection(projection)
-        cypher = f"""
-        MATCH {source}{edge}{target}
-        {where_clause}
-        RETURN {return_expression}
-        """
-        rows = await self._query(cypher, **parameters)
-        items = [row["item"] for row in rows if isinstance(row.get("item"), dict)]
-        return StorageReadResult.from_items(
-            items, label=pattern.target_label, backend=self.backend
-        )
-
-
-def _cosine_similarities(vectors: list[list[float]], query: np.ndarray) -> np.ndarray:
-    """Cosine similarity for a batch of stored vectors (host similarity util).
-
-    The host clips to ``[0, 1]`` and treats a zero-norm stored vector as a zero
-    similarity; both rules are part of the score contract, so keep them.
+    The ported factory can build its own clients from settings
+    (``BackendFactory.create()``). The profile must not do that: it already owns
+    one driver and one Elasticsearch client per process, and opening a second
+    Elasticsearch client would also run the host's unguarded index ensure outside
+    the startup bootstrap. Injecting the instances keeps the factory's routing
+    (``MEMORY_READ_BACKEND``, ``ELASTIC_ONLY_LABELS``) untouched.
     """
-
-    matrix = np.asarray(vectors, dtype=np.float32)
-    norms = np.linalg.norm(matrix, axis=1, keepdims=True)
-    zero_norm_mask = norms[:, 0] == 0.0
-    if zero_norm_mask.any():
-        norms[zero_norm_mask, 0] = 1.0
-    matrix = matrix / norms
-    similarities = np.clip(matrix @ query, 0, 1)
-    similarities[zero_norm_mask] = 0.0
-    return similarities
-
-
-# ────────────────────────────────────────────────────────────────
-# Elasticsearch
-# ────────────────────────────────────────────────────────────────
-
-
-def _raise_on_response_failures(response: Mapping[str, Any], operation: str) -> None:
-    if response.get("error") is not None:
-        raise RuntimeError(f"Elasticsearch {operation} failed: {response['error']!r}")
-    if response.get("timed_out"):
-        raise RuntimeError(f"Elasticsearch {operation} timed out")
-    shards = response.get("_shards") or {}
-    if isinstance(shards, Mapping) and int(shards.get("failed", 0) or 0):
-        raise RuntimeError(
-            f"Elasticsearch {operation} shard failures: {shards.get('failures', [])!r}"
-        )
-
-
-def _projection_requests_score(projection: NodeProjection | None) -> bool:
-    return VIRTUAL_SCORE_FIELD in score_output_names(projection)
-
-
-def _parse_hits(
-    response: Mapping[str, Any],
-    spec: NodeSearchSpec,
-    operation: str,
-    *,
-    score_transform: Any = None,
-    source_required: bool = False,
-) -> StorageReadResult:
-    _raise_on_response_failures(response, operation)
-    hits_container = response.get("hits")
-    hits = hits_container.get("hits") if isinstance(hits_container, Mapping) else None
-    if not isinstance(hits, (list, tuple)):
-        raise RuntimeError(f"Elasticsearch {operation} returned invalid hits")
-    include_score = _projection_requests_score(spec.projection)
-    items: list[dict[str, Any]] = []
-    for index, hit in enumerate(hits):
-        if not isinstance(hit, Mapping):
-            raise RuntimeError(
-                f"Elasticsearch {operation} returned invalid hit at index {index}"
-            )
-        source_value = hit.get("_source")
-        if source_value is None and not source_required:
-            # A body with ``_source: false`` legitimately answers without source.
-            source: Mapping[str, Any] = {}
-        elif isinstance(source_value, Mapping):
-            source = source_value
-        else:
-            raise RuntimeError(
-                f"Elasticsearch {operation} returned invalid _source at index {index}"
-            )
-        virtual_fields: dict[str, Any] = {}
-        if include_score:
-            raw_score = hit.get("_score")
-            if not isinstance(raw_score, (int, float)) or isinstance(raw_score, bool):
-                raise RuntimeError(
-                    f"Elasticsearch {operation} returned invalid _score at index {index}"
-                )
-            score = float(raw_score)
-            virtual_fields[VIRTUAL_SCORE_FIELD] = (
-                score_transform(score) if score_transform is not None else score
-            )
-        items.append(
-            apply_elasticsearch_projection(
-                dict(source), spec.projection, virtual_fields=virtual_fields
-            )
-        )
-    return StorageReadResult.from_items(items, label=spec.label, backend="elastic")
-
-
-def _msearch_source_options(
-    projection: NodeProjection | None,
-) -> tuple[dict[str, Any], bool]:
-    """Port of the host ``_compile_msearch_source_options``.
-
-    Inside an ``_msearch`` search body the projection must travel as ``_source``:
-    ``source_includes`` is a ``_search`` query parameter and an ``_msearch`` body
-    carrying it (or ``allow_partial_search_results``) is rejected with a 400
-    ``parsing_exception``. ``source_required`` tells the hit parser whether a
-    missing ``_source`` is expected (``_source: false``) or a protocol error.
-    """
-
-    source_fields = compile_elasticsearch_projection(
-        projection, virtual_fields={VIRTUAL_SCORE_FIELD}
-    )
-    if source_fields is None:
-        return {}, True
-    if source_fields:
-        return {"_source": source_fields}, True
-    return {"_source": False}, False
-
-
-def _resolve_embedding_field(label: str, dimension: int) -> str:
-    """Resolve the dimension-matched dense_vector property name (contract helper)."""
-
-    return es_embedding_field(label, dimension)
-
-
-class ElasticReadClient:
-    """Read-only Elasticsearch searches over the writer's index aliases."""
-
-    backend = "elastic"
-
-    def __init__(self, elasticsearch: Any) -> None:
-        self._elasticsearch = elasticsearch
-
-    async def _client(self) -> Any:
-        return await self._elasticsearch.client()
-
-
-    async def search_by_fulltext_many(
-        self,
-        specs: Sequence[NodeSearchSpec],
-        text: str,
-        limit: int,
-    ) -> dict[str, StorageReadResult]:
-        """One ES ``_msearch`` for every label (host ``search_many_by_fulltext``).
-
-        Each label contributes a header line plus a standard search body. The
-        ``allow_partial_search_results`` flag rides on the header line (``_msearch``
-        exposes no such request option through the client) and the projection
-        travels as ``_source`` — the query-style spellings of both
-        (``allow_partial_search_results`` / ``source_includes`` as body keys) are
-        what made Elasticsearch answer 400 ``parsing_exception``.
-        """
-
-        normalized = text.strip()
-        if not normalized:
-            return {
-                spec.label: StorageReadResult(backend=self.backend) for spec in specs
-            }
-        searches: list[dict[str, Any]] = []
-        requested: list[tuple[NodeSearchSpec, bool]] = []
-        for spec in specs:
-            index = ES_INDEX_ALIAS.get(spec.label)
-            fields = ES_FULLTEXT_FIELDS.get(spec.label)
-            if index is None or fields is None:
-                continue
-            source_options, requires_source = _msearch_source_options(spec.projection)
-            requested.append((spec, requires_source))
-            searches.append(
-                {"index": index, "allow_partial_search_results": False}
-            )
-            searches.append(
-                {
-                    "query": {
-                        "bool": {
-                            "must": [
-                                {
-                                    "multi_match": {
-                                        "query": normalized,
-                                        "fields": list(fields),
-                                    }
-                                }
-                            ],
-                            "filter": [compile_elasticsearch_filter(spec.node_filter)],
-                        }
-                    },
-                    "size": limit,
-                    **source_options,
-                }
-            )
-        results: dict[str, StorageReadResult] = {
-            spec.label: StorageReadResult(backend=self.backend) for spec in specs
-        }
-        if not requested:
-            return results
-        client = await self._client()
-        response = await client.msearch(
-            searches=searches, max_concurrent_searches=len(requested)
-        )
-        responses = response.get("responses") if isinstance(response, Mapping) else None
-        if not isinstance(responses, (list, tuple)) or len(responses) != len(requested):
-            raise RuntimeError("Elasticsearch msearch returned an invalid response list")
-        for (spec, requires_source), item in zip(requested, responses, strict=True):
-            if not isinstance(item, Mapping):
-                raise RuntimeError("Elasticsearch msearch returned an invalid response")
-            results[spec.label] = _parse_hits(
-                item,
-                spec,
-                f"fulltext search for {spec.label}",
-                source_required=requires_source,
-            )
-        return results
-
-    async def search_by_fulltext(
-        self,
-        spec: NodeSearchSpec,
-        text: str,
-        limit: int,
-    ) -> StorageReadResult:
-        index = ES_INDEX_ALIAS.get(spec.label)
-        fields = ES_FULLTEXT_FIELDS.get(spec.label)
-        normalized = text.strip()
-        if index is None or fields is None or not normalized:
-            return StorageReadResult(backend=self.backend)
-        source_fields = compile_elasticsearch_projection(
-            spec.projection, virtual_fields={VIRTUAL_SCORE_FIELD}
-        )
-        client = await self._client()
-        response = await client.search(
-            index=index,
-            query={
-                "bool": {
-                    "must": [
-                        {"multi_match": {"query": normalized, "fields": list(fields)}}
-                    ],
-                    "filter": [compile_elasticsearch_filter(spec.node_filter)],
-                }
-            },
-            size=limit,
-            allow_partial_search_results=False,
-            source_includes=source_fields,
-        )
-        return _parse_hits(
-            response, spec, f"fulltext search for {spec.label}"
-        )
-
-    async def search_by_embedding(
-        self,
-        spec: NodeSearchSpec,
-        embedding: Sequence[float],
-        limit: int,
-    ) -> StorageReadResult:
-        index = ES_INDEX_ALIAS.get(spec.label)
-        if index is None:
-            return StorageReadResult(backend=self.backend)
-        query_vector = [float(value) for value in embedding]
-        if not query_vector or not math.isfinite(math.hypot(*query_vector)):
-            raise ValueError("embedding query vector must contain finite numbers")
-        if math.hypot(*query_vector) == 0:
-            return StorageReadResult(backend=self.backend)
-        field_name = _resolve_embedding_field(spec.label, len(query_vector))
-        source_fields = compile_elasticsearch_projection(
-            spec.projection, virtual_fields={VIRTUAL_SCORE_FIELD}
-        )
-        num_candidates = min(
-            ES_MAX_SEARCH_LIMIT,
-            max(ES_MIN_KNN_CANDIDATES, limit, limit * ES_KNN_CANDIDATE_MULTIPLIER),
-        )
-        client = await self._client()
-        response = await client.search(
-            index=index,
-            knn={
-                "field": field_name,
-                "query_vector": query_vector,
-                "k": limit,
-                "num_candidates": num_candidates,
-                "filter": compile_elasticsearch_filter(spec.node_filter),
-            },
-            size=limit,
-            allow_partial_search_results=False,
-            source_includes=source_fields,
-        )
-        return _parse_hits(
-            response,
-            spec,
-            f"embedding search for {spec.label}",
-            score_transform=lambda score: (2.0 * score) - 1.0,
-        )
-
-    async def get_node(
-        self,
-        label: str,
-        node_filter: NodeFilter,
-        projection: NodeProjection | None,
-    ) -> StorageReadResult:
-        index = ES_INDEX_ALIAS.get(label)
-        if index is None:
-            return StorageReadResult(backend=self.backend)
-        spec = NodeSearchSpec(
-            label=label,
-            node_filter=node_filter,
-            projection=projection or (),
-        )
-        source_fields = compile_elasticsearch_projection(
-            projection, virtual_fields={VIRTUAL_SCORE_FIELD}
-        )
-        client = await self._client()
-        response = await client.search(
-            index=index,
-            query=compile_elasticsearch_filter(node_filter),
-            size=ES_LOOKUP_PAGE_SIZE,
-            allow_partial_search_results=False,
-            source_includes=source_fields,
-        )
-        return _parse_hits(response, spec, f"node lookup for {label}")
-
-
-# ────────────────────────────────────────────────────────────────
-# Backend router
-# ────────────────────────────────────────────────────────────────
-
-
-class ReadStorage:
-    """Select the read backend per node family, like the host ``BackendFactory``."""
 
     def __init__(
         self,
         *,
-        neo4j: Neo4jReadClient,
-        elastic: ElasticReadClient,
-        read_backend: str = "ELASTIC",
+        read_backend: BackendType,
+        clients: Mapping[BackendType, BaseClient],
     ) -> None:
-        backend = (read_backend or "ELASTIC").strip().upper()
-        if backend not in {"ELASTIC", "NEO4J"}:
-            raise ValueError(
-                f"Invalid memory read backend {read_backend!r}; expected one of: ELASTIC, NEO4J"
-            )
-        self._neo4j = neo4j
-        self._elastic = elastic
-        self._read_backend = backend
-
-    @property
-    def read_backend(self) -> str:
-        return self._read_backend
-
-    def _client_for(self, label: str) -> Neo4jReadClient | ElasticReadClient:
-        if label in BackendFactory.ELASTIC_ONLY_LABELS:
-            return self._elastic
-        return self._elastic if self._read_backend == "ELASTIC" else self._neo4j
-
-    async def search_by_fulltext(
-        self,
-        node_filters: Mapping[str, NodeFilter],
-        text: str,
-        pre_limit: int,
-        projections: Mapping[str, NodeProjection] | None = None,
-    ) -> StorageReadResult:
-        projections = projections or {}
-        specs = _search_specs(node_filters, projections, self._client_for)
-        elastic_specs = [
-            (client, spec) for client, spec in specs if isinstance(client, ElasticReadClient)
-        ]
-        batched: dict[str, StorageReadResult] = {}
-        if elastic_specs:
-            batched = await elastic_specs[0][0].search_by_fulltext_many(
-                [spec for _client, spec in elastic_specs], text, pre_limit
-            )
-        results: list[StorageReadResult] = []
-        for client, spec in specs:
-            if isinstance(client, ElasticReadClient):
-                results.append(
-                    batched.get(
-                        spec.label, StorageReadResult(backend=self.read_backend)
-                    )
-                )
-            else:
-                results.append(await client.search_by_fulltext(spec, text, pre_limit))
-        return merge_read_results(results)
-
-    async def search_by_embedding(
-        self,
-        node_filters: Mapping[str, NodeFilter],
-        embedding: Sequence[float],
-        pre_limit: int,
-        projections: Mapping[str, NodeProjection] | None = None,
-    ) -> StorageReadResult:
-        projections = projections or {}
-        specs = _search_specs(node_filters, projections, self._client_for)
-        results = await asyncio.gather(
-            *(
-                client.search_by_embedding(spec, embedding, pre_limit)
-                for client, spec in specs
-            )
-        )
-        return merge_read_results(results)
-
-    async def get_node(
-        self,
-        label: str,
-        node_filter: NodeFilter,
-        projection: NodeProjection | None = None,
-    ) -> StorageReadResult:
-        return await self._client_for(label).get_node(label, node_filter, projection)
-
-    async def search_relationships(
-        self,
-        pattern: RelationshipPattern,
-        rel_filter: RelationshipFilter,
-        projection: tuple[RelationshipProjectionField, ...] | None = None,
-    ) -> StorageReadResult:
-        # Relationships live only in the graph; the host factory always returns Neo4j.
-        return await self._neo4j.search_relationships(pattern, rel_filter, projection)
+        super().__init__()
+        self._clients = dict(clients)
+        self._read_backend = read_backend
 
 
 def _resolve_read_backend(runtime: Any, read_backend: str | None) -> str:
@@ -801,32 +132,290 @@ def _resolve_read_backend(runtime: Any, read_backend: str | None) -> str:
 
     if read_backend:
         return read_backend
-    configured = getattr(runtime.settings, "memory_read_backend", None)
+    settings = getattr(runtime, "settings", None)
+    configured = getattr(settings, "memory_read_backend", None)
     if configured:
         return str(configured)
     return os.environ.get("MEMORY_READ_BACKEND", DEFAULT_READ_BACKEND)
 
 
+class ReadStorage:
+    """Route read-DSL calls onto the ported storage clients."""
+
+    def __init__(
+        self,
+        *,
+        runtime: Any = None,
+        read_backend: str | None = None,
+        clients: Mapping[BackendType, BaseClient] | None = None,
+    ) -> None:
+        resolved = _resolve_read_backend(runtime, read_backend)
+        try:
+            self._backend = BackendType(str(resolved).strip().upper())
+        except ValueError:
+            raise ValueError(
+                f"Invalid memory read backend {resolved!r}; expected one of: "
+                f"{', '.join(member.value for member in BackendType)}"
+            ) from None
+        if runtime is None and clients is None:
+            raise ValueError(
+                "ReadStorage needs a runtime or explicit ported clients"
+            )
+        self._runtime = runtime
+        self._injected = dict(clients) if clients is not None else None
+        self._router: ReadRouter | None = None
+        self._lock = asyncio.Lock()
+        if clients is not None:
+            # Explicitly injected clients open no pool: wire the router eagerly so
+            # routing is inspectable without awaiting a read.
+            self._router = ReadRouter(
+                _ReadFactory(read_backend=self._backend, clients=clients)
+            )
+
+    # ── wiring ─────────────────────────────────────────────────
+
+    @property
+    def read_backend(self) -> str:
+        return self._backend.value
+
+    def _client_for(
+        self,
+        label: str,
+        dimension: StorageBackendType = StorageBackendType.GRAPH_MAIN_READ,
+    ) -> BaseClient:
+        """Resolve the routed client for one label (diagnostic/test seam)."""
+
+        if self._router is None:
+            raise RuntimeError(
+                "ReadStorage clients are not wired yet; run a read or inject clients"
+            )
+        backend_label = to_backend_label(label)
+        if backend_label is None:
+            raise KeyError(f"unknown storage label {label!r}")
+        return self._router.backend_factory.get_read_client(
+            backend_label, dimension
+        )
+
+    async def _read_router(self) -> ReadRouter:
+        if self._router is None:
+            async with self._lock:
+                if self._router is None:
+                    clients = self._injected
+                    if clients is None:
+                        clients = await self._build_clients()
+                    self._router = ReadRouter(
+                        _ReadFactory(read_backend=self._backend, clients=clients)
+                    )
+        return self._router
+
+    async def _build_clients(self) -> dict[BackendType, BaseClient]:
+        runtime = self._runtime
+        configure_neo4j_manager(runtime.neo4j)
+        neo4j = await Neo4jClient.create()
+        elastic = ElasticClient()
+        # Borrow the process pool: index confirmation is the startup bootstrap's
+        # job (``PROFILE_STORAGE_INDEX_BOOTSTRAP``), never a request's.
+        elastic.client = await runtime.elasticsearch.client()
+        return {BackendType.NEO4J: neo4j, BackendType.ELASTIC: elastic}
+
+    def _empty(self) -> StorageReadResult:
+        return StorageReadResult(backend=self._backend.value.lower())
+
+    # ── per-label planning ─────────────────────────────────────
+
+    def _supports(
+        self,
+        client: BaseClient,
+        label: MemoryNodeType,
+        *,
+        kind: str,
+        dimension: int | None = None,
+    ) -> bool:
+        """Whether the routed backend has an index for this label and query kind."""
+
+        if isinstance(client, ElasticClient):
+            if label.value not in ES_INDEX_ALIAS:
+                return False
+            if kind == "fulltext":
+                return label.value in ES_FULLTEXT_FIELDS
+            if dimension is None:
+                return False
+            try:
+                es_embedding_field(label.value, dimension)
+            except (KeyError, ValueError):
+                return False
+            return True
+        if kind == "fulltext":
+            return label.value in NEO4J_FULLTEXT_INDEX
+        return label.value in NEO4J_EMBEDDING_FIELD
+
+    def _plan_searches(
+        self,
+        router: ReadRouter,
+        node_filters: Mapping[str, NodeFilter],
+        projections: Mapping[str, NodeProjection],
+        *,
+        kind: str,
+        dimension: int | None = None,
+    ) -> tuple[list[tuple[BaseClient, list[NodeSearchSpec]]], list[StorageReadResult]]:
+        """Group labels by their routed client, keeping one spec (and projection) each.
+
+        Grouping by client is what lets one multi-label call stay a single
+        Elasticsearch ``_msearch`` even though every label carries its own
+        projection — the host cannot express that through the router's single
+        ``projection=`` argument, so the adapter performs the same grouping the
+        host's ``_run_grouped_search`` does and calls the clients' batched APIs.
+        """
+
+        dimension_key = (
+            StorageBackendType.TEXT_MAIN_READ
+            if kind == "fulltext"
+            else StorageBackendType.VECTOR_MAIN_READ
+        )
+        groups: dict[int, tuple[BaseClient, list[NodeSearchSpec]]] = {}
+        empties: list[StorageReadResult] = []
+        for label, node_filter in node_filters.items():
+            backend_label = to_backend_label(label)
+            if backend_label is None:
+                empties.append(self._empty())
+                continue
+            client = router.backend_factory.get_read_client(
+                backend_label, dimension_key
+            )
+            if not self._supports(
+                client, backend_label, kind=kind, dimension=dimension
+            ):
+                empties.append(self._empty())
+                continue
+            projection = projections.get(label)
+            if projection is None:
+                try:
+                    projection = projection_for(label)
+                except KeyError:
+                    empties.append(self._empty())
+                    continue
+            slot = groups.setdefault(id(client), (client, []))
+            slot[1].append(
+                NodeSearchSpec(
+                    label=backend_label,
+                    node_filter=to_backend_filter(node_filter),
+                    projection=to_backend_projection(projection),
+                )
+            )
+        return list(groups.values()), empties
+
+    # ── full-text / vector search ──────────────────────────────
+
+    async def search_by_fulltext(
+        self,
+        node_filters: Mapping[str, NodeFilter],
+        text: str,
+        pre_limit: int,
+        projections: Mapping[str, NodeProjection] | None = None,
+    ) -> StorageReadResult:
+        router = await self._read_router()
+        groups, empties = self._plan_searches(
+            router, node_filters, projections or {}, kind="fulltext"
+        )
+        if not groups:
+            return merge_read_results(empties)
+        batches = await asyncio.gather(
+            *(
+                client.search_many_by_fulltext(specs, text, pre_limit)
+                for client, specs in groups
+            )
+        )
+        results = [
+            to_core_result(result) for batch in batches for result in batch
+        ]
+        return merge_read_results([*results, *empties])
+
+    async def search_by_embedding(
+        self,
+        node_filters: Mapping[str, NodeFilter],
+        embedding: Sequence[float],
+        pre_limit: int,
+        projections: Mapping[str, NodeProjection] | None = None,
+    ) -> StorageReadResult:
+        router = await self._read_router()
+        vector = [float(value) for value in embedding]
+        groups, empties = self._plan_searches(
+            router,
+            node_filters,
+            projections or {},
+            kind="embedding",
+            dimension=len(vector),
+        )
+        if not groups:
+            return merge_read_results(empties)
+        batches = await asyncio.gather(
+            *(
+                client.search_many_by_embedding(specs, vector, pre_limit)
+                for client, specs in groups
+            )
+        )
+        results = [
+            to_core_result(result) for batch in batches for result in batch
+        ]
+        return merge_read_results([*results, *empties])
+
+    # ── node lookup / relationships ────────────────────────────
+
+    async def get_node(
+        self,
+        label: str,
+        node_filter: NodeFilter,
+        projection: NodeProjection | None = None,
+    ) -> StorageReadResult:
+        router = await self._read_router()
+        backend_label = to_backend_label(label)
+        if backend_label is None:
+            return self._empty()
+        client = router.backend_factory.get_read_client(
+            backend_label, StorageBackendType.GRAPH_MAIN_READ
+        )
+        if isinstance(client, ElasticClient) and label not in ES_INDEX_ALIAS:
+            return self._empty()
+        result = await router.get_node(
+            backend_label,
+            to_backend_filter(node_filter),
+            to_backend_projection(projection),
+        )
+        return to_core_result(result)
+
+    async def search_relationships(
+        self,
+        pattern: RelationshipPattern,
+        rel_filter: RelationshipFilter,
+        projection: Sequence[RelationshipProjectionField] | None = None,
+    ) -> StorageReadResult:
+        router = await self._read_router()
+        backend_filter = to_backend_relationship_filter(rel_filter)
+        if backend_filter is None:
+            raise ValueError(
+                "a relationship search needs at least one scoped node filter"
+            )
+        result = await router.search_relationships_by_graph(
+            to_backend_relationship_pattern(pattern),
+            backend_filter,
+            to_backend_relationship_projection(projection),
+        )
+        return to_core_result(result)
+
+
 def build_read_storage(runtime: Any, *, read_backend: str | None = None) -> ReadStorage:
-    """Wire the read clients onto the process runtime managers.
+    """Wire the read router onto the process runtime managers.
 
     This is the composition seam for every read service: the returned
     :class:`ReadStorage` executes the DSL against Neo4j/Elasticsearch without
     opening a second pool.
     """
 
-    return ReadStorage(
-        neo4j=Neo4jReadClient(runtime.neo4j),
-        elastic=ElasticReadClient(runtime.elasticsearch),
-        read_backend=_resolve_read_backend(runtime, read_backend),
-    )
+    return ReadStorage(runtime=runtime, read_backend=read_backend)
 
 
 __all__ = [
     "DEFAULT_READ_BACKEND",
-    "ElasticReadClient",
-    "Neo4jReadClient",
-    "NodeSearchSpec",
     "ReadStorage",
     "RelationshipFilter",
     "RelationshipPattern",
