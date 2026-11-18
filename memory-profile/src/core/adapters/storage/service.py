@@ -437,6 +437,7 @@ def _parse_hits(
     operation: str,
     *,
     score_transform: Any = None,
+    source_required: bool = False,
 ) -> StorageReadResult:
     _raise_on_response_failures(response, operation)
     hits_container = response.get("hits")
@@ -450,8 +451,16 @@ def _parse_hits(
             raise RuntimeError(
                 f"Elasticsearch {operation} returned invalid hit at index {index}"
             )
-        source = hit.get("_source")
-        source = source if isinstance(source, Mapping) else {}
+        source_value = hit.get("_source")
+        if source_value is None and not source_required:
+            # A body with ``_source: false`` legitimately answers without source.
+            source: Mapping[str, Any] = {}
+        elif isinstance(source_value, Mapping):
+            source = source_value
+        else:
+            raise RuntimeError(
+                f"Elasticsearch {operation} returned invalid _source at index {index}"
+            )
         virtual_fields: dict[str, Any] = {}
         if include_score:
             raw_score = hit.get("_score")
@@ -469,6 +478,28 @@ def _parse_hits(
             )
         )
     return StorageReadResult.from_items(items, label=spec.label, backend="elastic")
+
+
+def _msearch_source_options(
+    projection: NodeProjection | None,
+) -> tuple[dict[str, Any], bool]:
+    """Port of the host ``_compile_msearch_source_options``.
+
+    Inside an ``_msearch`` search body the projection must travel as ``_source``:
+    ``source_includes`` is a ``_search`` query parameter and an ``_msearch`` body
+    carrying it (or ``allow_partial_search_results``) is rejected with a 400
+    ``parsing_exception``. ``source_required`` tells the hit parser whether a
+    missing ``_source`` is expected (``_source: false``) or a protocol error.
+    """
+
+    source_fields = compile_elasticsearch_projection(
+        projection, virtual_fields={VIRTUAL_SCORE_FIELD}
+    )
+    if source_fields is None:
+        return {}, True
+    if source_fields:
+        return {"_source": source_fields}, True
+    return {"_source": False}, False
 
 
 def _resolve_embedding_field(label: str, dimension: int) -> str:
@@ -495,65 +526,72 @@ class ElasticReadClient:
         text: str,
         limit: int,
     ) -> dict[str, StorageReadResult]:
-        """One ES ``msearch`` for every label (host batching parity).
+        """One ES ``_msearch`` for every label (host ``search_many_by_fulltext``).
 
-        The result set is identical to calling :meth:`search_by_fulltext` per
-        label; only the number of round trips changes (one instead of N).
+        Each label contributes a header line plus a standard search body. The
+        ``allow_partial_search_results`` flag rides on the header line (``_msearch``
+        exposes no such request option through the client) and the projection
+        travels as ``_source`` — the query-style spellings of both
+        (``allow_partial_search_results`` / ``source_includes`` as body keys) are
+        what made Elasticsearch answer 400 ``parsing_exception``.
         """
 
         normalized = text.strip()
-        preparations: list[tuple[NodeSearchSpec, str, dict[str, Any]]] = []
+        if not normalized:
+            return {
+                spec.label: StorageReadResult(backend=self.backend) for spec in specs
+            }
+        searches: list[dict[str, Any]] = []
+        requested: list[tuple[NodeSearchSpec, bool]] = []
         for spec in specs:
             index = ES_INDEX_ALIAS.get(spec.label)
             fields = ES_FULLTEXT_FIELDS.get(spec.label)
-            if index is None or fields is None or not normalized:
+            if index is None or fields is None:
                 continue
-            source_fields = compile_elasticsearch_projection(
-                spec.projection, virtual_fields={VIRTUAL_SCORE_FIELD}
+            source_options, requires_source = _msearch_source_options(spec.projection)
+            requested.append((spec, requires_source))
+            searches.append(
+                {"index": index, "allow_partial_search_results": False}
             )
-            preparations.append(
-                (
-                    spec,
-                    index,
-                    {
-                        "query": {
-                            "bool": {
-                                "must": [
-                                    {
-                                        "multi_match": {
-                                            "query": normalized,
-                                            "fields": list(fields),
-                                        }
+            searches.append(
+                {
+                    "query": {
+                        "bool": {
+                            "must": [
+                                {
+                                    "multi_match": {
+                                        "query": normalized,
+                                        "fields": list(fields),
                                     }
-                                ],
-                                "filter": [compile_elasticsearch_filter(spec.node_filter)],
-                            }
-                        },
-                        "size": limit,
-                        "allow_partial_search_results": False,
-                        "source_includes": source_fields,
+                                }
+                            ],
+                            "filter": [compile_elasticsearch_filter(spec.node_filter)],
+                        }
                     },
-                )
+                    "size": limit,
+                    **source_options,
+                }
             )
-        if not preparations:
-            return {}
+        results: dict[str, StorageReadResult] = {
+            spec.label: StorageReadResult(backend=self.backend) for spec in specs
+        }
+        if not requested:
+            return results
         client = await self._client()
-        searches: list[dict[str, Any]] = []
-        for _spec, index, body in preparations:
-            searches.append({"index": index})
-            searches.append(body)
         response = await client.msearch(
-            searches=searches, max_concurrent_searches=len(preparations)
+            searches=searches, max_concurrent_searches=len(requested)
         )
         responses = response.get("responses") if isinstance(response, Mapping) else None
-        if not isinstance(responses, (list, tuple)) or len(responses) != len(preparations):
+        if not isinstance(responses, (list, tuple)) or len(responses) != len(requested):
             raise RuntimeError("Elasticsearch msearch returned an invalid response list")
-        results: dict[str, StorageReadResult] = {}
-        for (spec, _index, _body), item in zip(preparations, responses, strict=False):
+        for (spec, requires_source), item in zip(requested, responses, strict=True):
             if not isinstance(item, Mapping):
                 raise RuntimeError("Elasticsearch msearch returned an invalid response")
             results[spec.label] = _parse_hits(
-                item, spec, f"fulltext search for {spec.label}"
+                item,
+                spec,
+                f"fulltext search for {spec.label}",
+                source_required=requires_source,
             )
         return results
 
