@@ -257,7 +257,7 @@ const MySharing = forwardRef<MySharingRef, { switchOntology: (item: Application)
         ref={tableRef}
         apiUrl={getMySharedOutListUrl}
         columns={columns}
-        rowKey="app_id"
+        rowKey={(row) => `${row.app_id}-${row.scope}`}
       />
       <ApplicationRecordModal ref={recordModalRef} />
       <DelistModal
