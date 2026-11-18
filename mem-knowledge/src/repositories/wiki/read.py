@@ -137,6 +137,7 @@ def begin_read(session, scope):
     knowledge = session.scalar(_readable_knowledge(scope))
     if knowledge is None:
         raise WikiError("WIKI_NOT_FOUND", retryable=False)
+    return knowledge
 
 
 def _folders(session, scope):
