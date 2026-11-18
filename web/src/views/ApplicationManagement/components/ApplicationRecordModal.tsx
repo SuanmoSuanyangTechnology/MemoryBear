@@ -32,17 +32,20 @@ const publicationEventConfigs: Array<{
   action: PublicationEvent['event_type'];
   labelKey: string;
   color: string;
+  showInLegend?: boolean;
 }> = [
-  { source: 'publisher', action: 'submitted', labelKey: 'application.recordEvent_submitted', color: PROGRESSING_EVENT_COLOR },
-  { source: 'platform', action: 'rejected', labelKey: 'application.recordEvent_rejected', color: ERROR_EVENT_COLOR },
-  { source: 'publisher', action: 'withdrawn', labelKey: 'application.recordEvent_withdrawn', color: DEFAULT_EVENT_COLOR },
-  { source: 'platform', action: 'approved', labelKey: 'application.recordEvent_approved', color: SUCCESS_EVENT_COLOR },
-  { source: 'publisher', action: 'relisted', labelKey: 'application.recordEvent_publisher_relisted', color: SUCCESS_EVENT_COLOR },
-  { source: 'platform', action: 'relisted', labelKey: 'application.recordEvent_platform_relisted', color: SUCCESS_EVENT_COLOR },
-  { source: 'platform', action: 'listed', labelKey: 'application.recordEvent_platform_listed', color: SUCCESS_EVENT_COLOR },
-  { source: 'publisher', action: 'pending', labelKey: 'application.recordEvent_pending', color: WARNING_EVENT_COLOR },
-  { source: 'publisher', action: 'delisted', labelKey: 'application.recordEvent_publisher_delisted', color: WARNING_EVENT_COLOR },
-  { source: 'platform', action: 'delisted', labelKey: 'application.recordEvent_platform_delisted', color: WARNING_EVENT_COLOR },
+  // Only these five statuses are shown in the legend; all others use the withdrawn color
+  { source: 'publisher', action: 'submitted', labelKey: 'application.recordEvent_submitted', color: PROGRESSING_EVENT_COLOR, showInLegend: true },
+  { source: 'publisher', action: 'pending', labelKey: 'application.recordEvent_pending', color: WARNING_EVENT_COLOR, showInLegend: true },
+  { source: 'platform', action: 'approved', labelKey: 'application.recordEvent_approved', color: SUCCESS_EVENT_COLOR, showInLegend: true },
+  { source: 'platform', action: 'rejected', labelKey: 'application.recordEvent_rejected', color: ERROR_EVENT_COLOR, showInLegend: true },
+  { source: 'publisher', action: 'withdrawn', labelKey: 'application.recordEvent_withdrawn', color: DEFAULT_EVENT_COLOR, showInLegend: true },
+  { source: 'publisher', action: 'delisted', labelKey: 'application.recordEvent_publisher_delisted', color: DEFAULT_EVENT_COLOR },
+  { source: 'publisher', action: 'relisted', labelKey: 'application.recordEvent_publisher_relisted', color: DEFAULT_EVENT_COLOR },
+  { source: 'platform', action: 'delisted', labelKey: 'application.recordEvent_platform_delisted', color: DEFAULT_EVENT_COLOR },
+  { source: 'platform', action: 'relisted', labelKey: 'application.recordEvent_platform_relisted', color: DEFAULT_EVENT_COLOR },
+  { source: 'platform', action: 'listed', labelKey: 'application.recordEvent_platform_listed', color: DEFAULT_EVENT_COLOR },
+  { source: 'platform', action: 'display_updated', labelKey: 'application.recordEvent_display_updated', color: DEFAULT_EVENT_COLOR },
 ];
 
 const listingStatusLabelMap: Record<string, string> = {
@@ -67,6 +70,15 @@ const ApplicationRecordModal = forwardRef<ApplicationRecordModalRef>((_props, re
   const [loading, setLoading] = useState(false);
   const [events, setEvents] = useState<PublicationEvent[]>([]);
   const [recordData, setRecordData] = useState<PublicationRecordData | null>(null);
+
+  /** Renders changed display fields as "名称、图标或简介". */
+  const formatChangedFields = (fields?: PublicationEvent['changed_fields']) => {
+    const labels = (fields || []).map(field =>
+      t(`application.recordEvent_changedField_${field}`, { defaultValue: field })
+    );
+    if (labels.length < 2) return labels[0] || '';
+    return labels.join('、');
+  };
 
   const handleClose = () => {
     setVisible(false);
@@ -135,7 +147,7 @@ const ApplicationRecordModal = forwardRef<ApplicationRecordModalRef>((_props, re
           </div>
         )}
         <Flex wrap="wrap" gap={12} className="rb:mb-4! rb:pb-4! rb:border-b rb:border-gray-200">
-          {publicationEventConfigs.map((item) => (
+          {publicationEventConfigs.filter(item => item.showInLegend).map((item) => (
             <Flex key={item.labelKey} align="center" gap={4}>
               <span
                 className="rb:inline-block rb:size-2 rb:rounded-full"
@@ -152,6 +164,9 @@ const ApplicationRecordModal = forwardRef<ApplicationRecordModalRef>((_props, re
             const timeInfo = formatDateTime(event.occurred_at);
             const action = event.action || event.event_type;
             const eventConfig = getEventConfig(event);
+            const changedFieldsText = action === 'display_updated' && event.changed_fields?.length
+              ? formatChangedFields(event.changed_fields)
+              : '';
             return {
               color: eventConfig?.color || DEFAULT_EVENT_COLOR,
               label: <div className="rb:text-gray-600 rb:wrap-break-word">{timeInfo}</div>,
@@ -163,7 +178,12 @@ const ApplicationRecordModal = forwardRef<ApplicationRecordModalRef>((_props, re
                       {t(eventConfig?.labelKey || `application.recordEvent_${action}`, { defaultValue: action })}
                     </span>
                   </Flex>
-                  {event.reason && (
+                  {changedFieldsText && (
+                    <div className="rb:text-[12px] rb:text-gray-500">
+                      {t('application.recordEvent_display_updated_detail', { fields: changedFieldsText })}
+                    </div>
+                  )}
+                  {!changedFieldsText && event.reason && (
                     <div className="rb:text-[12px] rb:text-gray-500">
                       {event.reason}
                     </div>
