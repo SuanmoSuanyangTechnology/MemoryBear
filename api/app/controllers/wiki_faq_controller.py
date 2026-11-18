@@ -4,8 +4,10 @@ from typing import Annotated, Literal
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi.responses import StreamingResponse
 
 from app.dependencies import cur_workspace_access_guard_async, get_current_user_async
+from app.integrations.knowledge.call_profile import CallProfile
 from app.integrations.knowledge.contracts import KnowledgeRetrievalSource
 from app.integrations.knowledge.route_proxy import route_through_knowledge_service
 from app.models.user_model import User
@@ -95,6 +97,24 @@ async def batch_enabled(
     request: Request,
     kb_id: UUID,
     payload: FAQBatchEnabled,
+    current_user: Annotated[User, Depends(get_current_user_async)],
+):
+    raise HTTPException(status_code=503, detail="FAQ requires mem-knowledge")
+
+
+@router.get(
+    "/export",
+    response_class=StreamingResponse,
+    responses={200: {"content": {"text/csv": {"schema": {"type": "string", "format": "binary"}}}}},
+)
+@cur_workspace_access_guard_async()
+@route_through_knowledge_service(
+    source=KnowledgeRetrievalSource.MANAGER_API,
+    profile=CallProfile.STREAM_DOWNLOAD,
+)
+async def export_faqs(
+    request: Request,
+    kb_id: UUID,
     current_user: Annotated[User, Depends(get_current_user_async)],
 ):
     raise HTTPException(status_code=503, detail="FAQ requires mem-knowledge")

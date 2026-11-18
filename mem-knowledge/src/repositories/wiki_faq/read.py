@@ -1,9 +1,12 @@
 """列表全库计数不受筛选影响；审核按每条 FAQ 的真实 Wiki 基线取数。"""
 
+from uuid import UUID
+
 from sqlalchemy import case, func, or_, select
 
 from ...models.owned.wiki import WikiPage
 from ...models.owned.wiki_faq import WikiFAQ, WikiFAQGenerationJob, WikiPageVersion
+from ...rag.faq.contracts import readable_faq_text
 from ...utils.datetime_utils import to_timestamp_ms
 from ..wiki.common import as_uuid
 from ..wiki.read import begin_read
@@ -16,6 +19,30 @@ from .common import (
     serialize,
     snapshot_data,
 )
+
+FAQ_EXPORT_BATCH_SIZE = 500
+
+
+def export_batch(
+    session, scope, *, after: UUID | None = None,
+) -> list[tuple[UUID, str, str]]:
+    query = (
+        select(WikiFAQ.id, WikiFAQ.standard_question, WikiFAQ.answers[0].astext)
+        .where(*scoped(WikiFAQ, scope), WikiFAQ.deleted_at.is_(None))
+        .order_by(WikiFAQ.id)
+        .limit(FAQ_EXPORT_BATCH_SIZE)
+    )
+    if after is not None:
+        query = query.where(WikiFAQ.id > after)
+    return [
+        (faq_id, readable_faq_text(question), readable_faq_text(answer))
+        for faq_id, question, answer in session.execute(query)
+    ]
+
+
+def start_export(session, scope) -> tuple[str, list[tuple[UUID, str, str]]]:
+    knowledge = begin_read(session, scope)
+    return knowledge.name, export_batch(session, scope)
 
 
 def list_faqs(
