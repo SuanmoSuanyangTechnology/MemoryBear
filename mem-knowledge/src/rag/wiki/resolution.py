@@ -26,7 +26,9 @@ def types_conflict(left, right):
 
 
 def _conflict_side(topic):
-    evidence = list(dict.fromkeys(item["quote"] for item in topic.get("type_evidence", [])))[:4]
+    evidence = list(dict.fromkeys(
+        item.get("context") or item["quote"] for item in topic.get("type_evidence", [])
+    ))[:4]
     return {
         "name": topic["name"],
         "aliases": topic["aliases"][:8],

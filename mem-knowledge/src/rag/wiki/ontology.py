@@ -3,6 +3,7 @@
 from enum import StrEnum
 
 ONTOLOGY_VERSION = "ontology_general_v1:v1"
+TYPE_EVIDENCE_CONTEXT_CHARS = 180
 
 
 class OntologyType(StrEnum):
@@ -61,12 +62,19 @@ def candidate_identity(candidate: dict) -> str:
 def with_verified_type(candidate: dict, source_text: dict[str, str]) -> dict:
     """仅保留候选自己引用且能在原文找到的引文。"""
     refs = set(candidate["source_refs"])
-    evidence = [
-        {**item, "semantic_type": candidate["semantic_type"]}
-        for item in candidate["type_evidence"]
-        if item["source_ref"] in refs and item["quote"].strip()
-        and item["quote"] in source_text.get(item["source_ref"], "")
-    ]
+    evidence = []
+    for item in candidate["type_evidence"]:
+        ref, quote = item["source_ref"], item["quote"]
+        if ref not in refs or not quote.strip():
+            continue
+        text = source_text.get(ref, "")
+        start = text.find(quote)
+        if start < 0:
+            continue
+        # 分类引文附近可能还有原文明确写出的同名、隶属或纠正关系。
+        context = text[max(0, start - TYPE_EVIDENCE_CONTEXT_CHARS):
+                       start + len(quote) + TYPE_EVIDENCE_CONTEXT_CHARS]
+        evidence.append({**item, "semantic_type": candidate["semantic_type"], "context": context})
     if not evidence:
         raise ValueError(f"Candidate {candidate['name']!r} has no valid type evidence")
     kind = page_type(candidate["semantic_type"])

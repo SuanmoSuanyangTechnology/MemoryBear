@@ -6,6 +6,9 @@ import io
 import logging
 from collections.abc import AsyncIterator
 
+from sqlalchemy.exc import OperationalError
+from sqlalchemy.exc import TimeoutError as PoolTimeoutError
+
 from ..error_mapping import map_wiki_error
 from ..errors import KnowledgeError
 from ..rag.faq.contracts import FAQ_GENERATE_TASK, FAQ_QUEUE
@@ -48,6 +51,8 @@ async def start_csv_export(runtime, scope) -> tuple[str, AsyncIterator[bytes]]:
         if exc.code != "WIKI_NOT_FOUND":
             raise
         raise KnowledgeError.from_code("KB_KNOWLEDGE_NOT_FOUND", status_code=404) from exc
+    except (OperationalError, PoolTimeoutError) as exc:
+        raise KnowledgeError.from_code("KB_HTTP_UNAVAILABLE") from exc
 
     async def stream() -> AsyncIterator[bytes]:
         batch = first_batch

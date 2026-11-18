@@ -249,8 +249,12 @@ def bind_materials(draft, plan, catalog, title):
             item["_ontology"] = {
                 **selected_type,
                 "type_evidence": [
-                    {"chunk_id": catalog[evidence["source_ref"]]["chunk_id"],
-                     "quote": evidence["quote"], "semantic_type": evidence["semantic_type"]}
+                    {
+                        "chunk_id": catalog[evidence["source_ref"]]["chunk_id"],
+                        "quote": evidence["quote"],
+                        "semantic_type": evidence["semantic_type"],
+                        **({"context": evidence["context"]} if evidence.get("context") else {}),
+                    }
                     for evidence in selected_type["type_evidence"]
                     if evidence["source_ref"] in catalog
                 ],

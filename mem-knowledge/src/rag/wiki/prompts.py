@@ -69,7 +69,9 @@ Return decision as same_object, different_objects, or insufficient. Use insuffic
 cannot establish identity or distinguish two objects from the evidence. Different type labels,
 scope wording, or titles alone are not evidence of distinct identity.
 For same_object, use preferred=right only if the evidence supports correcting the left side's
-classification to the right side's given semantic_type. Otherwise use preferred=left.
+classification to the right side's given semantic_type. If the right source explicitly identifies
+the same previously documented subject and states the earlier type was erroneous, resolve it as
+same_object with preferred=right. Otherwise preserve the earlier type when identity is established.
 For different_objects, return the shortest distinguishing phrases as left_label and right_label.
 Each phrase must be copied verbatim from its own side's provided evidence, with no parentheses.
 When the left side is an existing page its title is retained and its label can be omitted.
