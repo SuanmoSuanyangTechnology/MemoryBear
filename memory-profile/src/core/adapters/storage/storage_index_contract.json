@@ -1,0 +1,2233 @@
+{
+  "consistency": {
+    "elasticsearch_embedding_without_neo4j_field": [
+      "RagMemory"
+    ],
+    "fulltext_name_mismatches": [],
+    "labels_without_managed_fulltext": [],
+    "labels_without_vector_index": [
+      "UserSource"
+    ],
+    "vector_property_mismatches": []
+  },
+  "elasticsearch": {
+    "alias_suffix": "_current",
+    "default_embedding_dimension": 1024,
+    "embedding_fields": {
+      "AssistantPruned": "text_embedding",
+      "Chunk": "chunk_embedding",
+      "Community": "summary_embedding",
+      "Dialogue": "dialog_embedding",
+      "ExtractedEntity": "name_embedding",
+      "MemorySummary": "summary_embedding",
+      "Perceptual": "summary_embedding",
+      "RagMemory": "text_embedding",
+      "SceneCommunity": "summary_embedding",
+      "SceneSummary": "summary_embedding",
+      "Statement": "statement_embedding",
+      "UserSource": "text_embedding"
+    },
+    "fulltext_fields": {
+      "AssistantPruned": [
+        "text"
+      ],
+      "Chunk": [
+        "content"
+      ],
+      "Community": [
+        "name",
+        "summary"
+      ],
+      "Dialogue": [
+        "content"
+      ],
+      "ExtractedEntity": [
+        "name",
+        "description",
+        "aliases",
+        "description_summary",
+        "description_timeline"
+      ],
+      "MemorySummary": [
+        "content"
+      ],
+      "Perceptual": [
+        "summary",
+        "topic",
+        "domain",
+        "keywords"
+      ],
+      "RagMemory": [
+        "content"
+      ],
+      "SceneCommunity": [
+        "topic_name",
+        "topic_scope",
+        "summary"
+      ],
+      "SceneSummary": [
+        "content"
+      ],
+      "Statement": [
+        "statement"
+      ]
+    },
+    "index_definitions": {
+      "AssistantOriginal": {
+        "alias": "assistant_original_current",
+        "generation": 1,
+        "mappings": {
+          "dynamic_templates": [
+            {
+              "strings_as_keywords": {
+                "mapping": {
+                  "ignore_above": 8191,
+                  "type": "keyword"
+                },
+                "match_mapping_type": "string"
+              }
+            }
+          ],
+          "properties": {
+            "access_count": {
+              "type": "long"
+            },
+            "created_at": {
+              "type": "date"
+            },
+            "dialog_id": {
+              "type": "keyword"
+            },
+            "end_user_id": {
+              "type": "keyword"
+            },
+            "id": {
+              "type": "keyword"
+            },
+            "name": {
+              "type": "text"
+            },
+            "pair_id": {
+              "type": "keyword"
+            },
+            "run_id": {
+              "type": "keyword"
+            }
+          }
+        },
+        "name": "assistant_original",
+        "schema_version": 2,
+        "settings": {
+          "number_of_shards": 5
+        }
+      },
+      "AssistantPruned": {
+        "alias": "assistant_pruned_current",
+        "generation": 1,
+        "mappings": {
+          "dynamic_templates": [
+            {
+              "strings_as_keywords": {
+                "mapping": {
+                  "ignore_above": 8191,
+                  "type": "keyword"
+                },
+                "match_mapping_type": "string"
+              }
+            }
+          ],
+          "properties": {
+            "created_at": {
+              "type": "date"
+            },
+            "dialog_id": {
+              "type": "keyword"
+            },
+            "end_user_id": {
+              "type": "keyword"
+            },
+            "id": {
+              "type": "keyword"
+            },
+            "memory_type": {
+              "type": "keyword"
+            },
+            "name": {
+              "type": "text"
+            },
+            "pair_id": {
+              "type": "keyword"
+            },
+            "run_id": {
+              "type": "keyword"
+            },
+            "text": {
+              "analyzer": "cjk",
+              "type": "text"
+            },
+            "text_embedding": {
+              "dims": 1024,
+              "index": true,
+              "similarity": "cosine",
+              "type": "dense_vector"
+            },
+            "text_embedding_1536": {
+              "dims": 1536,
+              "index": true,
+              "similarity": "cosine",
+              "type": "dense_vector"
+            },
+            "text_embedding_2048": {
+              "dims": 2048,
+              "index": true,
+              "similarity": "cosine",
+              "type": "dense_vector"
+            },
+            "text_embedding_3072": {
+              "dims": 3072,
+              "index": true,
+              "similarity": "cosine",
+              "type": "dense_vector"
+            },
+            "text_embedding_4096": {
+              "dims": 4096,
+              "index": true,
+              "similarity": "cosine",
+              "type": "dense_vector"
+            },
+            "text_embedding_768": {
+              "dims": 768,
+              "index": true,
+              "similarity": "cosine",
+              "type": "dense_vector"
+            }
+          }
+        },
+        "name": "assistant_pruned",
+        "schema_version": 3,
+        "settings": {
+          "number_of_shards": 5
+        }
+      },
+      "Chunk": {
+        "alias": "chunk_current",
+        "generation": 1,
+        "mappings": {
+          "dynamic_templates": [
+            {
+              "strings_as_keywords": {
+                "mapping": {
+                  "ignore_above": 8191,
+                  "type": "keyword"
+                },
+                "match_mapping_type": "string"
+              }
+            }
+          ],
+          "properties": {
+            "chunk_embedding": {
+              "dims": 1024,
+              "index": true,
+              "similarity": "cosine",
+              "type": "dense_vector"
+            },
+            "chunk_embedding_1536": {
+              "dims": 1536,
+              "index": true,
+              "similarity": "cosine",
+              "type": "dense_vector"
+            },
+            "chunk_embedding_2048": {
+              "dims": 2048,
+              "index": true,
+              "similarity": "cosine",
+              "type": "dense_vector"
+            },
+            "chunk_embedding_3072": {
+              "dims": 3072,
+              "index": true,
+              "similarity": "cosine",
+              "type": "dense_vector"
+            },
+            "chunk_embedding_4096": {
+              "dims": 4096,
+              "index": true,
+              "similarity": "cosine",
+              "type": "dense_vector"
+            },
+            "chunk_embedding_768": {
+              "dims": 768,
+              "index": true,
+              "similarity": "cosine",
+              "type": "dense_vector"
+            },
+            "content": {
+              "analyzer": "cjk",
+              "type": "text"
+            },
+            "created_at": {
+              "type": "date"
+            },
+            "delete_at": {
+              "type": "date"
+            },
+            "dialog_id": {
+              "type": "keyword"
+            },
+            "end_user_id": {
+              "type": "keyword"
+            },
+            "id": {
+              "type": "keyword"
+            },
+            "name": {
+              "type": "text"
+            },
+            "run_id": {
+              "type": "keyword"
+            },
+            "sequence_number": {
+              "type": "long"
+            },
+            "speaker": {
+              "type": "keyword"
+            },
+            "topology_score": {
+              "type": "float"
+            }
+          }
+        },
+        "name": "chunk",
+        "schema_version": 3,
+        "settings": {
+          "number_of_shards": 5
+        }
+      },
+      "Community": {
+        "alias": "community_current",
+        "generation": 1,
+        "mappings": {
+          "dynamic_templates": [
+            {
+              "strings_as_keywords": {
+                "mapping": {
+                  "ignore_above": 8191,
+                  "type": "keyword"
+                },
+                "match_mapping_type": "string"
+              }
+            }
+          ],
+          "properties": {
+            "community_id": {
+              "type": "keyword"
+            },
+            "core_entities": {
+              "type": "keyword"
+            },
+            "end_user_id": {
+              "type": "keyword"
+            },
+            "id": {
+              "type": "keyword"
+            },
+            "member_count": {
+              "type": "long"
+            },
+            "name": {
+              "analyzer": "cjk",
+              "type": "text"
+            },
+            "summary": {
+              "analyzer": "cjk",
+              "type": "text"
+            },
+            "summary_embedding": {
+              "dims": 1024,
+              "index": true,
+              "similarity": "cosine",
+              "type": "dense_vector"
+            },
+            "summary_embedding_1536": {
+              "dims": 1536,
+              "index": true,
+              "similarity": "cosine",
+              "type": "dense_vector"
+            },
+            "summary_embedding_2048": {
+              "dims": 2048,
+              "index": true,
+              "similarity": "cosine",
+              "type": "dense_vector"
+            },
+            "summary_embedding_3072": {
+              "dims": 3072,
+              "index": true,
+              "similarity": "cosine",
+              "type": "dense_vector"
+            },
+            "summary_embedding_4096": {
+              "dims": 4096,
+              "index": true,
+              "similarity": "cosine",
+              "type": "dense_vector"
+            },
+            "summary_embedding_768": {
+              "dims": 768,
+              "index": true,
+              "similarity": "cosine",
+              "type": "dense_vector"
+            },
+            "updated_at": {
+              "type": "date"
+            }
+          }
+        },
+        "name": "community",
+        "schema_version": 3,
+        "settings": {
+          "number_of_shards": 5
+        }
+      },
+      "Conversation": {
+        "alias": "conversation_current",
+        "generation": 1,
+        "mappings": {
+          "dynamic_templates": [
+            {
+              "strings_as_keywords": {
+                "mapping": {
+                  "ignore_above": 8191,
+                  "type": "keyword"
+                },
+                "match_mapping_type": "string"
+              }
+            }
+          ],
+          "properties": {
+            "conversation_id": {
+              "type": "keyword"
+            },
+            "created_at": {
+              "type": "date"
+            },
+            "end_user_id": {
+              "type": "keyword"
+            },
+            "id": {
+              "type": "keyword"
+            },
+            "name": {
+              "type": "text"
+            },
+            "run_id": {
+              "type": "keyword"
+            }
+          }
+        },
+        "name": "conversation",
+        "schema_version": 2,
+        "settings": {
+          "number_of_shards": 5
+        }
+      },
+      "Dialogue": {
+        "alias": "dialogue_current",
+        "generation": 1,
+        "mappings": {
+          "dynamic_templates": [
+            {
+              "strings_as_keywords": {
+                "mapping": {
+                  "ignore_above": 8191,
+                  "type": "keyword"
+                },
+                "match_mapping_type": "string"
+              }
+            }
+          ],
+          "properties": {
+            "config_id": {
+              "type": "keyword"
+            },
+            "content": {
+              "analyzer": "cjk",
+              "type": "text"
+            },
+            "created_at": {
+              "type": "date"
+            },
+            "delete_at": {
+              "type": "date"
+            },
+            "dialog_embedding": {
+              "dims": 1024,
+              "index": true,
+              "similarity": "cosine",
+              "type": "dense_vector"
+            },
+            "dialog_embedding_1536": {
+              "dims": 1536,
+              "index": true,
+              "similarity": "cosine",
+              "type": "dense_vector"
+            },
+            "dialog_embedding_2048": {
+              "dims": 2048,
+              "index": true,
+              "similarity": "cosine",
+              "type": "dense_vector"
+            },
+            "dialog_embedding_3072": {
+              "dims": 3072,
+              "index": true,
+              "similarity": "cosine",
+              "type": "dense_vector"
+            },
+            "dialog_embedding_4096": {
+              "dims": 4096,
+              "index": true,
+              "similarity": "cosine",
+              "type": "dense_vector"
+            },
+            "dialog_embedding_768": {
+              "dims": 768,
+              "index": true,
+              "similarity": "cosine",
+              "type": "dense_vector"
+            },
+            "emotion": {
+              "type": "keyword"
+            },
+            "emotion_score": {
+              "type": "float"
+            },
+            "end_user_id": {
+              "type": "keyword"
+            },
+            "id": {
+              "type": "keyword"
+            },
+            "name": {
+              "type": "text"
+            },
+            "ref_id": {
+              "type": "keyword"
+            },
+            "run_id": {
+              "type": "keyword"
+            },
+            "uuid": {
+              "type": "keyword"
+            },
+            "write_mode": {
+              "type": "keyword"
+            }
+          }
+        },
+        "name": "dialogue",
+        "schema_version": 3,
+        "settings": {
+          "number_of_shards": 5
+        }
+      },
+      "ExtractedEntity": {
+        "alias": "extracted_entity_current",
+        "generation": 1,
+        "mappings": {
+          "dynamic_templates": [
+            {
+              "strings_as_keywords": {
+                "mapping": {
+                  "ignore_above": 8191,
+                  "type": "keyword"
+                },
+                "match_mapping_type": "string"
+              }
+            }
+          ],
+          "properties": {
+            "access_count": {
+              "type": "long"
+            },
+            "access_history": {
+              "type": "keyword"
+            },
+            "aliases": {
+              "analyzer": "cjk",
+              "type": "text"
+            },
+            "anchors": {
+              "type": "keyword"
+            },
+            "beliefs_or_stances": {
+              "type": "keyword"
+            },
+            "connect_strength": {
+              "type": "keyword"
+            },
+            "core_facts": {
+              "type": "keyword"
+            },
+            "created_at": {
+              "type": "date"
+            },
+            "delete_at": {
+              "type": "date"
+            },
+            "description": {
+              "analyzer": "cjk",
+              "type": "text"
+            },
+            "description_summary": {
+              "analyzer": "cjk",
+              "type": "text"
+            },
+            "description_timeline": {
+              "analyzer": "cjk",
+              "type": "text"
+            },
+            "end_user_id": {
+              "type": "keyword"
+            },
+            "entity_idx": {
+              "type": "long"
+            },
+            "entity_type": {
+              "type": "keyword"
+            },
+            "event_timeline": {
+              "type": "text"
+            },
+            "events": {
+              "type": "keyword"
+            },
+            "example": {
+              "type": "text"
+            },
+            "extraction_count": {
+              "type": "long"
+            },
+            "goals": {
+              "type": "keyword"
+            },
+            "id": {
+              "type": "keyword"
+            },
+            "importance_score": {
+              "type": "float"
+            },
+            "interests": {
+              "type": "keyword"
+            },
+            "is_explicit_memory": {
+              "type": "boolean"
+            },
+            "name": {
+              "analyzer": "cjk",
+              "type": "text"
+            },
+            "name_embedding": {
+              "dims": 1024,
+              "index": true,
+              "similarity": "cosine",
+              "type": "dense_vector"
+            },
+            "name_embedding_1536": {
+              "dims": 1536,
+              "index": true,
+              "similarity": "cosine",
+              "type": "dense_vector"
+            },
+            "name_embedding_2048": {
+              "dims": 2048,
+              "index": true,
+              "similarity": "cosine",
+              "type": "dense_vector"
+            },
+            "name_embedding_3072": {
+              "dims": 3072,
+              "index": true,
+              "similarity": "cosine",
+              "type": "dense_vector"
+            },
+            "name_embedding_4096": {
+              "dims": 4096,
+              "index": true,
+              "similarity": "cosine",
+              "type": "dense_vector"
+            },
+            "name_embedding_768": {
+              "dims": 768,
+              "index": true,
+              "similarity": "cosine",
+              "type": "dense_vector"
+            },
+            "relations": {
+              "type": "keyword"
+            },
+            "run_id": {
+              "type": "keyword"
+            },
+            "source": {
+              "type": "keyword"
+            },
+            "statement_id": {
+              "type": "keyword"
+            },
+            "topology_score": {
+              "type": "float"
+            },
+            "traits": {
+              "type": "keyword"
+            },
+            "type_description": {
+              "type": "text"
+            },
+            "type_id": {
+              "type": "long"
+            }
+          }
+        },
+        "name": "extracted_entity",
+        "schema_version": 3,
+        "settings": {
+          "number_of_shards": 5
+        }
+      },
+      "MemorySummary": {
+        "alias": "memory_summary_current",
+        "generation": 1,
+        "mappings": {
+          "dynamic_templates": [
+            {
+              "strings_as_keywords": {
+                "mapping": {
+                  "ignore_above": 8191,
+                  "type": "keyword"
+                },
+                "match_mapping_type": "string"
+              }
+            }
+          ],
+          "properties": {
+            "access_count": {
+              "type": "long"
+            },
+            "access_history": {
+              "type": "keyword"
+            },
+            "activation_value": {
+              "type": "float"
+            },
+            "chunk_ids": {
+              "type": "keyword"
+            },
+            "config_id": {
+              "type": "keyword"
+            },
+            "content": {
+              "analyzer": "cjk",
+              "type": "text"
+            },
+            "created_at": {
+              "type": "date"
+            },
+            "delete_at": {
+              "type": "date"
+            },
+            "dialog_id": {
+              "type": "keyword"
+            },
+            "end_user_id": {
+              "type": "keyword"
+            },
+            "id": {
+              "type": "keyword"
+            },
+            "importance_score": {
+              "type": "float"
+            },
+            "last_access_time": {
+              "type": "keyword"
+            },
+            "memory_type": {
+              "type": "keyword"
+            },
+            "merged_at": {
+              "type": "date"
+            },
+            "original_entity_id": {
+              "type": "keyword"
+            },
+            "original_statement_id": {
+              "type": "keyword"
+            },
+            "run_id": {
+              "type": "keyword"
+            },
+            "summary_embedding": {
+              "dims": 1024,
+              "index": true,
+              "similarity": "cosine",
+              "type": "dense_vector"
+            },
+            "summary_embedding_1536": {
+              "dims": 1536,
+              "index": true,
+              "similarity": "cosine",
+              "type": "dense_vector"
+            },
+            "summary_embedding_2048": {
+              "dims": 2048,
+              "index": true,
+              "similarity": "cosine",
+              "type": "dense_vector"
+            },
+            "summary_embedding_3072": {
+              "dims": 3072,
+              "index": true,
+              "similarity": "cosine",
+              "type": "dense_vector"
+            },
+            "summary_embedding_4096": {
+              "dims": 4096,
+              "index": true,
+              "similarity": "cosine",
+              "type": "dense_vector"
+            },
+            "summary_embedding_768": {
+              "dims": 768,
+              "index": true,
+              "similarity": "cosine",
+              "type": "dense_vector"
+            },
+            "topology_score": {
+              "type": "float"
+            },
+            "version": {
+              "type": "long"
+            }
+          }
+        },
+        "name": "memory_summary",
+        "schema_version": 3,
+        "settings": {
+          "number_of_shards": 5
+        }
+      },
+      "Perceptual": {
+        "alias": "perceptual_current",
+        "generation": 1,
+        "mappings": {
+          "dynamic_templates": [
+            {
+              "strings_as_keywords": {
+                "mapping": {
+                  "ignore_above": 8191,
+                  "type": "keyword"
+                },
+                "match_mapping_type": "string"
+              }
+            }
+          ],
+          "properties": {
+            "created_at": {
+              "type": "date"
+            },
+            "domain": {
+              "analyzer": "cjk",
+              "type": "text"
+            },
+            "end_user_id": {
+              "type": "keyword"
+            },
+            "file_ext": {
+              "type": "keyword"
+            },
+            "file_name": {
+              "type": "keyword"
+            },
+            "file_path": {
+              "type": "keyword"
+            },
+            "file_type": {
+              "type": "keyword"
+            },
+            "id": {
+              "type": "keyword"
+            },
+            "keywords": {
+              "analyzer": "cjk",
+              "type": "text"
+            },
+            "perceptual_type": {
+              "type": "long"
+            },
+            "summary": {
+              "analyzer": "cjk",
+              "type": "text"
+            },
+            "summary_embedding": {
+              "dims": 1024,
+              "index": true,
+              "similarity": "cosine",
+              "type": "dense_vector"
+            },
+            "summary_embedding_1536": {
+              "dims": 1536,
+              "index": true,
+              "similarity": "cosine",
+              "type": "dense_vector"
+            },
+            "summary_embedding_2048": {
+              "dims": 2048,
+              "index": true,
+              "similarity": "cosine",
+              "type": "dense_vector"
+            },
+            "summary_embedding_3072": {
+              "dims": 3072,
+              "index": true,
+              "similarity": "cosine",
+              "type": "dense_vector"
+            },
+            "summary_embedding_4096": {
+              "dims": 4096,
+              "index": true,
+              "similarity": "cosine",
+              "type": "dense_vector"
+            },
+            "summary_embedding_768": {
+              "dims": 768,
+              "index": true,
+              "similarity": "cosine",
+              "type": "dense_vector"
+            },
+            "topic": {
+              "analyzer": "cjk",
+              "type": "text"
+            },
+            "topology_score": {
+              "type": "float"
+            }
+          }
+        },
+        "name": "perceptual",
+        "schema_version": 3,
+        "settings": {
+          "number_of_shards": 5
+        }
+      },
+      "Preference": {
+        "alias": "preference_current",
+        "generation": 1,
+        "mappings": {
+          "dynamic_templates": [
+            {
+              "strings_as_keywords": {
+                "mapping": {
+                  "ignore_above": 8191,
+                  "type": "keyword"
+                },
+                "match_mapping_type": "string"
+              }
+            }
+          ],
+          "properties": {
+            "created_at": {
+              "type": "date"
+            },
+            "domain": {
+              "type": "keyword"
+            },
+            "end_user_id": {
+              "type": "keyword"
+            },
+            "id": {
+              "type": "keyword"
+            },
+            "mode": {
+              "type": "keyword"
+            },
+            "preference_text": {
+              "type": "keyword"
+            },
+            "situation_key": {
+              "type": "keyword"
+            },
+            "status": {
+              "type": "keyword"
+            },
+            "subject": {
+              "type": "keyword"
+            },
+            "updated_at": {
+              "type": "date"
+            }
+          }
+        },
+        "name": "preference",
+        "schema_version": 1,
+        "settings": {
+          "number_of_shards": 5
+        }
+      },
+      "RagMemory": {
+        "alias": "rag_memory_current",
+        "generation": 1,
+        "mappings": {
+          "dynamic_templates": [
+            {
+              "strings_as_keywords": {
+                "mapping": {
+                  "ignore_above": 8191,
+                  "type": "keyword"
+                },
+                "match_mapping_type": "string"
+              }
+            }
+          ],
+          "properties": {
+            "config_id": {
+              "type": "keyword"
+            },
+            "content": {
+              "analyzer": "cjk",
+              "type": "text"
+            },
+            "delete_at": {
+              "type": "date"
+            },
+            "dialog_at": {
+              "type": "date"
+            },
+            "end_user_id": {
+              "type": "keyword"
+            },
+            "id": {
+              "type": "keyword"
+            },
+            "role": {
+              "type": "keyword"
+            },
+            "source": {
+              "type": "keyword"
+            },
+            "text_embedding": {
+              "dims": 1024,
+              "index": true,
+              "similarity": "cosine",
+              "type": "dense_vector"
+            },
+            "text_embedding_1536": {
+              "dims": 1536,
+              "index": true,
+              "similarity": "cosine",
+              "type": "dense_vector"
+            },
+            "text_embedding_2048": {
+              "dims": 2048,
+              "index": true,
+              "similarity": "cosine",
+              "type": "dense_vector"
+            },
+            "text_embedding_3072": {
+              "dims": 3072,
+              "index": true,
+              "similarity": "cosine",
+              "type": "dense_vector"
+            },
+            "text_embedding_4096": {
+              "dims": 4096,
+              "index": true,
+              "similarity": "cosine",
+              "type": "dense_vector"
+            },
+            "text_embedding_768": {
+              "dims": 768,
+              "index": true,
+              "similarity": "cosine",
+              "type": "dense_vector"
+            }
+          }
+        },
+        "name": "rag_memory",
+        "schema_version": 1,
+        "settings": {
+          "number_of_shards": 5
+        }
+      },
+      "SceneCommunity": {
+        "alias": "scene_community_current",
+        "generation": 2,
+        "mappings": {
+          "dynamic_templates": [
+            {
+              "strings_as_keywords": {
+                "mapping": {
+                  "ignore_above": 8191,
+                  "type": "keyword"
+                },
+                "match_mapping_type": "string"
+              }
+            }
+          ],
+          "properties": {
+            "category_l1": {
+              "type": "keyword"
+            },
+            "created_at": {
+              "type": "date"
+            },
+            "end_user_id": {
+              "type": "keyword"
+            },
+            "ended_at": {
+              "type": "date"
+            },
+            "id": {
+              "type": "keyword"
+            },
+            "member_count": {
+              "type": "long"
+            },
+            "started_at": {
+              "type": "date"
+            },
+            "summary": {
+              "analyzer": "cjk",
+              "fields": {
+                "literal": {
+                  "type": "wildcard"
+                }
+              },
+              "type": "text"
+            },
+            "summary_embedding": {
+              "dims": 1024,
+              "index": true,
+              "similarity": "cosine",
+              "type": "dense_vector"
+            },
+            "summary_embedding_1536": {
+              "dims": 1536,
+              "index": true,
+              "similarity": "cosine",
+              "type": "dense_vector"
+            },
+            "summary_embedding_2048": {
+              "dims": 2048,
+              "index": true,
+              "similarity": "cosine",
+              "type": "dense_vector"
+            },
+            "summary_embedding_3072": {
+              "dims": 3072,
+              "index": true,
+              "similarity": "cosine",
+              "type": "dense_vector"
+            },
+            "summary_embedding_4096": {
+              "dims": 4096,
+              "index": true,
+              "similarity": "cosine",
+              "type": "dense_vector"
+            },
+            "summary_embedding_768": {
+              "dims": 768,
+              "index": true,
+              "similarity": "cosine",
+              "type": "dense_vector"
+            },
+            "topic_name": {
+              "analyzer": "cjk",
+              "fields": {
+                "literal": {
+                  "type": "wildcard"
+                }
+              },
+              "type": "text"
+            },
+            "topic_scope": {
+              "analyzer": "cjk",
+              "fields": {
+                "literal": {
+                  "type": "wildcard"
+                }
+              },
+              "type": "text"
+            },
+            "updated_at": {
+              "type": "date"
+            }
+          }
+        },
+        "name": "scene_community",
+        "schema_version": 2,
+        "settings": {
+          "number_of_shards": 5
+        }
+      },
+      "SceneSummary": {
+        "alias": "scene_summary_current",
+        "generation": 2,
+        "mappings": {
+          "dynamic_templates": [
+            {
+              "strings_as_keywords": {
+                "mapping": {
+                  "ignore_above": 8191,
+                  "type": "keyword"
+                },
+                "match_mapping_type": "string"
+              }
+            }
+          ],
+          "properties": {
+            "close_reason": {
+              "type": "keyword"
+            },
+            "community_category_l1": {
+              "type": "keyword"
+            },
+            "community_eligibility": {
+              "type": "keyword"
+            },
+            "community_status": {
+              "type": "keyword"
+            },
+            "config_id": {
+              "type": "keyword"
+            },
+            "content": {
+              "analyzer": "cjk",
+              "fields": {
+                "literal": {
+                  "type": "wildcard"
+                }
+              },
+              "type": "text"
+            },
+            "conversation_id": {
+              "type": "keyword"
+            },
+            "created_at": {
+              "type": "date"
+            },
+            "end_message_id": {
+              "type": "keyword"
+            },
+            "end_user_id": {
+              "type": "keyword"
+            },
+            "ended_at": {
+              "type": "date"
+            },
+            "id": {
+              "type": "keyword"
+            },
+            "scene_community_id": {
+              "type": "keyword"
+            },
+            "source_message_ids": {
+              "type": "keyword"
+            },
+            "start_message_id": {
+              "type": "keyword"
+            },
+            "started_at": {
+              "type": "date"
+            },
+            "summary_embedding": {
+              "dims": 1024,
+              "index": true,
+              "similarity": "cosine",
+              "type": "dense_vector"
+            },
+            "summary_embedding_1536": {
+              "dims": 1536,
+              "index": true,
+              "similarity": "cosine",
+              "type": "dense_vector"
+            },
+            "summary_embedding_2048": {
+              "dims": 2048,
+              "index": true,
+              "similarity": "cosine",
+              "type": "dense_vector"
+            },
+            "summary_embedding_3072": {
+              "dims": 3072,
+              "index": true,
+              "similarity": "cosine",
+              "type": "dense_vector"
+            },
+            "summary_embedding_4096": {
+              "dims": 4096,
+              "index": true,
+              "similarity": "cosine",
+              "type": "dense_vector"
+            },
+            "summary_embedding_768": {
+              "dims": 768,
+              "index": true,
+              "similarity": "cosine",
+              "type": "dense_vector"
+            },
+            "topic_scope": {
+              "analyzer": "cjk",
+              "type": "text"
+            },
+            "turn_count": {
+              "type": "long"
+            },
+            "updated_at": {
+              "type": "date"
+            }
+          }
+        },
+        "name": "scene_summary",
+        "schema_version": 4,
+        "settings": {
+          "number_of_shards": 5
+        }
+      },
+      "Statement": {
+        "alias": "statement_current",
+        "generation": 1,
+        "mappings": {
+          "dynamic_templates": [
+            {
+              "strings_as_keywords": {
+                "mapping": {
+                  "ignore_above": 8191,
+                  "type": "keyword"
+                },
+                "match_mapping_type": "string"
+              }
+            }
+          ],
+          "properties": {
+            "access_count": {
+              "type": "long"
+            },
+            "access_history": {
+              "type": "keyword"
+            },
+            "chunk_id": {
+              "type": "keyword"
+            },
+            "created_at": {
+              "type": "date"
+            },
+            "delete_at": {
+              "type": "date"
+            },
+            "dialog_at": {
+              "type": "date"
+            },
+            "emotion_intensity": {
+              "type": "float"
+            },
+            "emotion_keywords": {
+              "type": "keyword"
+            },
+            "emotion_type": {
+              "type": "keyword"
+            },
+            "end_user_id": {
+              "type": "keyword"
+            },
+            "has_unsolved_reference": {
+              "type": "boolean"
+            },
+            "id": {
+              "type": "keyword"
+            },
+            "importance_score": {
+              "type": "float"
+            },
+            "invalid_at": {
+              "type": "date"
+            },
+            "is_permanent": {
+              "type": "boolean"
+            },
+            "run_id": {
+              "type": "keyword"
+            },
+            "speaker": {
+              "type": "keyword"
+            },
+            "statement": {
+              "analyzer": "cjk",
+              "type": "text"
+            },
+            "statement_embedding": {
+              "dims": 1024,
+              "index": true,
+              "similarity": "cosine",
+              "type": "dense_vector"
+            },
+            "statement_embedding_1536": {
+              "dims": 1536,
+              "index": true,
+              "similarity": "cosine",
+              "type": "dense_vector"
+            },
+            "statement_embedding_2048": {
+              "dims": 2048,
+              "index": true,
+              "similarity": "cosine",
+              "type": "dense_vector"
+            },
+            "statement_embedding_3072": {
+              "dims": 3072,
+              "index": true,
+              "similarity": "cosine",
+              "type": "dense_vector"
+            },
+            "statement_embedding_4096": {
+              "dims": 4096,
+              "index": true,
+              "similarity": "cosine",
+              "type": "dense_vector"
+            },
+            "statement_embedding_768": {
+              "dims": 768,
+              "index": true,
+              "similarity": "cosine",
+              "type": "dense_vector"
+            },
+            "stmt_type": {
+              "type": "keyword"
+            },
+            "temporal_info": {
+              "type": "text"
+            },
+            "topology_score": {
+              "type": "float"
+            },
+            "valid_at": {
+              "type": "date"
+            }
+          }
+        },
+        "name": "statement",
+        "schema_version": 3,
+        "settings": {
+          "number_of_shards": 5
+        }
+      },
+      "UserSource": {
+        "alias": "user_source_current",
+        "generation": 1,
+        "mappings": {
+          "dynamic_templates": [
+            {
+              "strings_as_keywords": {
+                "mapping": {
+                  "ignore_above": 8191,
+                  "type": "keyword"
+                },
+                "match_mapping_type": "string"
+              }
+            }
+          ],
+          "properties": {
+            "created_at": {
+              "type": "date"
+            },
+            "end_user_id": {
+              "type": "keyword"
+            },
+            "id": {
+              "type": "keyword"
+            },
+            "message_seq": {
+              "type": "long"
+            },
+            "original_text": {
+              "type": "text"
+            },
+            "pruned_text": {
+              "type": "text"
+            },
+            "run_id": {
+              "type": "keyword"
+            },
+            "text_embedding": {
+              "dims": 1024,
+              "index": true,
+              "similarity": "cosine",
+              "type": "dense_vector"
+            },
+            "text_embedding_1536": {
+              "dims": 1536,
+              "index": true,
+              "similarity": "cosine",
+              "type": "dense_vector"
+            },
+            "text_embedding_2048": {
+              "dims": 2048,
+              "index": true,
+              "similarity": "cosine",
+              "type": "dense_vector"
+            },
+            "text_embedding_3072": {
+              "dims": 3072,
+              "index": true,
+              "similarity": "cosine",
+              "type": "dense_vector"
+            },
+            "text_embedding_4096": {
+              "dims": 4096,
+              "index": true,
+              "similarity": "cosine",
+              "type": "dense_vector"
+            },
+            "text_embedding_768": {
+              "dims": 768,
+              "index": true,
+              "similarity": "cosine",
+              "type": "dense_vector"
+            }
+          }
+        },
+        "name": "user_source",
+        "schema_version": 3,
+        "settings": {
+          "number_of_shards": 5
+        }
+      }
+    },
+    "index_shard_count": 5,
+    "supported_embedding_dimensions": [
+      768,
+      1024,
+      1536,
+      2048,
+      3072,
+      4096
+    ]
+  },
+  "neo4j": {
+    "managed_definitions": {
+      "composite_constraints": [
+        {
+          "label": "Preference",
+          "name": "preference_business_key_unique",
+          "properties": [
+            "end_user_id",
+            "domain",
+            "subject",
+            "situation_key"
+          ]
+        }
+      ],
+      "composite_indexes": [
+        {
+          "label": "Statement",
+          "name": "user_statement_id",
+          "property": "id"
+        },
+        {
+          "label": "ExtractedEntity",
+          "name": "user_entity_id",
+          "property": "id"
+        },
+        {
+          "label": "Chunk",
+          "name": "user_chunk_id",
+          "property": "id"
+        },
+        {
+          "label": "MemorySummary",
+          "name": "user_summary_id",
+          "property": "id"
+        },
+        {
+          "label": "Perceptual",
+          "name": "user_perceptual_id",
+          "property": "id"
+        },
+        {
+          "label": "Community",
+          "name": "user_community_id",
+          "property": "community_id"
+        },
+        {
+          "label": "UserSource",
+          "name": "user_source_id",
+          "property": "id"
+        },
+        {
+          "label": "Preference",
+          "name": "user_preference_status",
+          "property": "status"
+        },
+        {
+          "label": "SceneSummary",
+          "name": "scene_summary_community_queue",
+          "property": "community_status"
+        },
+        {
+          "label": "SceneSummary",
+          "name": "scene_summary_scene_community_lookup",
+          "property": "scene_community_id"
+        },
+        {
+          "label": "SceneCommunity",
+          "name": "scene_community_category_lookup",
+          "property": "category_l1"
+        }
+      ],
+      "constraints": [
+        {
+          "label": "Dialogue",
+          "name": "dialog_id_unique",
+          "property": "id"
+        },
+        {
+          "label": "Statement",
+          "name": "statement_id_unique",
+          "property": "id"
+        },
+        {
+          "label": "Chunk",
+          "name": "chunk_id_unique",
+          "property": "id"
+        },
+        {
+          "label": "AssistantOriginal",
+          "name": "assistant_original_id_unique",
+          "property": "id"
+        },
+        {
+          "label": "AssistantPruned",
+          "name": "assistant_pruned_id_unique",
+          "property": "id"
+        },
+        {
+          "label": "Conversation",
+          "name": "conversation_id_unique",
+          "property": "id"
+        },
+        {
+          "label": "ExtractedEntity",
+          "name": "entity_id_unique",
+          "property": "id"
+        },
+        {
+          "label": "MemorySummary",
+          "name": "memory_summary_id_unique",
+          "property": "id"
+        },
+        {
+          "label": "SceneSummary",
+          "name": "scene_summary_id_unique",
+          "property": "id"
+        },
+        {
+          "label": "SceneCommunity",
+          "name": "scene_community_id_unique",
+          "property": "id"
+        },
+        {
+          "label": "Perceptual",
+          "name": "perceptual_id_unique",
+          "property": "id"
+        },
+        {
+          "label": "Community",
+          "name": "community_id_unique",
+          "property": "community_id"
+        },
+        {
+          "label": "UserSource",
+          "name": "user_source_id_unique",
+          "property": "id"
+        },
+        {
+          "label": "Preference",
+          "name": "preference_id_unique",
+          "property": "id"
+        }
+      ],
+      "delete_at_indexes": [
+        {
+          "label": "Statement",
+          "name": "user_statement_delete_at",
+          "property": "delete_at"
+        },
+        {
+          "label": "ExtractedEntity",
+          "name": "user_entity_delete_at",
+          "property": "delete_at"
+        },
+        {
+          "label": "Chunk",
+          "name": "user_chunk_delete_at",
+          "property": "delete_at"
+        }
+      ],
+      "fulltext_indexes": [
+        {
+          "analyzer": "cjk",
+          "label": "Statement",
+          "name": "statementsFulltext",
+          "properties": [
+            "statement"
+          ]
+        },
+        {
+          "analyzer": "cjk",
+          "label": "ExtractedEntity",
+          "name": "entitiesFulltext",
+          "properties": [
+            "name",
+            "description",
+            "aliases",
+            "description_summary",
+            "description_timeline"
+          ]
+        },
+        {
+          "analyzer": "cjk",
+          "label": "Chunk",
+          "name": "chunksFulltext",
+          "properties": [
+            "content"
+          ]
+        },
+        {
+          "analyzer": "cjk",
+          "label": "MemorySummary",
+          "name": "summariesFulltext",
+          "properties": [
+            "content"
+          ]
+        },
+        {
+          "analyzer": "cjk",
+          "label": "SceneSummary",
+          "name": "sceneSummariesFulltext",
+          "properties": [
+            "content"
+          ]
+        },
+        {
+          "analyzer": "cjk",
+          "label": "SceneCommunity",
+          "name": "sceneCommunitiesFulltext",
+          "properties": [
+            "topic_name",
+            "topic_scope",
+            "summary"
+          ]
+        },
+        {
+          "analyzer": "cjk",
+          "label": "Community",
+          "name": "communitiesFulltext",
+          "properties": [
+            "name",
+            "summary"
+          ]
+        },
+        {
+          "analyzer": "cjk",
+          "label": "Perceptual",
+          "name": "perceptualFulltext",
+          "properties": [
+            "summary",
+            "topic",
+            "domain",
+            "keywords"
+          ]
+        },
+        {
+          "analyzer": "cjk",
+          "label": "AssistantPruned",
+          "name": "assistantPrunedFulltext",
+          "properties": [
+            "text"
+          ]
+        },
+        {
+          "analyzer": "cjk",
+          "label": "Dialogue",
+          "name": "dialogueFulltext",
+          "properties": [
+            "content"
+          ]
+        }
+      ],
+      "range_indexes": [
+        {
+          "label": "Dialogue",
+          "name": "user_dialogue",
+          "property": "end_user_id"
+        },
+        {
+          "label": "AssistantOriginal",
+          "name": "user_assistant_original",
+          "property": "end_user_id"
+        },
+        {
+          "label": "AssistantPruned",
+          "name": "user_assistant_pruned",
+          "property": "end_user_id"
+        },
+        {
+          "label": "Conversation",
+          "name": "user_conversation",
+          "property": "end_user_id"
+        },
+        {
+          "label": "Statement",
+          "name": "user_statement",
+          "property": "end_user_id"
+        },
+        {
+          "label": "Chunk",
+          "name": "user_chunk",
+          "property": "end_user_id"
+        },
+        {
+          "label": "ExtractedEntity",
+          "name": "user_extracted_entity",
+          "property": "end_user_id"
+        },
+        {
+          "label": "MemorySummary",
+          "name": "user_memorysummary",
+          "property": "end_user_id"
+        },
+        {
+          "label": "Perceptual",
+          "name": "user_perceptual",
+          "property": "end_user_id"
+        },
+        {
+          "label": "SceneSummary",
+          "name": "user_scenesummary",
+          "property": "end_user_id"
+        },
+        {
+          "label": "Preference",
+          "name": "user_preference",
+          "property": "end_user_id"
+        },
+        {
+          "label": "SceneCommunity",
+          "name": "user_scenecommunity",
+          "property": "end_user_id"
+        }
+      ],
+      "vector_indexes": [
+        {
+          "dimensions": 1024,
+          "label": "Statement",
+          "name": "statement_embedding_index",
+          "property": "statement_embedding"
+        },
+        {
+          "dimensions": 1024,
+          "label": "Chunk",
+          "name": "chunk_embedding_index",
+          "property": "chunk_embedding"
+        },
+        {
+          "dimensions": 1024,
+          "label": "ExtractedEntity",
+          "name": "entity_embedding_index",
+          "property": "name_embedding"
+        },
+        {
+          "dimensions": 1024,
+          "label": "MemorySummary",
+          "name": "summary_embedding_index",
+          "property": "summary_embedding"
+        },
+        {
+          "dimensions": 1024,
+          "label": "SceneSummary",
+          "name": "scene_summary_embedding_index",
+          "property": "summary_embedding"
+        },
+        {
+          "dimensions": 1024,
+          "label": "SceneCommunity",
+          "name": "scene_community_embedding_index",
+          "property": "summary_embedding"
+        },
+        {
+          "dimensions": 1024,
+          "label": "Community",
+          "name": "community_summary_embedding_index",
+          "property": "summary_embedding"
+        },
+        {
+          "dimensions": 1024,
+          "label": "Dialogue",
+          "name": "dialogue_embedding_index",
+          "property": "dialog_embedding"
+        },
+        {
+          "dimensions": 1024,
+          "label": "Perceptual",
+          "name": "perceptual_summary_embedding_index",
+          "property": "summary_embedding"
+        },
+        {
+          "dimensions": 1024,
+          "label": "AssistantPruned",
+          "name": "assistant_pruned_embedding_index",
+          "property": "text_embedding"
+        }
+      ]
+    },
+    "read_definitions": {
+      "embedding_fields": {
+        "AssistantPruned": "text_embedding",
+        "Chunk": "chunk_embedding",
+        "Community": "summary_embedding",
+        "Dialogue": "dialog_embedding",
+        "ExtractedEntity": "name_embedding",
+        "MemorySummary": "summary_embedding",
+        "Perceptual": "summary_embedding",
+        "SceneCommunity": "summary_embedding",
+        "SceneSummary": "summary_embedding",
+        "Statement": "statement_embedding",
+        "UserSource": "text_embedding"
+      },
+      "fulltext_indexes": {
+        "AssistantPruned": "assistantPrunedFulltext",
+        "Chunk": "chunksFulltext",
+        "Community": "communitiesFulltext",
+        "Dialogue": "dialogueFulltext",
+        "ExtractedEntity": "entitiesFulltext",
+        "MemorySummary": "summariesFulltext",
+        "Perceptual": "perceptualFulltext",
+        "SceneCommunity": "sceneCommunitiesFulltext",
+        "SceneSummary": "sceneSummariesFulltext",
+        "Statement": "statementsFulltext"
+      }
+    }
+  },
+  "projections": {
+    "default": {
+      "Chunk": [
+        {
+          "field": "id"
+        },
+        {
+          "field": "content"
+        },
+        {
+          "field": "created_at"
+        },
+        {
+          "field": "score"
+        }
+      ],
+      "Community": [
+        {
+          "alias": "id",
+          "field": "community_id"
+        },
+        {
+          "field": "name"
+        },
+        {
+          "alias": null,
+          "field": "summary"
+        },
+        {
+          "field": "core_entities"
+        },
+        {
+          "field": "updated_at"
+        },
+        {
+          "field": "score"
+        }
+      ],
+      "Dialogue": [
+        {
+          "field": "id"
+        },
+        {
+          "field": "content"
+        },
+        {
+          "field": "created_at"
+        },
+        {
+          "field": "score"
+        }
+      ],
+      "ExtractedEntity": [
+        {
+          "field": "id"
+        },
+        {
+          "field": "name"
+        },
+        {
+          "alias": "aliases",
+          "coalesce": [
+            "aliases"
+          ],
+          "default": []
+        },
+        {
+          "field": "description"
+        },
+        {
+          "field": "description_summary"
+        },
+        {
+          "field": "event_timeline"
+        },
+        {
+          "field": "created_at"
+        },
+        {
+          "field": "score"
+        }
+      ],
+      "MemorySummary": [
+        {
+          "field": "id"
+        },
+        {
+          "field": "name"
+        },
+        {
+          "field": "content"
+        },
+        {
+          "field": "created_at"
+        },
+        {
+          "field": "chunk_ids"
+        },
+        {
+          "field": "score"
+        }
+      ],
+      "Perceptual": [
+        {
+          "field": "id"
+        },
+        {
+          "field": "perceptual_type"
+        },
+        {
+          "field": "file_path"
+        },
+        {
+          "field": "file_name"
+        },
+        {
+          "field": "file_ext"
+        },
+        {
+          "field": "summary"
+        },
+        {
+          "field": "keywords"
+        },
+        {
+          "field": "topic"
+        },
+        {
+          "field": "domain"
+        },
+        {
+          "field": "created_at"
+        },
+        {
+          "field": "file_type"
+        },
+        {
+          "field": "score"
+        }
+      ],
+      "Preference": [
+        {
+          "field": "id"
+        },
+        {
+          "field": "end_user_id"
+        },
+        {
+          "field": "domain"
+        },
+        {
+          "field": "subject"
+        },
+        {
+          "field": "situation_key"
+        },
+        {
+          "field": "mode"
+        },
+        {
+          "field": "preference_text"
+        },
+        {
+          "field": "preference_text_all"
+        },
+        {
+          "field": "status"
+        },
+        {
+          "field": "created_at"
+        },
+        {
+          "field": "updated_at"
+        },
+        {
+          "field": "score"
+        }
+      ],
+      "RagMemory": [
+        {
+          "field": "id"
+        },
+        {
+          "field": "content"
+        },
+        {
+          "field": "role"
+        },
+        {
+          "field": "end_user_id"
+        },
+        {
+          "field": "config_id"
+        },
+        {
+          "field": "dialog_at"
+        },
+        {
+          "field": "source"
+        },
+        {
+          "field": "delete_at"
+        },
+        {
+          "field": "score"
+        }
+      ],
+      "SceneCommunity": [
+        {
+          "field": "id"
+        },
+        {
+          "field": "topic_name"
+        },
+        {
+          "field": "topic_scope"
+        },
+        {
+          "field": "summary"
+        },
+        {
+          "field": "end_user_id"
+        },
+        {
+          "field": "delete_at"
+        },
+        {
+          "field": "score"
+        }
+      ],
+      "SceneSummary": [
+        {
+          "field": "id"
+        },
+        {
+          "field": "topic_scope"
+        },
+        {
+          "field": "content"
+        },
+        {
+          "field": "source_message_ids"
+        },
+        {
+          "field": "started_at"
+        },
+        {
+          "field": "ended_at"
+        },
+        {
+          "field": "turn_count"
+        },
+        {
+          "field": "close_reason"
+        },
+        {
+          "field": "created_at"
+        },
+        {
+          "field": "updated_at"
+        },
+        {
+          "field": "score"
+        },
+        {
+          "field": "end_user_id"
+        },
+        {
+          "field": "delete_at"
+        },
+        {
+          "field": "scene_community_id"
+        },
+        {
+          "field": "community_status"
+        },
+        {
+          "field": "community_eligibility"
+        }
+      ],
+      "Statement": [
+        {
+          "field": "id"
+        },
+        {
+          "field": "statement"
+        },
+        {
+          "field": "created_at"
+        },
+        {
+          "field": "chunk_id"
+        },
+        {
+          "field": "score"
+        }
+      ]
+    }
+  },
+  "routing": {
+    "elastic_only_labels": [
+      "RagMemory"
+    ]
+  },
+  "schema": 1,
+  "source_files": [
+    "api/app/core/memory/storage/enums.py",
+    "api/app/core/memory/storage/provider/elasticsearch/index/definitions.py",
+    "api/app/core/memory/storage/provider/neo4j/index/definitions.py",
+    "api/app/repositories/neo4j/create_indexes.py",
+    "api/app/core/memory/storage/provider/factory.py",
+    "api/app/core/memory/storage/models/projection.py"
+  ]
+}
