@@ -163,6 +163,7 @@ async def create_folder(
             parent_id,
             folder_name,
             principal,
+            max_folder_depth=runtime.settings.kb_file_folder_max_depth,
         )
         data = file_service.file_to_data(folder)
     return _success(
@@ -345,7 +346,10 @@ async def update_file(
     runtime: Annotated[ProcessRuntime, Depends(get_runtime)],
 ) -> SuccessEnvelope[dict[str, Any]]:
     async with runtime.database.async_session() as db:
-        file = await file_service.update_file(db, file_id, update_data, principal)
+        file = await file_service.update_file(
+            db, file_id, update_data, principal,
+            max_folder_depth=runtime.settings.kb_file_folder_max_depth,
+        )
         data = file_service.file_to_data(file)
     return _success(
         request,

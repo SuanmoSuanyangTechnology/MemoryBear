@@ -202,6 +202,13 @@ class Settings:
         min(30000, int(os.getenv("KNOWLEDGE_GRAPH_RETRIEVAL_TIMEOUT_MS", "15000"))),
     )
 
+    KB_KNOWLEDGE_FOLDER_MAX_DEPTH: int = TypeAdapter(
+        Annotated[int, Field(ge=1)]
+    ).validate_python(os.getenv("KB_KNOWLEDGE_FOLDER_MAX_DEPTH", "3"))
+    KB_FILE_FOLDER_MAX_DEPTH: int = TypeAdapter(
+        Annotated[int, Field(ge=1)]
+    ).validate_python(os.getenv("KB_FILE_FOLDER_MAX_DEPTH", "4"))
+
     # Independent knowledge service routing
     ENABLE_MEM_KNOWLEDGE: bool = os.getenv("ENABLE_MEM_KNOWLEDGE", "false").lower() == "true"
     MEM_KNOWLEDGE_BASE_URL: str = os.getenv("MEM_KNOWLEDGE_BASE_URL", "")

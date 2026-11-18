@@ -170,6 +170,9 @@ _DEFINITIONS = {
     ),
     "KB_EXTERNAL_ID_EXISTS": ErrorDefinition(400, False, 5002, "business", {}, "ALREADY_EXISTS"),
     "KB_FEISHU_AUTH_INVALID": ErrorDefinition(200, False, 2001, "business", {}, "INVALID_ARGUMENT"),
+    "KB_FILE_FOLDER_DEPTH_EXCEEDED": ErrorDefinition(
+        400, False, 9254, "business", {}, "INVALID_ARGUMENT"
+    ),
     "KB_FILE_NOT_FOUND": ErrorDefinition(400, False, 4006, "business", {}, "NOT_FOUND"),
     "KB_FILE_STORAGE_KEY_MISSING": ErrorDefinition(
         400, False, 9249, "business", {}, "FAILED_PRECONDITION"
@@ -240,6 +243,12 @@ _DEFINITIONS = {
     "KB_KNOWLEDGE_CREATOR_NOT_FOUND": ErrorDefinition(400, False, 9450, "business", {}, "INTERNAL"),
     "KB_KNOWLEDGE_DOWNLOAD_EMPTY": ErrorDefinition(
         400, False, 9248, "business", {}, "FAILED_PRECONDITION"
+    ),
+    "KB_KNOWLEDGE_FOLDER_DEPTH_EXCEEDED": ErrorDefinition(
+        400, False, 9252, "business", {}, "INVALID_ARGUMENT"
+    ),
+    "KB_KNOWLEDGE_FOLDER_PARENT_INVALID": ErrorDefinition(
+        400, False, 9253, "business", {}, "INVALID_ARGUMENT"
     ),
     "KB_KNOWLEDGE_NAME_EXISTS": ErrorDefinition(
         400, False, 5001, "business", {"knowledge_name": str}, "ALREADY_EXISTS"

@@ -8,6 +8,7 @@ import uuid
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Body, Depends, Query, Request
+from pydantic import WrapValidator
 
 from ...runtime import ProcessRuntime
 from ...services import document as document_service
@@ -15,7 +16,8 @@ from ...services import file as file_service
 from ...services.knowledge_file_storage import KnowledgeFileStorage
 from ...services.knowledge_metadata import KnowledgeMetadataService
 from ...tasks.dispatch import TaskDispatcher
-from ..dependencies import Principal, get_principal, get_runtime
+from ..dependencies import Principal, get_principal, get_runtime, is_manager_request
+from ..query_validation import localized_query_validation
 from ..schemas.common import SERVICE_UNAVAILABLE_RESPONSE, SuccessEnvelope, success
 from ..schemas.document import DocumentCreate, DocumentUpdate
 from ..schemas.knowledge_metadata import (
@@ -65,6 +67,7 @@ async def get_documents(
     desc: Annotated[bool, Query()] = False,
     keywords: Annotated[str | None, Query()] = None,
     document_ids: Annotated[str | None, Query()] = None,
+    include_wiki_count: Annotated[bool, WrapValidator(localized_query_validation)] = False,
 ) -> SuccessEnvelope[dict[str, Any]]:
     async with runtime.database.async_session() as db:
         total, items = await document_service.list_documents(
@@ -78,6 +81,7 @@ async def get_documents(
             desc=desc,
             keywords=keywords,
             document_ids=document_ids,
+            include_wiki_count=include_wiki_count and is_manager_request(request),
         )
     return _success(
         request,

@@ -2,7 +2,7 @@ import asyncio
 import copy
 import datetime
 import os
-from typing import Optional
+from typing import Annotated, Optional
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, status, Query, Body, Request
@@ -121,6 +121,10 @@ async def get_documents(
         db: AsyncSession = Depends(get_async_db),
         current_user: User = Depends(get_current_user_async),
         request: Request = None,
+        include_wiki_count: Annotated[bool, Query(
+            description="When true, include wiki_count (the number of associated Wiki pages) for each document. "
+                        "When false or omitted, omit wiki_count."
+        )] = False,
 ):
     """
     Paged query document list
@@ -216,7 +220,11 @@ async def get_documents(
             "has_next": True if page * pagesize < total else False
         }
     }
-    return success(data=jsonable_encoder(result), msg="Query of document list succeeded")
+    data = jsonable_encoder(result)
+    if include_wiki_count:
+        for item in data["items"]:
+            item["wiki_count"] = 0
+    return success(data=data, msg="Query of document list succeeded")
 
 
 @router.post("/document", response_model=ApiResponse)

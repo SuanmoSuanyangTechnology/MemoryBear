@@ -33,6 +33,7 @@ from ..rag.knowledge_graph import (
 )
 from ..rag.parser_config import normalize_document_parser_config
 from ..repositories import document as document_repository
+from ..repositories.wiki import read as wiki_read
 from ..tasks.dispatch import TaskDispatcher
 from ..utils.datetime_utils import to_iso_z, utcnow, utcnow_naive
 from . import file as file_service
@@ -98,6 +99,7 @@ async def list_documents(
     desc: bool,
     keywords: str | None,
     document_ids: str | None,
+    include_wiki_count: bool = False,
 ) -> tuple[int, list[dict[str, Any]]]:
     if await knowledge_service.get_knowledge(db, kb_id, principal) is None:
         raise KnowledgeError.from_code("KB_KNOWLEDGE_NOT_FOUND")
@@ -123,7 +125,20 @@ async def list_documents(
         orderby,
         desc,
     )
-    return total, [document_to_data(document) for document in documents]
+    items = [document_to_data(document) for document in documents]
+    if include_wiki_count and documents:
+        counts = await wiki_read.count_pages_by_document(
+            db,
+            {
+                "kb_id": kb_id,
+                "tenant_id": principal.tenant_id,
+                "workspace_id": principal.workspace_id,
+            },
+            [document.id for document in documents],
+        )
+        for document, item in zip(documents, items, strict=True):
+            item["wiki_count"] = counts.get(document.id, 0)
+    return total, items
 
 
 async def create_document(
