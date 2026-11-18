@@ -488,5 +488,14 @@ export const knowledgeBase = {
       hybridIsHasGraph: 'Enable graph retrieval',
       yes: 'Yes',
       no: 'No',
+      wikiColumn: 'Wiki',
+      documentWiki: {
+        ready: 'Organized · {{count}}',
+        pending: 'Not organized',
+        processing: 'Organizing',
+        view: 'View {{count}} related Wiki pages',
+        subtitle: '{{name}} · {{count}} Wiki pages',
+        empty: 'No Wiki pages generated yet',
+      },
     },
 }

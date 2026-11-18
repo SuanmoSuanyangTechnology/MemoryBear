@@ -52,6 +52,7 @@ const KnowledgeListModal = forwardRef<KnowledgeModalRef, KnowledgeModalProps>(({
       pagesize: 50,
       orderby: 'created_at',
       desc: true,
+      status: 1
     })
       .then(res => {
         const items = (res as { items: KnowledgeBaseListItem[] }).items || []

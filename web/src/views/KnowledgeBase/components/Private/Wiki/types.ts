@@ -137,6 +137,8 @@ export interface WikiPagesQuery {
    * 默认 50，上限 200。
    */
   pagesize?: number;
+  /** 按来源文档筛选，用于文件列表的「关联 Wiki」详情 */
+  document_id?: string;
 }
 export interface FolderPathItem {
   id: string;

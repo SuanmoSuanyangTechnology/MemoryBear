@@ -90,6 +90,35 @@ export const getFaqList = (kb_id: string, data: FaqQuery) => {
   return request.get<FaqListResponse>(getFaqListUrl(kb_id), data)
 };
 
+// 从响应头解析下载文件名，优先使用 RFC 5987 的 filename*
+const parseFaqExportFileName = (contentDisposition: unknown) => {
+  const fallback = 'FAQ.csv';
+  if (typeof contentDisposition !== 'string' || !contentDisposition) return fallback;
+  const encoded = contentDisposition.match(/filename\*=UTF-8''([^;]+)/i)?.[1];
+  if (encoded) {
+    try {
+      return decodeURIComponent(encoded.trim());
+    } catch {
+      return fallback;
+    }
+  }
+  return contentDisposition.match(/filename="?([^";]+)"?/i)?.[1]?.trim() || fallback;
+};
+
+// FAQ 全量导出：流式下载带 BOM 的 UTF-8 CSV，文件名由响应头提供
+export const exportAllFaq = async (kb_id: string) => {
+  const response = await request.getBlobResponse<Blob>(`/knowledges/${kb_id}/faqs/export`);
+  const blobUrl = URL.createObjectURL(response.data);
+  const link = document.createElement('a');
+  link.href = blobUrl;
+  link.style.display = 'none';
+  link.setAttribute('download', parseFaqExportFileName(response.headers['content-disposition']));
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(blobUrl);
+};
+
 // Create an FAQ manually
 export const createFaq = (kb_id: string, data: FaqForm) => {
   return request.post(`/knowledges/${kb_id}/faqs`, data)
