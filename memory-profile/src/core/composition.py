@@ -61,6 +61,8 @@ async def flush_read_side_effects() -> None:
             "read side effects: display-card drain exceeded %.1fs; dropping the rest",
             DISPLAY_SHUTDOWN_TIMEOUT_SECONDS,
         )
+    except Exception:  # noqa: BLE001 - shutdown must still release the runtime
+        logger.warning("read side effects: display-card drain failed", exc_info=True)
 
 
 def _build_end_users(runtime: ProfileRuntime) -> Any:
