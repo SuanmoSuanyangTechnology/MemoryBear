@@ -14,6 +14,7 @@ import time
 import uuid
 from typing import Any
 
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from ..config import AppServiceSettings
@@ -417,6 +418,8 @@ class ExternalCatalogService:
             workspace_id = self._resolve_install_workspace(
                 tenant_id, request.workspace_id
             )
+            if request.resource_type == "app" and workspace_id is None:
+                self._raise_missing_workspace(tenant_id)
             bundle = _run(
                 self.gateway.download_bundle(
                     request.resource_id,
@@ -537,19 +540,61 @@ class ExternalCatalogService:
             registration_synced=synced,
         )
 
+    def _raise_missing_workspace(self, tenant_id: uuid.UUID) -> None:
+        """app 安装缺目标空间：区分「没有空间」与「有空间没选」（契约 §3.4）。"""
+
+        available = self.db.scalar(
+            select(func.count())
+            .select_from(Workspace)
+            .where(
+                Workspace.tenant_id == tenant_id,
+                Workspace.is_active.is_(True),
+            )
+        )
+        if not available:
+            raise ExternalCatalogError(
+                BizCode.INVALID_PARAMETER,
+                "当前企业还没有空间，请先创建空间后再添加",
+                data={"reason": "NO_WORKSPACE"},
+            )
+        raise ExternalCatalogError(
+            BizCode.INVALID_PARAMETER,
+            "请选择要添加到的空间",
+            data={"reason": "WORKSPACE_REQUIRED"},
+        )
+
     def _resolve_install_workspace(
         self, tenant_id: uuid.UUID, workspace_id: str | None
     ) -> uuid.UUID | None:
-        if workspace_id is None:
+        raw = (workspace_id or "").strip()
+        if not raw:
             return None
-        workspace = self.db.get(Workspace, uuid.UUID(workspace_id))
+        try:
+            workspace_uuid = uuid.UUID(raw)
+        except ValueError as error:
+            raise ExternalCatalogError(
+                BizCode.INVALID_PARAMETER,
+                "工作空间 ID 格式无效",
+                data={"reason": "WORKSPACE_ID_INVALID"},
+            ) from error
+        workspace = self.db.get(Workspace, workspace_uuid)
         if workspace is None:
             raise ExternalCatalogError(
-                BizCode.WORKSPACE_NOT_FOUND, "工作空间不存在"
+                BizCode.WORKSPACE_NOT_FOUND,
+                "工作空间不存在",
+                data={"reason": "WORKSPACE_NOT_FOUND"},
             )
         if workspace.tenant_id != tenant_id:
             raise ExternalCatalogError(
-                BizCode.WORKSPACE_ACCESS_DENIED, "无权访问该工作空间"
+                BizCode.WORKSPACE_ACCESS_DENIED,
+                "无权访问该工作空间",
+                data={"reason": "WORKSPACE_ACCESS_DENIED"},
+            )
+        if workspace.is_active is False:
+            raise ExternalCatalogError(
+                BizCode.WORKSPACE_ACCESS_DENIED,
+                "工作空间已被禁用",
+                data={"reason": "WORKSPACE_DISABLED"},
             )
         return workspace.id
 
