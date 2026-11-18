@@ -145,7 +145,7 @@ class MemoryConfigHandler:
         self, principal: MemoryPrincipal, request: Request
     ) -> ApiResponse[list[SimpleSceneData]] | JSONResponse:
         try:
-            data = await self.query.simple_scenes(principal.tenant_id)
+            data = await self.query.simple_scenes(principal.workspace_id)
         except Exception:
             logger.exception("list_simple_scenes failed")
             return error_response(

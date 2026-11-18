@@ -91,10 +91,10 @@ class MemoryConfigQueryService:
         self.workspaces = WorkspaceRepository(postgres)
         self.scenes = SceneRepository(postgres)
 
-    async def simple_scenes(self, tenant_id: UUID) -> list[SimpleSceneData]:
-        rows = await self.scenes.list_visible_simple_scenes(tenant_id)
+    async def simple_scenes(self, workspace_id: UUID) -> list[SimpleSceneData]:
+        rows = await self.scenes.list_visible_simple_scenes(workspace_id)
         return [
-            SimpleSceneData(scene_id=row["scene_type_id"], scene_name=row["scene_name"])
+            SimpleSceneData(scene_id=row["scene_id"], scene_name=row["scene_name"])
             for row in rows
         ]
 
