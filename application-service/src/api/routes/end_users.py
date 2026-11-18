@@ -22,7 +22,7 @@ from sqlalchemy.orm import Session
 
 from ...errors import BizCode, BusinessException, InternalServerError
 from ...infrastructure.upstream import MonolithUpstream, UpstreamUnavailableError
-from ...memory.metadata_models import LEGACY_METADATA_FIELDS, project_display_profile
+from ...memory.metadata_models import project_display_profile
 from ...quota.alerts import report_quota_change_sync
 from ...quota.usage import require_end_user_quota
 from ...repositories import cross_domain_read
@@ -155,19 +155,16 @@ def get_end_user_info(
         )
 
     # Top level: other_name is always returned, aliases only when it has
-    # values. meta_data: truthy legacy fields kept as-is plus the display
-    # projection of the 13 shared level-2 keys (at most 10 entries per key).
+    # values. meta_data contains the display projection of the 13 shared
+    # level-2 keys (at most 10 entries per key) plus domain-specific info.
     raw_meta = info_record.meta_data if isinstance(info_record.meta_data, dict) else {}
 
     selected_top: dict[str, Any] = {"other_name": info_record.other_name}
     if info_record.aliases:
         selected_top["aliases"] = info_record.aliases
 
-    filtered_meta: dict[str, Any] = {
-        field: raw_meta[field] for field in LEGACY_METADATA_FIELDS if raw_meta.get(field)
-    }
-    filtered_meta.update(
-        project_display_profile(raw_meta, limit_per_key=END_USER_INFO_PROFILE_KEY_LIMIT)
+    filtered_meta = project_display_profile(
+        raw_meta, limit_per_key=END_USER_INFO_PROFILE_KEY_LIMIT
     )
     # The domain projection needs ontology configuration only the monolith can
     # query, so it comes back already assembled (parsing, grouping, dedupe and
