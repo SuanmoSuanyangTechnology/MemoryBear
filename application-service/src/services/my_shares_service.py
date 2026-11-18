@@ -175,13 +175,27 @@ class MySharesService:
             if sync is None:
                 continue
 
-            market_version = releases.get(sync.release_id) or pinned
+            market_version = releases.get(sync.release_id)
+            if market_version is None:
+                continue
             state = market_state.get(str(app.id)) or dict(_UNKNOWN_MARKET_ROW)
-            status = self._market_row_status(sync, state.get("status"))
+            # The status request can already see a newer submission. Match the
+            # local row by publication ID before enabling actions such as withdraw.
+            reviews = state.get("submission_statuses", {})
+            if reviews:
+                review_status = reviews.get(str(sync.market_submission_id))
+            elif state.get("latest_version") == (market_version.version_name or "").strip():
+                review_status = state.get("status")
+                if review_status == "pending" and state.get("pending_publication_id") != sync.market_submission_id:
+                    review_status = None
+            else:
+                review_status = None
+            status = self._market_row_status(sync, review_status)
             rows.append({
                 **legacy,
                 # 列表展示与重新上架共用 version；尚无公开版本时保持空值。
                 "version": state.get("current_version"),
+                "review_version": market_version.version_name,
                 "version_number": market_version.version,
                 # 本地发布序号与 release_id 跟随最近一次投稿，供查询投稿记录。
                 "release_id": str(sync.release_id),
@@ -408,9 +422,20 @@ class MySharesService:
                 status = UNKNOWN
             listing_status = _record_get(record, "listing_status")
             delist_actor = _record_get(record, "delist_actor")
+            submission_statuses = {}
+            # Market events are newest first. Ignore listing events and the
+            # synthetic submitted event when resolving a publication's status.
+            for event in _record_get(record, "events") or []:
+                publication_id = _record_get(event, "publication_id")
+                event_type = _record_get(event, "event_type")
+                if publication_id and event_type in _MARKET_STATUSES:
+                    submission_statuses.setdefault(str(publication_id), event_type)
             folded[str(key)] = {
                 "status": status,
+                "submission_statuses": submission_statuses,
+                "pending_publication_id": _record_get(record, "pending_publication_id"),
                 "current_version": _record_get(record, "current_version"),
+                "latest_version": _record_get(record, "latest_version"),
                 "listing_status": listing_status,
                 "delist_actor": delist_actor,
                 "can_delist": _can_delist(record, listing_status),
