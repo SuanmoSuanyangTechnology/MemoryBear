@@ -54,31 +54,37 @@ class BaseClient(ABC):
     async def close(self):
         pass
 
-    @abstractmethod
+    # The write surface stays declared (the storage router and the jobs side share
+    # this interface) but is not abstract: memory-profile is a read-only consumer,
+    # node/edge writes are executed by the memory-jobs service.
     async def save_node(
             self,
             label: MemoryNodeLabel,
             data: dict,
     ) -> StorageWriteResult:
-        pass
+        raise NotImplementedError(
+            f"{type(self).__name__} is read-only; node writes run in memory-jobs"
+        )
 
-    @abstractmethod
     async def update_node(
             self,
             label: MemoryNodeLabel,
             data: dict,
             node_filter: NodeFilter,
     ) -> StorageWriteResult:
-        pass
+        raise NotImplementedError(
+            f"{type(self).__name__} is read-only; node writes run in memory-jobs"
+        )
 
-    @abstractmethod
     async def delete_node(
             self,
             label: MemoryNodeLabel,
             node_filter: NodeFilter,
             draft: bool = False,
     ) -> StorageWriteResult:
-        pass
+        raise NotImplementedError(
+            f"{type(self).__name__} is read-only; node writes run in memory-jobs"
+        )
 
     @abstractmethod
     async def get_node(
