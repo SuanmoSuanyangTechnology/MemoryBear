@@ -149,6 +149,7 @@ dependencies = [
     { name = "langchain-openai" },
     { name = "langgraph" },
     { name = "langid" },
+    { name = "mem-storage-core" },
     { name = "memorybear-grpc" },
     { name = "olefile" },
     { name = "openpyxl" },
@@ -210,6 +211,7 @@ requires-dist = [
     { name = "langchain-openai", specifier = ">=1.1,<2" },
     { name = "langgraph", specifier = ">=1.0,<2" },
     { name = "langid", specifier = ">=1.1.6,<2" },
+    { name = "mem-storage-core", directory = "../packages/storage-core" },
     { name = "memorybear-grpc", directory = "../packages/memorybear-grpc" },
     { name = "olefile", specifier = ">=0.47,<1" },
     { name = "openpyxl", specifier = ">=3.1.5,<4" },
@@ -1164,6 +1166,25 @@ source = { registry = "https://mirrors.cloud.tencent.com/pypi/simple" }
 sdist = { url = "https://mirrors.cloud.tencent.com/pypi/packages/d6/54/cfe61301667036ec958cb99bd3efefba235e65cdeb9c84d24a8293ba1d90/mdurl-0.1.2.tar.gz", hash = "sha256:bb413d29f5eea38f31dd4754dd7377d4465116fb207585f97bf925588687c1ba" }
 wheels = [
     { url = "https://mirrors.cloud.tencent.com/pypi/packages/b3/38/89ba8ad64ae25be8de66a6d463314cf1eb366222074cfda9ee839c56a4b4/mdurl-0.1.2-py3-none-any.whl", hash = "sha256:84008a41e51615a49fc9966191ff91509e3c40b939176e643fd50a5c2196b8f8" },
+]
+
+[[package]]
+name = "mem-storage-core"
+version = "0.1.0"
+source = { directory = "../packages/storage-core" }
+dependencies = [
+    { name = "aiofiles" },
+    { name = "boto3" },
+    { name = "oss2" },
+    { name = "pydantic" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "aiofiles", specifier = ">=23,<26" },
+    { name = "boto3", specifier = ">=1.35,<2" },
+    { name = "oss2", specifier = ">=2.19,<3" },
+    { name = "pydantic", specifier = ">=2.12,<3" },
 ]
 
 [[package]]

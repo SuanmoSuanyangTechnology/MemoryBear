@@ -27,6 +27,7 @@ dependencies = [
     "langchain-openai>=1.1,<2",
     "langgraph>=1.0,<2",
     "langid>=1.1.6,<2",
+    "mem-storage-core",
     "memorybear-grpc",
     "olefile>=0.47,<1",
     "openpyxl>=3.1.5,<4",
@@ -71,6 +72,7 @@ dev = [
 
 [tool.uv.sources]
 auth-sdk = { path = "../packages/auth-sdk" }
+mem-storage-core = { path = "../packages/storage-core" }
 memorybear-grpc = { path = "../packages/memorybear-grpc" }
 redbear-model = { path = "../packages/redbear-model" }
 error-core = { path = "../packages/error-core" }

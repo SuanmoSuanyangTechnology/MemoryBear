@@ -43,13 +43,17 @@ import asyncio
 import hashlib
 import io
 import logging
-import posixpath
 import threading
 import uuid
 import zipfile
 from collections.abc import Callable, Coroutine
 from typing import Any
 
+from mem_storage.object_keys import (
+    ObjectKeyInvalid,
+    ObjectKeyMissing,
+    normalise_object_key,
+)
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -85,27 +89,24 @@ DependencyFetcher = Callable[[str, str, str], dict[str, Any]]
 # 版本文件包接口接进来；没有注入时（社区构建）退回直读共享桶的老路径。
 DependencyFilesFetcher = Callable[[str, str, str, str], bytes]
 
-# 市场 zip 的成员名 = 规范化后的 `object_key`（`market-service/src/storage.py`
-# 的 `normalise_object_key`）。两个服务各持一份实现，规则必须逐字一致：
-# 反斜杠转 `/`、去掉前导 `/`、`posixpath.normpath` 后不得越界。
+# 市场 zip 的成员名 = 规范化后的 `object_key`；规则实现在
+# `mem_storage.object_keys`，与 market-service 共用，避免两份实现漂移。
 _FILE_SOURCE_CONTEXT_DEPENDENCY = "dependency"
 
 
 def _zip_member_name(object_key: Any) -> str:
-    raw = str(object_key or "")
-    if not raw or any(ord(char) < 0x20 for char in raw):
+    try:
+        return normalise_object_key(object_key)
+    except ObjectKeyMissing as error:
         raise BusinessException(
             "技能文件缺少 object_key", BizCode.EXTERNAL_CATALOG_INVALID,
             data={"reason": "SKILL_FILES_MISSING"},
-        )
-    key = raw.replace("\\", "/").lstrip("/")
-    normalised = posixpath.normpath(key)
-    if normalised in (".", "") or normalised.startswith("../") or normalised == "..":
+        ) from error
+    except ObjectKeyInvalid as error:
         raise BusinessException(
             "技能文件的 object_key 非法", BizCode.EXTERNAL_CATALOG_INVALID,
             data={"reason": "SKILL_FILES_INVALID"},
-        )
-    return normalised
+        ) from error
 
 
 def _run_async(coro_factory: Callable[[], Coroutine]):
