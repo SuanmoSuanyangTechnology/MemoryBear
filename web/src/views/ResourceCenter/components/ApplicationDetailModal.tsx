@@ -166,7 +166,7 @@ const ApplicationDetailModal = forwardRef<ApplicationDetailModalRef, Application
                         <Flex align="center" gap={8} wrap key={tool.name}>
                           <ToolIcon iconUrl={tool.icon as string} />
                           {tool.name}
-                          <Tag>{tool.tool_type}</Tag>
+                          <Tag>{t(`tool.${tool.tool_type}`)}</Tag>
                         </Flex>
                       ))
                       : <Empty size={88} />
