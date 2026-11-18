@@ -7,6 +7,7 @@ import uuid
 
 from sqlalchemy import select
 from sqlalchemy.exc import InterfaceError, OperationalError
+from sqlalchemy.exc import TimeoutError as DatabaseTimeoutError
 
 from ..errors import KnowledgeError
 from ..models.owned import Knowledge
@@ -248,7 +249,7 @@ async def execute(runtime, task_id):
     except jobs.ImportModelChanged:
         await db_call(runtime, jobs.release_for_reindex, task_id, token)
         return True
-    except (InterfaceError, OperationalError):
+    except (InterfaceError, OperationalError, DatabaseTimeoutError):
         logger.exception("FAQ 导入数据库暂不可用 task_id=%s stage=execute", task_id)
         await db_call(runtime, jobs.release_after_db_error, task_id, token)
         raise

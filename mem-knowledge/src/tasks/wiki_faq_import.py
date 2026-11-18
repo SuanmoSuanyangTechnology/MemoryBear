@@ -1,6 +1,7 @@
 """FAQ 导入 Worker，业务结果从 PG 任务记录读取。"""
 
 from sqlalchemy.exc import InterfaceError, OperationalError
+from sqlalchemy.exc import TimeoutError as DatabaseTimeoutError
 
 from ..runtime import get_worker_runtime
 from .celery_app import celery_app
@@ -38,7 +39,7 @@ def import_faqs(self, task_id):
                     "failed": BusinessOutcome.FAILURE,
                 }.get(job["status"] if job else "", BusinessOutcome.SKIPPED)
                 run.finish(outcome)
-        except (InterfaceError, OperationalError, ImportCleanupRetry) as exc:
+        except (InterfaceError, OperationalError, DatabaseTimeoutError, ImportCleanupRetry) as exc:
             run.finish(BusinessOutcome.RETRY)
             raise self.retry(exc=exc, countdown=30) from exc
     if busy:
