@@ -323,15 +323,6 @@ class MemoryProfileServiceClient:
                     )
                 async for chunk in response.aiter_bytes():
                     yield chunk
-        except httpx.TimeoutException as exc:
-            raise MemoryProfileTimeoutError(
-                "Memory profile stream timed out"
-            ) from exc
-        except httpx.RequestError as exc:
-            raise MemoryProfileUnavailableError(
-                "Memory profile stream is unavailable"
-            ) from exc
-        finally:
             logger.info(
                 "memory_profile_stream_completed method=%s path=%s "
                 "elapsed_ms=%.2f trace_id=%s",
@@ -340,6 +331,14 @@ class MemoryProfileServiceClient:
                 (time.perf_counter() - started_at) * 1000,
                 trace_id,
             )
+        except httpx.TimeoutException as exc:
+            raise MemoryProfileTimeoutError(
+                "Memory profile stream timed out"
+            ) from exc
+        except httpx.RequestError as exc:
+            raise MemoryProfileUnavailableError(
+                "Memory profile stream is unavailable"
+            ) from exc
 
     async def ready(self) -> bool:
         try:
