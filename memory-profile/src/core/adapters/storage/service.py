@@ -37,7 +37,6 @@ from src.core.adapters.storage.filters import (
     compile_neo4j_filter,
 )
 from src.core.adapters.storage.indexes import (
-    ELASTIC_ONLY_LABELS,
     ES_FULLTEXT_FIELDS,
     ES_INDEX_ALIAS,
     NEO4J_EMBEDDING_FIELD,
@@ -54,6 +53,7 @@ from src.core.adapters.storage.projection import (
     projection_for,
     score_output_names,
 )
+from src.storage.provider.factory import BackendFactory
 
 logger = logging.getLogger(__name__)
 
@@ -728,7 +728,7 @@ class ReadStorage:
         return self._read_backend
 
     def _client_for(self, label: str) -> Neo4jReadClient | ElasticReadClient:
-        if label in ELASTIC_ONLY_LABELS:
+        if label in BackendFactory.ELASTIC_ONLY_LABELS:
             return self._elastic
         return self._elastic if self._read_backend == "ELASTIC" else self._neo4j
 
