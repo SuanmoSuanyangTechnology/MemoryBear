@@ -2037,6 +2037,7 @@ class ToolService:
             # 检查工具是否有test_connection方法
             if hasattr(tool_instance, 'test_connection'):
                 result = await tool_instance.test_connection()
+                self._persist_builtin_test_status(config, result)
                 return result
             else:
                 # 检查是否需要配置
@@ -2052,4 +2053,27 @@ class ToolService:
                     
         except Exception as e:
             logger.error(f"测试内置工具失败: {config.id}, 错误: {e}")
+            self._persist_builtin_test_status(
+                config, {"success": False, "message": str(e)}
+            )
             return {"success": False, "message": f"测试失败: {str(e)}"}
+
+    def _persist_builtin_test_status(
+        self, config: ToolConfig, result: dict[str, Any]
+    ) -> None:
+        """将内置工具连接测试结果写入状态（仅限需要配置的工具）"""
+        try:
+            builtin_config = self.builtin_repo.find_by_tool_id(self.db, config.id)
+            if not builtin_config or not builtin_config.requires_config:
+                return
+            if result.get("success"):
+                config.status = (
+                    ToolStatus.AVAILABLE.value
+                    if builtin_config.is_enabled
+                    else ToolStatus.CONFIGURED_DISABLED.value
+                )
+            else:
+                config.status = ToolStatus.ERROR.value
+            self.db.commit()
+        except SQLAlchemyError as e:
+            logger.error(f"更新内置工具状态失败: {config.id}, 错误: {e}")
