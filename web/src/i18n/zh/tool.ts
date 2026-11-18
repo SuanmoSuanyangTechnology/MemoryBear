@@ -3,7 +3,7 @@ export const tool = {
   parameterRequired: '必填',
   parameterOptional: '选填',
   detailLoadFailed: '工具详情加载失败',
-  detailMethodCount: '{{count}}个工具',
+  detailMethodCount: '{{count}} 个工具',
   mcp: 'MCP',
   mcpTitle: 'MCP 服务',
   mcpDesc: '连接并管理 MCP 服务器，让你的应用可以访问外部工具与服务。',

@@ -6,6 +6,7 @@ import { nodeRegisterLibrary } from '../constant/nodeShapes';
 import { edgeAttrs } from '../constant/edges';
 import { nodeLibrary } from '../constant/nodeLibrary';
 import { leftPortGroup } from '../constant/ports';
+import { notesConfig } from '../constant/theme';
 
 const previewRightPortGroup = {
   ...leftPortGroup,
@@ -61,7 +62,8 @@ export const useWorkflowPreview = (nodes: WorkflowPreviewNode[], edges: Workflow
     graphRef.current = graph;
     nodes.forEach(node => {
       const layout = graphNodeLibrary[node.type] ?? graphNodeLibrary.default;
-      const definition = nodeLibrary.flatMap(group => group.nodes).find(item => item.type === node.type);
+      const definition = nodeLibrary.flatMap(group => group.nodes).find(item => item.type === node.type)
+        ?? (node.type === 'notes' ? notesConfig : undefined);
       const config = Object.fromEntries(
         Object.entries(definition?.config ?? {}).map(([key, field]) => [key, {
           ...field,
