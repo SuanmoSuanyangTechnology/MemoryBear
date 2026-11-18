@@ -43,6 +43,36 @@ class ErrorDefinition:
 
 # 存量入口保留旧 HTTP 与重试策略；公开业务码单独映射，不改变任务结果原因键。
 _DEFINITIONS = {
+    "KB_SHARE_SOURCE_NOT_FOUND": ErrorDefinition(
+        404, False, 9470, "business", {}, "NOT_FOUND"
+    ),
+    "KB_SHARE_TARGET_NOT_FOUND": ErrorDefinition(
+        404, False, 9471, "business", {}, "NOT_FOUND"
+    ),
+    "KB_SHARE_CROSS_TENANT": ErrorDefinition(
+        403, False, 9472, "business", {}, "PERMISSION_DENIED"
+    ),
+    "KB_SHARE_SOURCE_NOT_ALLOWED": ErrorDefinition(
+        400, False, 9473, "business", {}, "INVALID_ARGUMENT"
+    ),
+    "KB_SHARE_SOURCE_UNAVAILABLE": ErrorDefinition(
+        409, False, 9474, "business", {}, "FAILED_PRECONDITION"
+    ),
+    "KB_SHARE_TARGET_UNAVAILABLE": ErrorDefinition(
+        409, False, 9475, "business", {}, "FAILED_PRECONDITION"
+    ),
+    "KB_SHARE_SAME_WORKSPACE": ErrorDefinition(
+        400, False, 9476, "business", {}, "INVALID_ARGUMENT"
+    ),
+    "KB_SHARE_REFERENCE_UNAVAILABLE": ErrorDefinition(
+        409, False, 9477, "business", {}, "FAILED_PRECONDITION"
+    ),
+    "KB_SHARE_DUPLICATE": ErrorDefinition(
+        409, False, 9478, "business", {}, "FAILED_PRECONDITION"
+    ),
+    "KB_SHARE_SOURCE_OUTSIDE_WORKSPACE": ErrorDefinition(
+        403, False, 9479, "business", {}, "PERMISSION_DENIED"
+    ),
     "KB_CONNECTOR_CREDENTIAL_INVALID": ErrorDefinition(
         500, False, 9380, "business", {}, "INTERNAL"
     ),

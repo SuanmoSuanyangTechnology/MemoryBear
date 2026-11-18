@@ -1,5 +1,15 @@
 {
   "codes": {
+    "KB_SHARE_SOURCE_NOT_FOUND": "The source knowledge base does not exist.",
+    "KB_SHARE_TARGET_NOT_FOUND": "The target workspace does not exist.",
+    "KB_SHARE_CROSS_TENANT": "Knowledge can only be shared within the caller's tenant.",
+    "KB_SHARE_SOURCE_NOT_ALLOWED": "Only original knowledge bases can be shared, not folders, shared references or memory bases.",
+    "KB_SHARE_SOURCE_UNAVAILABLE": "The source knowledge base or workspace is disabled or deleted.",
+    "KB_SHARE_TARGET_UNAVAILABLE": "The target workspace is disabled.",
+    "KB_SHARE_SAME_WORKSPACE": "The target workspace must differ from the source workspace.",
+    "KB_SHARE_REFERENCE_UNAVAILABLE": "The existing shared reference is disabled, deleted or inconsistent. Resolve it before retrying.",
+    "KB_SHARE_DUPLICATE": "Multiple active shares exist for this source and target workspace. Resolve the conflict first.",
+    "KB_SHARE_SOURCE_OUTSIDE_WORKSPACE": "The source knowledge base is outside the API Key workspace.",
     "KB_FILE_DUPLICATE": "The knowledge base already contains an identical file.",
     "OK": "Success",
     "BAD_REQUEST": "Invalid request",
