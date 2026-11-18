@@ -495,67 +495,25 @@ class ElasticReadClient:
         text: str,
         limit: int,
     ) -> dict[str, StorageReadResult]:
-        """One ES ``msearch`` for every label (host batching parity).
+        """One fulltext search per label, issued concurrently (host parity).
 
-        The result set is identical to calling :meth:`search_by_fulltext` per
-        label; only the number of round trips changes (one instead of N).
+        The host's fulltext provider issues one ``search`` per label and passes
+        ``allow_partial_search_results`` as a *query* parameter. ``_msearch`` has
+        no per-request query parameters, and putting the flag (or
+        ``source_includes``) inside the search body is rejected by Elasticsearch
+        with a 400 ``parsing_exception`` — the batch therefore bought a round trip
+        at the cost of an invalid request. The single-search shape keeps the flag
+        and the ``_source`` projection valid; gathering keeps the latency.
         """
 
-        normalized = text.strip()
-        preparations: list[tuple[NodeSearchSpec, str, dict[str, Any]]] = []
-        for spec in specs:
-            index = ES_INDEX_ALIAS.get(spec.label)
-            fields = ES_FULLTEXT_FIELDS.get(spec.label)
-            if index is None or fields is None or not normalized:
-                continue
-            source_fields = compile_elasticsearch_projection(
-                spec.projection, virtual_fields={VIRTUAL_SCORE_FIELD}
-            )
-            preparations.append(
-                (
-                    spec,
-                    index,
-                    {
-                        "query": {
-                            "bool": {
-                                "must": [
-                                    {
-                                        "multi_match": {
-                                            "query": normalized,
-                                            "fields": list(fields),
-                                        }
-                                    }
-                                ],
-                                "filter": [compile_elasticsearch_filter(spec.node_filter)],
-                            }
-                        },
-                        "size": limit,
-                        "allow_partial_search_results": False,
-                        "source_includes": source_fields,
-                    },
-                )
-            )
-        if not preparations:
+        if not specs:
             return {}
-        client = await self._client()
-        searches: list[dict[str, Any]] = []
-        for _spec, index, body in preparations:
-            searches.append({"index": index})
-            searches.append(body)
-        response = await client.msearch(
-            searches=searches, max_concurrent_searches=len(preparations)
+        results = await asyncio.gather(
+            *(self.search_by_fulltext(spec, text, limit) for spec in specs)
         )
-        responses = response.get("responses") if isinstance(response, Mapping) else None
-        if not isinstance(responses, (list, tuple)) or len(responses) != len(preparations):
-            raise RuntimeError("Elasticsearch msearch returned an invalid response list")
-        results: dict[str, StorageReadResult] = {}
-        for (spec, _index, _body), item in zip(preparations, responses, strict=False):
-            if not isinstance(item, Mapping):
-                raise RuntimeError("Elasticsearch msearch returned an invalid response")
-            results[spec.label] = _parse_hits(
-                item, spec, f"fulltext search for {spec.label}"
-            )
-        return results
+        return {
+            spec.label: result for spec, result in zip(specs, results, strict=True)
+        }
 
     async def search_by_fulltext(
         self,
