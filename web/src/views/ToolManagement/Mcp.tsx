@@ -75,7 +75,7 @@ const Mcp = forwardRef<McpRef, { keyword?: string | undefined }>(({ keyword }, r
               >
                 <Flex align="center" justify="space-between" gap={8}>
                   <span className="rb:text-[12px] rb:text-gray-600">
-                    {item.parameters?.length} 个工具
+                    {t('tool.detailMethodCount', { count: item.method_count })}
                   </span>
                   <MoreDropdown
                     items={[

@@ -58,14 +58,6 @@ VALIDATION_STAGE_ALLOWLIST = frozenset(
 _PROFILE_FIELDS = {
     "aliases_name",
     "description",
-    "core_facts",
-    "goals",
-    "interests",
-    "relations",
-    "beliefs_or_stances",
-    "anchors",
-    "events",
-    "traits",
     *PROFILE_DISPLAY_KEYS,
 }
 _MEMORY_ITEM_FIELDS = {"rank", "memory_type", "source", "score", "content"}

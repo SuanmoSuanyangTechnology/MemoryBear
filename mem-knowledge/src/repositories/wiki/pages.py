@@ -13,6 +13,7 @@ from ...models.owned import (
     WikiPageLink,
     WikiPageSource,
 )
+from ...models.owned.wiki_faq import WikiPageVersion
 from ...rag.wiki.config import (
     TERMINAL_TASK_STATUSES,
     TYPE_GROUP_NAMES,
@@ -25,7 +26,14 @@ from ...rag.wiki.config import (
     normalize_name,
     read_wiki_config,
 )
-from ...rag.wiki.identity import TOPIC_IDENTITY_VERSION, same_name_target, topic_identity
+from ...rag.wiki.identity import (
+    TOPIC_IDENTITY_VERSION,
+    TOPIC_MAP_VERSION,
+    same_name_target,
+    topic_identity,
+)
+from ...rag.wiki.ontology import ONTOLOGY_VERSION
+from ...rag.wiki.resolution import planned_ontology
 from .common import (
     append_log,
     as_uuid,
@@ -45,7 +53,8 @@ def _can_reuse_plan(state):
     return state.plan_ready and (
         state.operation == "retract"
         or state.mapped_version == state.requested_version
-        or (state.map_progress or {}).get("identity_version") == TOPIC_IDENTITY_VERSION
+        or (state.map_progress or {}).get("identity_version")
+        in {TOPIC_IDENTITY_VERSION, TOPIC_MAP_VERSION}
     )
 
 
@@ -96,7 +105,7 @@ def load_map(session, delivery, *, failure_limit=None):
         "plan": load_plan(session, state),
         "reuse_candidate": bool(
             state.input_hash and not state.plan_ready
-            and (state.map_progress or {}).get("identity_version") == TOPIC_IDENTITY_VERSION
+            and (state.map_progress or {}).get("identity_version") == TOPIC_MAP_VERSION
         ),
         "mapped": state.mapped_version == state.requested_version,
         "requested_version": state.requested_version,
@@ -106,7 +115,7 @@ def load_map(session, delivery, *, failure_limit=None):
 def load_plan(session, state):
     """Rebuild stable handles from authoritative task rows, never progress JSON."""
     tasks = current_tasks(session, state)
-    upserts = {task.page_id for task in tasks if task.operation == "upsert"}
+    upserts = {task.page_id: task.planned_ontology for task in tasks if task.operation == "upsert"}
     topics, summary_id = [], None
     for page in session.scalars(
         select(WikiPage)
@@ -125,6 +134,7 @@ def load_plan(session, state):
                     "name": page.title,
                     "aliases": page.aliases,
                     "scope": page.topic_scope,
+                    **(upserts[page.id] or {}),
                 }
             )
     return {"topics": topics, "summary_id": summary_id, "total": len(tasks)}
@@ -168,21 +178,26 @@ def _page_for_candidate(session, scope, candidate, document_id):
     topic_scope = normalize_name(candidate["scope"])
     names = {name, *(normalize_name(v) for v in candidate["aliases"])}
     if candidate.get("existing_page_id"):
-        page = session.scalar(select(WikiPage).where(
+        lookup = select(WikiPage).where(
             WikiPage.id == as_uuid(candidate["existing_page_id"]),
-            WikiPage.kb_id == scope["kb_id"], WikiPage.page_type == candidate["kind"],
-        ))
+            WikiPage.kb_id == scope["kb_id"], WikiPage.page_type != "summary",
+        )
+        if not candidate.get("correct_type"):
+            lookup = lookup.where(WikiPage.page_type == candidate["kind"])
+        page = session.scalar(lookup)
         if page is None:
             raise WikiDeferred("WIKI_IDENTITY_CHANGED")
         return _assign_missing_folder(session, scope, page, candidate)
-    existing = list(
-        session.scalars(
-            select(WikiPage).where(
-                WikiPage.kb_id == scope["kb_id"],
-                WikiPage.page_type == candidate["kind"],
-            )
+    existing = []
+    if not candidate.get("disambiguated"):
+        lookup = select(WikiPage).where(
+            WikiPage.kb_id == scope["kb_id"], WikiPage.page_type == candidate["kind"],
         )
-    )
+        if semantic_type := candidate.get("semantic_type"):
+            lookup = lookup.where(
+                WikiPage.semantic_type.is_(None) | (WikiPage.semantic_type == semantic_type)
+            )
+        existing = list(session.scalars(lookup))
     matches = [
         page
         for page in existing
@@ -216,6 +231,8 @@ def _page_for_candidate(session, scope, candidate, document_id):
             normalized_name=name,
             topic_scope=candidate["scope"],
             page_type=candidate["kind"],
+            semantic_type=candidate.get("semantic_type"),
+            ontology_version=ONTOLOGY_VERSION if candidate.get("semantic_type") else None,
             aliases=candidate["aliases"],
             folder_id=_folder(session, scope, candidate["category_path"]),
         )
@@ -283,6 +300,7 @@ def fix_plan(
                 "error_message": "模型规划期间目录结构或页面归属已变化，需要重新读取目录规划",
             })
     topics, topic_pages = [], {}
+    ontology_by_page = {}
     new_ids = set()
     if has_text:
         summary_key = f"summary:{document.id}"
@@ -309,6 +327,12 @@ def fix_plan(
             page = _page_for_candidate(session, scope, candidate, document.id)
             if candidate.get("topic_ref"):
                 topic_pages[candidate["topic_ref"]] = str(page.id)
+            if selected := planned_ontology(candidate):
+                current = ontology_by_page.get(page.id)
+                if not current or (selected["correct_type"] and not current["correct_type"]):
+                    ontology_by_page[page.id] = selected
+                elif current["semantic_type"] == selected["semantic_type"]:
+                    current["type_evidence"].extend(selected["type_evidence"])
             if page.id in new_ids:
                 continue
             new_ids.add(page.id)
@@ -337,10 +361,11 @@ def fix_plan(
                 requested_version=state.requested_version,
                 page_id=page_id,
                 operation="upsert" if page_id in new_ids else "retract",
+                planned_ontology=ontology_by_page.get(page_id),
             )
         )
     state.map_progress = {"candidate_count": len(topics), "planned_pages": len(targets),
-                          "identity_version": TOPIC_IDENTITY_VERSION}
+                          "identity_version": TOPIC_MAP_VERSION}
     state.plan_ready, state.input_hash = True, input_hash
     state.stage = "materials"
     append_log(document, f"Wiki page plan ready: pages={len(targets)}.")
@@ -360,12 +385,17 @@ def _planning_context(session, kb_id):
               "canonical_key": row.canonical_key,
               "scope": row.topic_scope, "aliases": row.aliases,
               "description": row.summary, "status": row.status,
+              "semantic_type": row.semantic_type, "type_evidence": row.type_evidence or [],
               "folder_id": str(row.folder_id) if row.folder_id else None}
              for row in session.execute(select(
                  WikiPage.id, WikiPage.title, WikiPage.page_type, WikiPage.topic_scope,
                  WikiPage.aliases, WikiPage.folder_id, WikiPage.summary, WikiPage.status,
-                 WikiPage.canonical_key,
-             ).where(WikiPage.kb_id == kb_id, WikiPage.page_type != "summary")
+                 WikiPage.canonical_key, WikiPage.semantic_type, WikiPageVersion.type_evidence,
+             ).outerjoin(WikiPageVersion, (
+                 (WikiPageVersion.kb_id == WikiPage.kb_id)
+                 & (WikiPageVersion.wiki_page_id == WikiPage.id)
+                 & (WikiPageVersion.page_version == WikiPage.version)
+             )).where(WikiPage.kb_id == kb_id, WikiPage.page_type != "summary")
              .order_by(WikiPage.id))]
     folders = {folder.id: folder for folder in session.scalars(
         select(WikiFolder).where(WikiFolder.kb_id == kb_id).order_by(WikiFolder.id)
@@ -381,7 +411,8 @@ def _planning_context(session, kb_id):
     # 正文发布和状态推进不应使分类失效；只校验身份、目录归属及目录结构。
     revision = fingerprint({
         "pages": [{key: page[key] for key in (
-            "page_id", "name", "kind", "scope", "aliases", "folder_id", "canonical_key"
+            "page_id", "name", "kind", "scope", "aliases", "folder_id", "canonical_key",
+            "semantic_type",
         )} for page in pages],
         "folders": [
             [str(folder.id), str(folder.parent_id), folder.name] for folder in folders.values()
@@ -569,11 +600,48 @@ def confirm_reused_map(session, delivery, input_hash, config_hash, *, document_t
     state.plan_ready = True
     state.mapped_version = state.requested_version
     state.stage = "reducing"
-    state.map_progress = {"reused": True, "identity_version": TOPIC_IDENTITY_VERSION}
+    state.map_progress = {"reused": True, "identity_version": TOPIC_MAP_VERSION}
     append_log(document, "Wiki Map reused after source and configuration verification.")
     session.flush()
     settle_progress(session, document, state)
     return pending_page_ids(session, state)
+
+
+def _publication_type(session, page, sources, participants):
+    participating_ids = {item["document_id"] for item in participants}
+    proposals = [
+        source["source_context"].get("page_metadata", {}).get("_ontology")
+        for source in sources if source["document_id"] in participating_ids
+    ]
+    proposed = [item for item in proposals if item and item.get("semantic_type")]
+    correction = next((item for item in proposed if item["correct_type"]), None)
+    choice = correction or (proposed[0] if proposed and page.semantic_type is None else None)
+    kind = choice["kind"] if choice else page.page_type
+    semantic_type = choice["semantic_type"] if choice else page.semantic_type
+    ontology_version = choice["ontology_version"] if choice else page.ontology_version
+    evidence = []
+    if semantic_type:
+        for source in sources:
+            metadata = source["source_context"].get("page_metadata", {}).get("_ontology") or {}
+            evidence.extend(
+                {**item, "document_id": source["document_id"],
+                 "document_version": source["version"]}
+                for item in metadata.get("type_evidence", [])
+                if item["semantic_type"] == semantic_type
+            )
+        if not evidence and page.version > 0 and page.semantic_type == semantic_type:
+            evidence = session.scalar(
+                select(WikiPageVersion.type_evidence).where(
+                    WikiPageVersion.wiki_page_id == page.id,
+                    WikiPageVersion.page_version == page.version,
+                )
+            ) or []
+    return {
+        "page_type": kind,
+        "semantic_type": semantic_type,
+        "ontology_version": ontology_version,
+        "type_evidence": evidence,
+    }
 
 
 def load_reduce(session, kb_id, page_id, *, redelivered=False, failure_limit=None):
@@ -740,7 +808,7 @@ def load_reduce(session, kb_id, page_id, *, redelivered=False, failure_limit=Non
         **{k: str(v) for k, v in scope.items()},
         "page_id": str(page.id),
         "title": page.title,
-        "page_type": page.page_type,
+        **_publication_type(session, page, valid_sources, participants),
         "aliases": page.aliases,
         "row_version": page.row_version,
         # 被排除的旧来源可能仍在旧正文中，不能把它作为本次模型输入带回。
@@ -826,12 +894,17 @@ def commit_reduce(session, snapshot, result):
     )
     if updated.rowcount != 1:
         raise WikiDeferred("WIKI_CAS_CONFLICT")
+    if has_sources and "semantic_type" in snapshot:
+        page.page_type = snapshot["page_type"]
+        page.semantic_type = snapshot["semantic_type"]
+        page.ontology_version = snapshot["ontology_version"]
     content_hash = fingerprint(
         {
             "title": page.title.strip(),
             "content": result["content"].strip(),
             "summary": result["summary"].strip(),
             "page_type": page.page_type,
+            **({"semantic_type": page.semantic_type} if page.semantic_type else {}),
             "aliases": sorted({normalize_name(alias) for alias in page.aliases}),
         }
     )

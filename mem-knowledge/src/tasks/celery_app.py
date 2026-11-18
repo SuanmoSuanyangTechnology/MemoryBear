@@ -19,6 +19,7 @@ KNOWLEDGE_QUEUES = (
 )
 
 PUBLISHABLE_KNOWLEDGE_TASK_ROUTES = {
+    "mem_knowledge.tasks.import_faqs": "qa_import",
     FAQ_GENERATE_TASK: FAQ_QUEUE,
     BACKFILL_TASK: WIKI_QUEUE,
     MAP_TASK: WIKI_QUEUE,

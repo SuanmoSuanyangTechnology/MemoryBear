@@ -15,5 +15,5 @@
 
 .timeline :global(.ant-timeline-item-content) {
   inset-inline-start: 209px !important;
-  width: calc(100% - 209px) !important;
+  width: calc(100% - 240px) !important;
 }

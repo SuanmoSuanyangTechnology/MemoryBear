@@ -83,6 +83,7 @@ _DEFINITIONS = {
     "KB_FAQ_SOURCE_CHANGED": ErrorDefinition(
         409, False, 9424, "business", {}, "FAILED_PRECONDITION"
     ),
+    "KB_FAQ_IMPORT_BUSY": ErrorDefinition(409, False, 9494, "business", {}, "FAILED_PRECONDITION"),
     "KB_FAQ_JOB_BUSY": ErrorDefinition(409, False, 9426, "business", {}, "FAILED_PRECONDITION"),
     "KB_FAQ_JOB_TERMINAL": ErrorDefinition(409, False, 9427, "business", {}, "FAILED_PRECONDITION"),
     "KB_PRINCIPAL_INVALID": ErrorDefinition(400, False, 2001, "business", {}, "UNAUTHENTICATED"),

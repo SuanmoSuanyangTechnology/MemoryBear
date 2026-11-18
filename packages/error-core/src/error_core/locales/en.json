@@ -201,6 +201,7 @@
     "KB_WIKI_SNAPSHOT_UNAVAILABLE": "The source version used for this Wiki run is temporarily unavailable. Refresh the source content and start processing again.",
     "KB_FAQ_REVIEW_REQUIRED": "This FAQ has not been approved. Complete the review before enabling it.",
     "KB_FAQ_JOB_BUSY": "FAQ generation for this item is still running. Do not submit it again; check the task list later for the result.",
+    "KB_FAQ_IMPORT_BUSY": "A FAQ import is already running in this knowledge base. Wait for it to finish before importing again.",
     "KB_FAQ_JOB_TERMINAL": "FAQ generation for this item has ended. Start a new generation task if you want to continue.",
     "KB_FAQ_INDEX_UNAVAILABLE": "The FAQ was saved, but its search index is not ready. Check this record in the FAQ list later for its index status.",
     "KB_FAQ_CONTENT_INVALID": "The FAQ content is invalid. Check the question, answer, and similar questions.",

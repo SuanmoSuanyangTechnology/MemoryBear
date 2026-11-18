@@ -6,6 +6,7 @@ from .config import WikiError, fingerprint, normalize_name, source_reference_key
 
 # 旧键已丢失词边界，不能用于查找按新规则生成的主题。
 TOPIC_IDENTITY_VERSION = "wiki_topic_identity_v2"
+TOPIC_MAP_VERSION = "wiki_ontology_v1"
 
 
 def topic_identity(kind: str, name: str) -> tuple[str, str]:
@@ -16,6 +17,12 @@ def merge_candidate(target: dict[str, Any], incoming: dict[str, Any]) -> None:
     target["source_refs"] = sorted(
         set(target["source_refs"]) | set(incoming["source_refs"]), key=source_reference_key,
     )
+    if incoming.get("type_evidence"):
+        evidence = {
+            (item["source_ref"], item["quote"]): item
+            for item in [*target.get("type_evidence", []), *incoming["type_evidence"]]
+        }
+        target["type_evidence"] = list(evidence.values())
     target["aliases"] = sorted(
         (set(target["aliases"]) | set(incoming["aliases"]) | {incoming["name"]})
         - {target["name"]},
