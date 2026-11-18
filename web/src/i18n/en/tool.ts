@@ -9,6 +9,7 @@ export const tool: ToolLocale = {
   mcpTitle: 'MCP Services',
   mcpDesc: 'Connect and manage MCP servers, allowing your applications to access external tools and services.',
   mcp_tip: 'Connect and manage MCP servers, allowing your applications to access external tools and services.',
+  builtin: 'Built-in Tools',
   inner: 'Built-in Tools',
   innerTitle: 'Built-in Tools',
   innerDesc: 'System built-in tools',

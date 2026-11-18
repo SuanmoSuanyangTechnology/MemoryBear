@@ -8,6 +8,7 @@ export const tool = {
   mcpTitle: 'MCP 服务',
   mcpDesc: '连接并管理 MCP 服务器，让你的应用可以访问外部工具与服务。',
   mcp_tip: '连接并管理 MCP 服务器，让你的应用可以访问外部工具与服务。',
+  builtin: '内置工具',
   inner: '内置工具',
   innerTitle: '内置工具',
   innerDesc: '系统内置工具',
