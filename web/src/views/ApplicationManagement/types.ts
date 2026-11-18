@@ -387,7 +387,8 @@ export type PublicationEventType =
     | 'withdrawn'
     | 'listed'
     | 'delisted'
-    | 'relisted';
+    | 'relisted'
+    | 'display_updated';
 
 /**
  * Community market publication event
@@ -402,6 +403,8 @@ export interface PublicationEvent {
     publication_id: string | null;
     occurred_at: number;
     reason: string | null;
+    /** Fields changed by a platform display update. */
+    changed_fields?: Array<'name' | 'icon' | 'summary' | 'categories' | 'tags'> | null;
 }
 
 /**
