@@ -19,8 +19,8 @@ import { refreshTokenUrl, refreshToken, loginUrl, logoutUrl } from '@/api/user'
 import i18n from '@/i18n'
 
 /**
- * 需要读取原始响应头时使用（如按 Content-Disposition 命名的文件下载）。
- * 开启后响应拦截器不做业务数据解包，直接返回 AxiosResponse。
+ * Use when raw response headers are needed (e.g. file downloads named via Content-Disposition).
+ * When enabled, the response interceptor skips business-data unwrapping and returns the AxiosResponse directly.
  */
 export interface RawResponseConfig extends AxiosRequestConfig {
   rawResponse?: boolean;
@@ -222,15 +222,27 @@ const tokenRefresh = async (): Promise<string> => {
 
 // Response interceptor
 service.interceptors.response.use(
-  (response) => {
+  async (response) => {
     const traceId = response.headers?.['x-trace-id'] || response.headers?.['X-Trace-Id']
     if (traceId) lastTraceId = traceId
 
-    if ((response.config as RawResponseConfig)?.rawResponse) {
+    const isRawResponse = !!(response.config as RawResponseConfig)?.rawResponse;
+    let responseData = response.data;
+
+    // Blob download endpoints may return a business-error envelope with 2xx; parse it before the shared code/auth checks
+    if (isRawResponse && responseData instanceof Blob && responseData.type.includes('json')) {
+      try {
+        const parsed = JSON.parse(await responseData.text());
+        if (parsed && typeof parsed === 'object' && 'code' in parsed) {
+          responseData = parsed;
+        }
+      } catch {
+        // Non-JSON payloads are treated as normal binary downloads
+      }
+    }
+    if (isRawResponse && responseData instanceof Blob) {
       return response;
     }
-
-    const { data: responseData } = response;
 
     if (!responseData || typeof responseData !== 'object') {
       return responseData;
@@ -240,7 +252,7 @@ service.interceptors.response.use(
 
     switch (code) {
       case 0:
-        return data !== undefined ? data : responseData;
+        return isRawResponse ? response : (data !== undefined ? data : responseData);
       case 2001:
         if (isPublicApi(response.config?.url)) {
           if (responseData.msg) {
@@ -523,7 +535,7 @@ export const request = {
       ...config
     }));
   },
-  /** 返回完整响应（含 headers）的 blob 请求，适用于按 Content-Disposition 命名的下载 */
+  /** Blob request that returns the full response (including headers), for downloads named via Content-Disposition */
   getBlobResponse<T = Blob>(url: string, config?: RawResponseConfig): Promise<AxiosResponse<T>> {
     return service.get(url, {
       ...config,

@@ -48,6 +48,15 @@ export interface PrivateFileWorkspaceRef {
   openCreateFolder: (parentId: string, parentName?: string, parentPath?: string[]) => void;
 }
 
+/** Remove the extension only when it actually sits at the end of the file name, so matching substrings elsewhere are kept */
+const stripFileNameExtension = (fileName: string, fileExt?: string): string => {
+  if (!fileExt) return fileName;
+  const ext = fileExt.startsWith('.') ? fileExt : `.${fileExt}`;
+  return fileName.toLowerCase().endsWith(ext.toLowerCase())
+    ? fileName.slice(0, -ext.length)
+    : fileName;
+};
+
 interface PrivateFileWorkspaceProps {
   knowledgeBase: KnowledgeBaseListItem;
   knowledgeBaseId: string;
@@ -243,7 +252,7 @@ const PrivateFileWorkspace = forwardRef<PrivateFileWorkspaceRef, PrivateFileWork
                 },
               })}
             >
-              {document.file_ext ? text.replace(document.file_ext, '') : text}
+              {stripFileNameExtension(document.file_name || text, document.file_ext)}
             </span>
           </Flex>
         );
@@ -270,25 +279,25 @@ const PrivateFileWorkspace = forwardRef<PrivateFileWorkspaceRef, PrivateFileWork
       width: 150,
       render: (_, record: AnyObject) => {
         const document = record as KnowledgeBaseDocumentData;
+        // Match the prototype: only "Organized · N" is a clickable link; other states are plain gray text
         const count = document.wiki_count ?? 0;
-        const processing = !count && typeof document.progress === 'number'
+        if (count > 0) {
+          return (
+            <button
+              type="button"
+              onClick={() => relatedWikiDrawerRef.current?.handleOpen(document)}
+              className="rb:p-0! rb:border-0 rb:bg-transparent rb:cursor-pointer rb:text-primary-600 rb:whitespace-nowrap rb:hover:underline"
+            >
+              {t('knowledgeBase.documentWiki.ready', { count })}
+            </button>
+          );
+        }
+        const processing = typeof document.progress === 'number'
           && document.progress > 0 && document.progress < 1;
-        const label = count > 0
-          ? t('knowledgeBase.documentWiki.ready', { count })
-          : processing
-            ? t('knowledgeBase.documentWiki.processing')
-            : t('knowledgeBase.documentWiki.pending');
         return (
-          <button
-            type="button"
-            onClick={() => relatedWikiDrawerRef.current?.handleOpen(document)}
-            className={clsx(
-              'rb:p-0! rb:border-0 rb:bg-transparent rb:cursor-pointer rb:whitespace-nowrap rb:hover:underline',
-              count > 0 ? 'rb:text-primary-600' : 'rb:text-gray-400',
-            )}
-          >
-            {label}
-          </button>
+          <span className="rb:text-gray-600">
+            {processing ? t('knowledgeBase.documentWiki.processing') : t('knowledgeBase.documentWiki.pending')}
+          </span>
         );
       },
     },

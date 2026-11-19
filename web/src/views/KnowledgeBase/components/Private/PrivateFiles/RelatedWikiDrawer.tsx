@@ -1,9 +1,9 @@
 /**
- * 文件列表「关联 Wiki」抽屉：按 document_id 分页拉取关联 Wiki 页面。
- * 列表使用 PageScrollList，点击条目切换到 Wiki 正文。
+ * "Related Wiki" drawer for the file list: fetches Wiki pages by document_id with pagination.
+ * Renders the list with PageScrollList; clicking an item opens the Wiki page.
  */
 import { forwardRef, useImperativeHandle, useMemo, useState } from 'react';
-import { Empty, Flex } from 'antd';
+import { Flex } from 'antd';
 import { useTranslation } from 'react-i18next';
 import clsx from 'clsx';
 
@@ -34,12 +34,12 @@ const RelatedWikiDrawer = forwardRef<RelatedWikiDrawerRef, RelatedWikiDrawerProp
   const { t } = useTranslation();
   const [visible, setVisible] = useState(false);
   const [document, setDocument] = useState<KnowledgeBaseDocumentData | null>(null);
-  const [total, setTotal] = useState(0);
+  const [total, setTotal] = useState<number | null>(0);
 
   useImperativeHandle(ref, () => ({
     handleOpen: (item) => {
       setDocument(item);
-      setTotal(item.wiki_count ?? 0);
+      setTotal(typeof item.wiki_count === 'number' ? item.wiki_count : null);
       setVisible(true);
     },
   }));
@@ -64,10 +64,12 @@ const RelatedWikiDrawer = forwardRef<RelatedWikiDrawerRef, RelatedWikiDrawerProp
         <Flex vertical gap={2}>
           <span>{key('privateWiki.relatedWiki')}</span>
           <span className="rb:text-[12px] rb:font-normal rb:text-gray-600">
-            {key('documentWiki.subtitle', {
-              name: document?.file_name ?? '',
-              count: total,
-            })}
+            {total === null
+              ? key('documentWiki.subtitleUnknown', { name: document?.file_name ?? '' })
+              : key('documentWiki.subtitle', {
+                name: document?.file_name ?? '',
+                count: total,
+              })}
           </span>
         </Flex>
       )}

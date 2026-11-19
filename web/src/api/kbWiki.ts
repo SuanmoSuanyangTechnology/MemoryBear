@@ -105,9 +105,13 @@ const parseFaqExportFileName = (contentDisposition: unknown) => {
   return contentDisposition.match(/filename="?([^";]+)"?/i)?.[1]?.trim() || fallback;
 };
 
-// FAQ 全量导出：流式下载带 BOM 的 UTF-8 CSV，文件名由响应头提供
+// Export all FAQs: stream a UTF-8 CSV with BOM; the file name comes from the response header
 export const exportAllFaq = async (kb_id: string) => {
-  const response = await request.getBlobResponse<Blob>(`/knowledges/${kb_id}/faqs/export`);
+  // Streaming exports can take a while, but a stalled connection must not leave the Promise pending forever
+  const response = await request.getBlobResponse<Blob>(
+    `/knowledges/${kb_id}/faqs/export`,
+    { timeout: 60_000 },
+  );
   const blobUrl = URL.createObjectURL(response.data);
   const link = document.createElement('a');
   link.href = blobUrl;
@@ -116,7 +120,8 @@ export const exportAllFaq = async (kb_id: string) => {
   document.body.appendChild(link);
   link.click();
   document.body.removeChild(link);
-  URL.revokeObjectURL(blobUrl);
+  // The browser reads the Blob URL after click() returns; revoking immediately can fail the download or truncate it
+  setTimeout(() => URL.revokeObjectURL(blobUrl), 10_000);
 };
 
 // Create an FAQ manually

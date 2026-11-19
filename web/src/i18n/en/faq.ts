@@ -39,6 +39,7 @@ export const faq = {
   add: 'Add FAQ',
   exportAll: 'Export all FAQs',
   exportAllSuccess: 'All FAQs exported successfully',
+  exportAllFailed: 'Export failed, please try again',
   selectedCount: '{{count}} selected',
   cancelSelection: 'Clear selection',
   edit: 'Edit',

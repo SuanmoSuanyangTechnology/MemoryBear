@@ -29,7 +29,7 @@ interface PrivateKnowledgeBaseWorkspaceProps {
   directoryCollapsed: boolean;
   onToggleDirectory: () => void;
   fileDirectory: ReactNode;
-  /** 文件页签内容；函数形式可接收跨页签打开 Wiki 页面的能力 */
+  /** File tab content; pass a function to receive the callback for opening a Wiki page across tabs */
   fileContent: ReactNode | ((openWikiPage: (pageId: string) => void) => ReactNode);
   onRefreshFiles: () => void;
   onCopyKnowledgeBaseId: () => void;

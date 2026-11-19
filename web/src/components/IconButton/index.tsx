@@ -28,7 +28,7 @@ const IconBtn: FC<IconButtonProps> = ({ icon, onClick, className, badge, disable
       'rb:opacity-65 rb:cursor-not-allowed': disabled,
       'rb:cursor-pointer': !disabled
     })}
-    onClick={onClick}
+    onClick={disabled ? undefined : onClick}
   >
     {badge !== undefined && badge !== null ? (
       <Badge
@@ -44,16 +44,16 @@ const IconBtn: FC<IconButtonProps> = ({ icon, onClick, className, badge, disable
   </Flex>
 )
 
-const IconButton: FC<IconButtonProps> = ({ title, icon, onClick, className, badge, hideTooltip = false }) => {
+const IconButton: FC<IconButtonProps> = ({ title, icon, onClick, className, badge, hideTooltip = false, disabled = false }) => {
   if (hideTooltip || !title) {
     return (
-      <IconBtn icon={icon} onClick={onClick} className={className} badge={badge} />
+      <IconBtn icon={icon} onClick={onClick} className={className} badge={badge} disabled={disabled} />
     )
   }
   return (
     <Tooltip title={title} trigger="hover">
       <span>
-        <IconBtn icon={icon} onClick={onClick} className={className} badge={badge} />
+        <IconBtn icon={icon} onClick={onClick} className={className} badge={badge} disabled={disabled} />
       </span>
     </Tooltip>
   );
