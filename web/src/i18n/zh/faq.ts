@@ -39,6 +39,7 @@ export const faq = {
   add: '新增问答',
   exportAll: '导出全部问答',
   exportAllSuccess: '全部问答导出成功',
+  exportAllFailed: '导出失败，请重试',
   selectedCount: '已选 {{count}} 条',
   cancelSelection: '取消选择',
   edit: '编辑',

@@ -1,6 +1,6 @@
 /**
- * 按文件扩展名获取项目内的文件类型图标（src/assets/images/file）。
- * class 均为完整字面量，确保 Tailwind 能静态扫描到背景图工具类。
+ * Resolve the project's file-type icon (src/assets/images/file) by file extension.
+ * Classes are written as full literals so Tailwind can statically detect the background-image utilities.
  */
 const FILE_ICON_CLASSES = {
   audio: "rb:bg-[url('@/assets/images/file/audio.svg')]",
@@ -32,7 +32,7 @@ const EXTENSION_ICON_TYPES: Record<string, keyof typeof FILE_ICON_CLASSES> = {
   png: 'image', jpg: 'image', jpeg: 'image', gif: 'image', webp: 'image', bmp: 'image', svg: 'image',
 };
 
-/** 根据扩展名（缺失时从文件名兜底）返回文件类型图标 class，未知类型回退到 txt */
+/** Return the icon class by extension (falling back to the file name); unknown types use the txt icon */
 export const getFileIconClassByExtension = (fileExt?: string, fileName?: string): string => {
   const extension = (fileExt || fileName?.split('.').pop() || '')
     .toLowerCase()
