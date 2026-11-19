@@ -4805,6 +4805,61 @@
         "status_code": 200
       }
     },
+    "GET /internal/v1/memory_config/scenes/simple": {
+      "endpoint": "list_simple_scenes",
+      "parameters": {},
+      "response": {
+        "declared": [],
+        "fields": {
+          "code": {
+            "annotation": "int",
+            "constraints": [],
+            "default": 0,
+            "required": false
+          },
+          "data": {
+            "annotation": "list[src.schemas.memory_config.SimpleSceneData]",
+            "constraints": [],
+            "default": null,
+            "fields": {
+              "scene_id": {
+                "annotation": "uuid.UUID",
+                "constraints": [],
+                "default": null,
+                "required": true
+              },
+              "scene_name": {
+                "annotation": "str",
+                "constraints": [],
+                "default": null,
+                "required": true
+              }
+            },
+            "required": true
+          },
+          "error": {
+            "annotation": "str",
+            "constraints": [],
+            "default": "",
+            "required": false
+          },
+          "msg": {
+            "annotation": "str",
+            "constraints": [],
+            "default": "OK",
+            "required": false
+          },
+          "time": {
+            "annotation": "int",
+            "constraints": [],
+            "default": "<factory:now_ms#5bec5d10ddf5>",
+            "required": false
+          }
+        },
+        "model": "src.common.responses.ApiResponse[list[SimpleSceneData]]",
+        "status_code": 200
+      }
+    },
     "POST /internal/v1/memory/analytics/generate_cache": {
       "endpoint": "generate_cache",
       "parameters": {
@@ -5195,6 +5250,201 @@
           }
         },
         "model": "src.common.responses.ApiResponse[OverviewData]",
+        "status_code": 200
+      }
+    },
+    "POST /internal/v1/memory/read/internal": {
+      "endpoint": "read_memory_internal",
+      "parameters": {
+        "body:body": {
+          "annotation": "src.modules.memory_read.schemas.ReadInternalBody",
+          "constraints": [],
+          "default": null,
+          "fields": {
+            "config_id": {
+              "annotation": "str | None",
+              "constraints": [],
+              "default": null,
+              "required": false
+            },
+            "enable_rerank": {
+              "annotation": "bool",
+              "constraints": [],
+              "default": false,
+              "required": false
+            },
+            "end_user_id": {
+              "annotation": "str",
+              "constraints": [],
+              "default": null,
+              "required": true
+            },
+            "include_metadata": {
+              "annotation": "bool",
+              "constraints": [],
+              "default": true,
+              "required": false
+            },
+            "includes": {
+              "annotation": "list[str] | None",
+              "constraints": [],
+              "default": null,
+              "required": false
+            },
+            "limit": {
+              "annotation": "int",
+              "constraints": [
+                "Ge(ge=1)",
+                "Le(le=100)"
+              ],
+              "default": 10,
+              "required": false
+            },
+            "message": {
+              "annotation": "str",
+              "constraints": [],
+              "default": null,
+              "required": true
+            },
+            "search_switch": {
+              "annotation": "str",
+              "constraints": [],
+              "default": null,
+              "required": true
+            },
+            "session_id": {
+              "annotation": "uuid.UUID",
+              "constraints": [],
+              "default": "<factory:uuid4#3c580eb3f8e0>",
+              "required": false
+            },
+            "skip_summary": {
+              "annotation": "bool",
+              "constraints": [],
+              "default": false,
+              "required": false
+            }
+          },
+          "in": "body",
+          "required": true
+        }
+      },
+      "response": {
+        "declared": [],
+        "fields": {
+          "code": {
+            "annotation": "int",
+            "constraints": [],
+            "default": 0,
+            "required": false
+          },
+          "data": {
+            "annotation": "dict[str, Any]",
+            "constraints": [],
+            "default": null,
+            "required": true
+          },
+          "error": {
+            "annotation": "str",
+            "constraints": [],
+            "default": "",
+            "required": false
+          },
+          "msg": {
+            "annotation": "str",
+            "constraints": [],
+            "default": "OK",
+            "required": false
+          },
+          "time": {
+            "annotation": "int",
+            "constraints": [],
+            "default": "<factory:now_ms#5bec5d10ddf5>",
+            "required": false
+          }
+        },
+        "model": "src.common.responses.ApiResponse[dict[str, Any]]",
+        "status_code": 200
+      }
+    },
+    "POST /internal/v1/memory/read/sync": {
+      "endpoint": "read_memory_sync",
+      "parameters": {
+        "body:body": {
+          "annotation": "src.modules.memory_read.schemas.ReadSyncBody",
+          "constraints": [],
+          "default": null,
+          "fields": {
+            "enable_rerank": {
+              "annotation": "bool",
+              "constraints": [],
+              "default": false,
+              "required": false
+            },
+            "end_user_id": {
+              "annotation": "str | None",
+              "constraints": [],
+              "default": null,
+              "required": false
+            },
+            "end_user_ids": {
+              "annotation": "list[str] | None",
+              "constraints": [],
+              "default": null,
+              "required": false
+            },
+            "message": {
+              "annotation": "str",
+              "constraints": [],
+              "default": null,
+              "required": true
+            },
+            "search_switch": {
+              "annotation": "str",
+              "constraints": [],
+              "default": null,
+              "required": true
+            }
+          },
+          "in": "body",
+          "required": true
+        }
+      },
+      "response": {
+        "declared": [],
+        "fields": {
+          "code": {
+            "annotation": "int",
+            "constraints": [],
+            "default": 0,
+            "required": false
+          },
+          "data": {
+            "annotation": "dict[str, Any]",
+            "constraints": [],
+            "default": null,
+            "required": true
+          },
+          "error": {
+            "annotation": "str",
+            "constraints": [],
+            "default": "",
+            "required": false
+          },
+          "msg": {
+            "annotation": "str",
+            "constraints": [],
+            "default": "OK",
+            "required": false
+          },
+          "time": {
+            "annotation": "int",
+            "constraints": [],
+            "default": "<factory:now_ms#5bec5d10ddf5>",
+            "required": false
+          }
+        },
+        "model": "src.common.responses.ApiResponse[dict[str, Any]]",
         "status_code": 200
       }
     },

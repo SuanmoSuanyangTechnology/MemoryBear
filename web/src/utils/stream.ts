@@ -114,6 +114,7 @@ export function parseSSEToJSON(sseString: string) {
   let dataContent = ''
 
   for (const line of lines) {
+    console.log('line', line)
     // SSE comment line (`: heartbeat`, `: connected`, ...) — emit as a comment event.
     if (line.startsWith(':')) {
       flushCurrent(currentEvent, dataContent)
@@ -135,6 +136,7 @@ export function parseSSEToJSON(sseString: string) {
   }
 
   flushCurrent(currentEvent, dataContent)
+  console.log('events', events)
   return events
 }
 

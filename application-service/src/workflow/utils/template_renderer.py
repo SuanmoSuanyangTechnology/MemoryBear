@@ -100,6 +100,14 @@ class TemplateRenderer:
             ... )
             'Analysis result: positive sentiment'
         """
+        # Dify 导入的节点可能带 `prompt: null` / `text: null`：调用方用
+        # `config.get("prompt", "")` 取默认值时拿不到保护（键存在就直接返回 None），
+        # None 会一路流到下面的正则替换上，抛
+        # `TypeError: expected string or bytes-like object, got 'NoneType'`。
+        # 空模板等价于「没有这段文本」，按空串处理。
+        if template is None:
+            return ""
+
         # Build namespace context
         context = {
             "conv": conv_vars,  # Conversation variables: {{conv.user_name}}

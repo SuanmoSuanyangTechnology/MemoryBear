@@ -202,6 +202,13 @@ class Settings:
         min(30000, int(os.getenv("KNOWLEDGE_GRAPH_RETRIEVAL_TIMEOUT_MS", "15000"))),
     )
 
+    KB_KNOWLEDGE_FOLDER_MAX_DEPTH: int = TypeAdapter(
+        Annotated[int, Field(ge=1)]
+    ).validate_python(os.getenv("KB_KNOWLEDGE_FOLDER_MAX_DEPTH", "3"))
+    KB_FILE_FOLDER_MAX_DEPTH: int = TypeAdapter(
+        Annotated[int, Field(ge=1)]
+    ).validate_python(os.getenv("KB_FILE_FOLDER_MAX_DEPTH", "4"))
+
     # Independent knowledge service routing
     ENABLE_MEM_KNOWLEDGE: bool = os.getenv("ENABLE_MEM_KNOWLEDGE", "false").lower() == "true"
     MEM_KNOWLEDGE_BASE_URL: str = os.getenv("MEM_KNOWLEDGE_BASE_URL", "")
@@ -305,6 +312,10 @@ class Settings:
 
     # LLM Request Configuration
     LLM_TIMEOUT: float = float(os.getenv("LLM_TIMEOUT", "120.0"))
+    # 探活连接建立的独立预算（秒）：快速暴露地址不可达，同时允许慢网关
+    MODEL_VALIDATION_CONNECT_TIMEOUT: float = float(
+        os.getenv("MODEL_VALIDATION_CONNECT_TIMEOUT", "10.0")
+    )
     LLM_MAX_RETRIES: int = int(os.getenv("LLM_MAX_RETRIES", "2"))
     LLM_NETWORK_RETRY_ATTEMPTS: int = int(os.getenv("LLM_NETWORK_RETRY_ATTEMPTS", "3"))
     EMBEDDING_BATCH_SIZE: int = int(os.getenv("EMBEDDING_BATCH_SIZE", "10"))

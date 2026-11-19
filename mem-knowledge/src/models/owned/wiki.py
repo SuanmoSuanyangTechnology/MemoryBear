@@ -85,6 +85,8 @@ class WikiPage(WikiScope, KnowledgeBase):
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     page_type = Column(String(16), nullable=False)
+    semantic_type = Column(String(32))
+    ontology_version = Column(String(32))
     canonical_key = Column(String(80), nullable=False)
     title = Column(Text, nullable=False)
     normalized_name = Column(String(400), nullable=False)
@@ -216,6 +218,7 @@ class WikiDocumentPageTask(WikiScope, KnowledgeBase):
     requested_version = Column(BigInteger, nullable=False)
     page_id = Column(UUID(as_uuid=True), nullable=False)
     operation = Column(String(16), nullable=False)
+    planned_ontology = Column(JSONB)
     status = Column(String(24), nullable=False, default="pending")
     failure_attempt = Column(Integer, nullable=False, default=0)
     defer_count = Column(Integer, nullable=False, default=0)

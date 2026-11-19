@@ -48,9 +48,9 @@ class ParamsConfig(BaseModel):
 
 
 class ParameterExtractorNodeConfig(BaseNodeConfig):
-    model_id: uuid.UUID = Field(
-        ...,
-        description="Unique identifier for the model"
+    model_id: uuid.UUID | None = Field(
+        default=None,
+        description="Unique identifier for the model (empty when imported from Dify, must be picked in the canvas)"
     )
 
     text: str = Field(

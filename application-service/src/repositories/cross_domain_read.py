@@ -40,8 +40,16 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
 from ..schemas.model_enums import LLM_FAMILY_TYPES
+from ..utils.statistics_window import day_bucket
 
 cross_domain_metadata = MetaData()
+
+tenants = Table(
+    "tenants",
+    cross_domain_metadata,
+    Column("id", PgUUID(as_uuid=True), primary_key=True),
+    Column("name", String),
+)
 
 workspaces = Table(
     "workspaces",
@@ -437,6 +445,14 @@ def get_user_display_names_by_ids(db: Session, user_ids: set[UUID]) -> dict[UUID
     return {row.id: row.username or row.email for row in rows}
 
 
+def get_tenant_name(db: Session, tenant_id: UUID) -> str | None:
+    """Tenant display name for community-market publisher metadata."""
+
+    return db.execute(
+        select(tenants.c.name).where(tenants.c.id == tenant_id)
+    ).scalar_one_or_none()
+
+
 def get_workspace_tenant_id(db: Session, workspace_id: UUID) -> UUID | None:
     """Workspace -> tenant mapping (host ``ToolRepository.get_tenant_id_by_workspace_id``)."""
 
@@ -807,15 +823,16 @@ def find_skill_id_by_name(db: Session, tenant_id: UUID, name: str) -> UUID | Non
 
 
 def get_daily_app_api_calls(
-    db: Session, app_id: UUID, start_dt: datetime, end_dt: datetime
+    db: Session, app_id: UUID, start_dt: datetime, end_dt: datetime, timezone_name: str = "UTC"
 ) -> list[Row]:
     """Daily API-call counts for one app (host
     ``AppStatisticsService._get_api_calls_statistics``: log rows joined to the
     keys bound to the app, half-open window)."""
 
+    bucket = day_bucket(api_key_logs.c.created_at, timezone_name)
     return db.execute(
         select(
-            cast(api_key_logs.c.created_at, Date).label("date"),
+            bucket.label("date"),
             func.count(api_key_logs.c.id).label("count"),
         )
         .select_from(
@@ -826,7 +843,7 @@ def get_daily_app_api_calls(
             api_key_logs.c.created_at >= start_dt,
             api_key_logs.c.created_at < end_dt,
         )
-        .group_by(cast(api_key_logs.c.created_at, Date))
+        .group_by(bucket)
     ).all()
 
 
@@ -861,7 +878,8 @@ def get_daily_workspace_api_calls(
 
 
 def get_daily_token_usage(
-    db: Session, tenant_id: UUID, app_id: UUID, start_dt: datetime, end_dt: datetime
+    db: Session, tenant_id: UUID, app_id: UUID, start_dt: datetime, end_dt: datetime,
+    timezone_name: str = "UTC",
 ) -> list[Row]:
     """Daily token sums for one app's llm calls (host
     ``AppStatisticsService._get_token_statistics``: usage records own-resource
@@ -870,9 +888,10 @@ def get_daily_token_usage(
     token_sum = func.sum(
         model_usage_records.c.input_tokens + model_usage_records.c.output_tokens
     )
+    bucket = day_bucket(model_usage_records.c.created_at, timezone_name)
     return db.execute(
         select(
-            cast(model_usage_records.c.created_at, Date).label("date"),
+            bucket.label("date"),
             token_sum.label("tokens"),
         )
         .where(
@@ -883,9 +902,9 @@ def get_daily_token_usage(
             model_usage_records.c.created_at >= start_dt,
             model_usage_records.c.created_at < end_dt,
         )
-        .group_by(cast(model_usage_records.c.created_at, Date))
+        .group_by(bucket)
         .having(token_sum > 0)
-        .order_by(cast(model_usage_records.c.created_at, Date))
+        .order_by(bucket)
     ).all()
 
 
@@ -917,6 +936,7 @@ __all__ = [
     "get_resource_pack_rows",
     "get_skill_row",
     "get_tenant_user_ids",
+    "get_tenant_name",
     "get_tool_config_row",
     "get_user",
     "get_user_display_names_by_ids",

@@ -260,9 +260,9 @@ class LLMNodeConfig(BaseNodeConfig):
     2. Message mode: use the messages field (recommended)
     """
 
-    model_id: uuid.UUID = Field(
-        ...,
-        description="模型配置 ID"
+    model_id: uuid.UUID | None = Field(
+        default=None,
+        description="模型配置 ID（导入的 Dify 工作流无法自动映射模型时为空，需在画布中手动选择）"
     )
 
     context: Any = Field(
@@ -280,7 +280,7 @@ class LLMNodeConfig(BaseNodeConfig):
         description="是否启用视觉模型"
     )
 
-    vision_input: str = Field(
+    vision_input: str | None = Field(
         default=None,
         description="视觉输入"
     )

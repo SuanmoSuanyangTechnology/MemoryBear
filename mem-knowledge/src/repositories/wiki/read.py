@@ -6,6 +6,8 @@ from collections import Counter, defaultdict
 
 from sqlalchemy import String, and_, cast, exists, func, literal, or_, select
 from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import aliased
 
 from ...models.owned import (
     Document,
@@ -90,10 +92,18 @@ def scoped_pages(scope, page_types=()):
     return and_(*conditions)
 
 
-def begin_read(session, scope):
-    # Both graph endpoints and page/source reads use one consistent short snapshot.
-    session.connection(execution_options={"isolation_level": "REPEATABLE READ"})
-    knowledge = session.scalar(
+def _published_document_source(source):
+    return and_(
+        source.page_id == WikiPage.id,
+        source.kb_id == WikiPage.kb_id,
+        source.workspace_id == WikiPage.workspace_id,
+        source.tenant_id == WikiPage.tenant_id,
+        published_source(source),
+    )
+
+
+def _readable_knowledge(scope):
+    return (
         select(Knowledge)
         .join(Workspace, Workspace.id == Knowledge.workspace_id)
         .where(
@@ -103,8 +113,31 @@ def begin_read(session, scope):
             Knowledge.status != 2,
         )
     )
+
+
+async def count_pages_by_document(db: AsyncSession, scope, document_ids):
+    source = aliased(WikiPageSource)
+    rows = await db.execute(
+        select(source.document_id, func.count())
+        .select_from(WikiPage)
+        .join(source, _published_document_source(source))
+        .where(
+            source.document_id.in_(document_ids),
+            scoped_pages(scope),
+            _readable_knowledge(scope).exists(),
+        )
+        .group_by(source.document_id)
+    )
+    return dict(rows.tuples().all())
+
+
+def begin_read(session, scope):
+    # Both graph endpoints and page/source reads use one consistent short snapshot.
+    session.connection(execution_options={"isolation_level": "REPEATABLE READ"})
+    knowledge = session.scalar(_readable_knowledge(scope))
     if knowledge is None:
         raise WikiError("WIKI_NOT_FOUND", retryable=False)
+    return knowledge
 
 
 def _folders(session, scope):
@@ -144,10 +177,18 @@ def page_data(row, folders):
 
 
 def list_pages(
-    session, scope, *, page_types=(), keyword=None, page=1, pagesize=50, legacy=False
+    session, scope, *, document_id=None, page_types=(), keyword=None, page=1,
+    pagesize=50, legacy=False,
 ):
     begin_read(session, scope)
     condition = scoped_pages(scope, page_types)
+    if document_id is not None:
+        source = WikiPageSource
+        condition = and_(condition, exists(
+            select(source.id).where(
+                source.document_id == document_id, _published_document_source(source)
+            )
+        ))
     keyword = (keyword or "").strip()
     if keyword:
         condition = and_(condition, or_(

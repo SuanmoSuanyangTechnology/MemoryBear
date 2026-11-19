@@ -344,3 +344,12 @@ export interface Provider {
   provider: string;
   default_api_base: string;
 }
+
+export enum ModelType {
+  Asr = "asr",
+  Embedding = "embedding",
+  Image = "image",
+  Llm = "llm",
+  Rerank = "rerank",
+  Video = "video",
+}

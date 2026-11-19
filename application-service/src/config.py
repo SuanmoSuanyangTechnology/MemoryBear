@@ -29,6 +29,14 @@ class AppServiceSettings(BaseSettings):
         validation_alias="ENABLE_SENSITIVE_DATA_FILTER",
     )
     i18n_default_language: str = Field(default="zh", validation_alias="I18N_DEFAULT_LANGUAGE")
+    # Read budget for in-process model probes; mirrors the host `settings.LLM_TIMEOUT`.
+    llm_timeout: float = Field(default=120.0, gt=0, validation_alias="LLM_TIMEOUT")
+    # 探活连接建立的独立预算（秒）：快速暴露地址不可达，同时允许慢网关
+    model_validation_connect_timeout: float = Field(
+        default=10.0,
+        gt=0,
+        validation_alias="MODEL_VALIDATION_CONNECT_TIMEOUT",
+    )
     # Caps FileUploadConfig.max_file_count in the app feature schemas; the host
     # validator reads the monolith `settings.MAX_FILE_COUNT` (same env name).
     max_file_count: int = Field(default=20, ge=1, validation_alias="MAX_FILE_COUNT")

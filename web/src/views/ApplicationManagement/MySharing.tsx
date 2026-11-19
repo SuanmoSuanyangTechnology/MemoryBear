@@ -11,6 +11,7 @@ import ApplicationRecordModal from './components/ApplicationRecordModal'
 import DelistModal from './components/DelistModal'
 import RelistModal from './components/RelistModal'
 import AppTypeIcon from '@/views/ResourceCenter/components/AppTypeIcon';
+import { formatVersion } from '@/utils/format';
 
 export interface MySharingRef {
   refresh: () => void;
@@ -130,7 +131,7 @@ const MySharing = forwardRef<MySharingRef, { switchOntology: (item: Application)
       title: t('application.appName'),
       dataIndex: 'app_name',
       key: 'app_name',
-      width: 200,
+      width: 400,
       render: (text: string, record: MySharedOutItem) => {
         return (
           <Flex align="center" gap={12}>
@@ -159,7 +160,7 @@ const MySharing = forwardRef<MySharingRef, { switchOntology: (item: Application)
       dataIndex: 'version',
       key: 'version',
       width: 120,
-      render: (version: string) => version || '-',
+      render: (version: string) => formatVersion(version),
     },
     {
       title: t('application.marketStatus'),
@@ -181,14 +182,14 @@ const MySharing = forwardRef<MySharingRef, { switchOntology: (item: Application)
       width: 160,
       render: (_: unknown, record: MySharedOutItem) => {
         const reviewStatus = record.share_status;
-        const reviewVersion = record.version;
+        const reviewVersion = record.review_version ? formatVersion(record.review_version) : undefined;
         if (!reviewStatus || reviewStatus === 'shared' || reviewStatus === 'unknown') {
           return <span>-</span>;
         }
         return (
           <Space>
             <Tag color={statusColorMap[reviewStatus] || 'default'}>
-              {[reviewVersion, t(statusLabelMap[reviewStatus] || 'application.statusUnknown')].join(' · ')}
+              {[reviewVersion, t(statusLabelMap[reviewStatus] || 'application.statusUnknown')].filter(Boolean).join(' · ')}
             </Tag>
           </Space>
         );
@@ -219,6 +220,7 @@ const MySharing = forwardRef<MySharingRef, { switchOntology: (item: Application)
       title: t('common.operation'),
       key: 'operation',
       fixed: 'right',
+      width: 180,
       render: (_: unknown, record: MySharedOutItem) => {
         return (
           <Space>
@@ -255,7 +257,7 @@ const MySharing = forwardRef<MySharingRef, { switchOntology: (item: Application)
         ref={tableRef}
         apiUrl={getMySharedOutListUrl}
         columns={columns}
-        rowKey="app_id"
+        rowKey={(row) => `${row.app_id}-${row.scope}`}
       />
       <ApplicationRecordModal ref={recordModalRef} />
       <DelistModal

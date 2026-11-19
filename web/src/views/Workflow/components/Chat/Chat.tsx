@@ -1,9 +1,3 @@
-/*
- * @Author: ZhaoYing 
- * @Date: 2026-02-06 21:10:56 
- * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-08-14 14:29:48
- */
 /**
  * Workflow Chat Component
  * 
@@ -551,8 +545,9 @@ const Chat = forwardRef<ChatRef, ChatProps>(({
                   danger={isNeedVariableConfig}
                   icon={<div className={clsx("rb:size-4 rb:bg-cover", {
                     "rb:bg-[url('@/assets/images/conversation/variables_red.svg')]": isNeedVariableConfig,
-                    "rb:bg-[url('@/assets/images/conversation/variables.svg')]": !isNeedVariableConfig
+                    "rb:bg-[url('@/assets/images/conversation/variables.svg')] rb:group-hover:bg-[url('@/assets/images/conversation/variables_blue.svg')]": !isNeedVariableConfig
                   })} />}
+                  className="rb:group"
                   onClick={() => variableConfigModalRef.current?.handleOpen(variables)}
                 >
                   {t('memoryConversation.variableConfig')}
@@ -562,6 +557,7 @@ const Chat = forwardRef<ChatRef, ChatProps>(({
                 type="primary"
                 onClick={() => handleSend()}
                 loading={loading}
+                disabled={isNeedVariableConfig}
               >
                 {t('workflow.startRun')}
               </Button>

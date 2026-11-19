@@ -1,0 +1,29 @@
+"""TODO: Current index management is pending migration from app/repositories/neo4j/create_indexes.py."""
+from src.storage.enums import MemoryNodeType, MemoryNodeLabel
+
+FULLTEXT_ANNC: dict[MemoryNodeLabel, str] = {
+    MemoryNodeType.STATEMENT: "statementsFulltext",
+    MemoryNodeType.CHUNK: "chunksFulltext",
+    MemoryNodeType.EXTRACTED_ENTITY: "entitiesFulltext",
+    MemoryNodeType.MEMORY_SUMMARY: "summariesFulltext",
+    MemoryNodeType.SCENE_COMMUNITY: "sceneCommunitiesFulltext",
+    MemoryNodeType.SCENE_SUMMARY: "sceneSummariesFulltext",
+    MemoryNodeType.COMMUNITY: "communitiesFulltext",
+    MemoryNodeType.PERCEPTUAL: "perceptualFulltext",
+    MemoryNodeType.ASSISTANT_PRUNED: "assistantPrunedFulltext",
+    MemoryNodeType.DIALOGUE: "dialogueFulltext",
+}
+
+EMBEDDING_FIELDS: dict[MemoryNodeLabel, str] = {
+    MemoryNodeType.STATEMENT: "statement_embedding",
+    MemoryNodeType.CHUNK: "chunk_embedding",
+    MemoryNodeType.EXTRACTED_ENTITY: "name_embedding",
+    MemoryNodeType.MEMORY_SUMMARY: "summary_embedding",
+    MemoryNodeType.SCENE_COMMUNITY: "summary_embedding",
+    MemoryNodeType.SCENE_SUMMARY: "summary_embedding",
+    MemoryNodeType.COMMUNITY: "summary_embedding",
+    MemoryNodeType.PERCEPTUAL: "summary_embedding",
+    MemoryNodeType.DIALOGUE: "dialog_embedding",
+    MemoryNodeType.ASSISTANT_PRUNED: "text_embedding",
+    MemoryNodeType.USER_SOURCE: "text_embedding",
+}

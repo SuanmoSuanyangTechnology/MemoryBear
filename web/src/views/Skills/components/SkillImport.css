@@ -49,6 +49,8 @@
 .skill-import-tree .ant-tree-title {
   flex: 1;
   min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .skill-import-tree .ant-tree-iconEle {

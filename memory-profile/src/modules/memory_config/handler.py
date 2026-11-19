@@ -51,6 +51,7 @@ from src.schemas.memory_config import (
     ReflectionMutationData,
     SceneCommunityConfigData,
     SceneConfigData,
+    SimpleSceneData,
     ValidateConfigResult,
 )
 from src.schemas.memory_config_requests import (
@@ -139,6 +140,20 @@ class MemoryConfigHandler:
         self.scene_demo = SceneSplitDemoService(runtime.scene_continuity)
 
     # ── Reads ────────────────────────────────────────────────────────────
+
+    async def list_simple_scenes(
+        self, principal: MemoryPrincipal, request: Request
+    ) -> ApiResponse[list[SimpleSceneData]] | JSONResponse:
+        try:
+            data = await self.query.simple_scenes(principal.workspace_id)
+        except Exception:
+            logger.exception("list_simple_scenes failed")
+            return error_response(
+                request,
+                200,
+                failure(BizCode.INTERNAL_ERROR, "查询失败", "场景查询失败，请稍后重试"),
+            )
+        return success(data, "查询成功")
 
     async def read_personality_anchor(
         self, principal: MemoryPrincipal, config_id: Any, request: Request

@@ -12,6 +12,14 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+# ── Simple ontology scenes ────────────────────────────────────────────────────
+
+
+class SimpleSceneData(BaseModel):
+    scene_id: UUID
+    scene_name: str
+
+
 # ── Personality anchor ───────────────────────────────────────────────────────
 
 

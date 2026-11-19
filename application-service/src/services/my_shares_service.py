@@ -4,9 +4,9 @@
 `docs/应用共享与市场/应用共享与社区市场改造方案.md` §4.4 是权威，本模块只负责取数：
 
 - **资源中心行** ← `app_assets.status = published`（`share_mode` 决定 `editable`）
-- **社区市场行** ← 存在 `market_sync` 行即说明投过稿（`market_sync` 是投稿兜底表，
+- **社区市场行** ← 只展示未失败的 `market_sync` 投稿（失败账只用于重试，
   本地提交成功、市场未收到时也留行），状态分两层：
-  1. 本地 `market_sync.status = pending_sync | sync_failed` 优先（市场还没收到，问它没意义）
+  1. 本地 `market_sync.status = pending_sync` 优先（市场还没收到，问它没意义）
   2. 其余问市场一次（`MarketGateway.publication_status`，一次批量，最多 100 个）
 
 两层之外还有**上架状态**：`share_status` 只表达投稿申请的审核结果，同一个
@@ -175,18 +175,29 @@ class MySharesService:
             if sync is None:
                 continue
 
-            market_version = releases.get(sync.release_id) or pinned
+            market_version = releases.get(sync.release_id)
+            if market_version is None:
+                continue
             state = market_state.get(str(app.id)) or dict(_UNKNOWN_MARKET_ROW)
-            status = self._market_row_status(sync, state.get("status"))
+            # The status request can already see a newer submission. Match the
+            # local row by publication ID before enabling actions such as withdraw.
+            reviews = state.get("submission_statuses", {})
+            if reviews:
+                review_status = reviews.get(str(sync.market_submission_id))
+            elif state.get("latest_version") == (market_version.version_name or "").strip():
+                review_status = state.get("status")
+                if review_status == "pending" and state.get("pending_publication_id") != sync.market_submission_id:
+                    review_status = None
+            else:
+                review_status = None
+            status = self._market_row_status(sync, review_status)
             rows.append({
                 **legacy,
-                "version": market_version.version_name,
+                # 列表展示与重新上架共用 version；尚无公开版本时保持空值。
+                "version": state.get("current_version"),
+                "review_version": market_version.version_name,
                 "version_number": market_version.version,
-                # 与市场 versions 接口的 item.release_id 同源（都是 `AppRelease.id`），
-                # 前端据此把「我的共享」这一行对到该资源的版本记录上。不能按
-                # `version` 字符串匹配：市场只列已通过版本，本行取最近一次投稿，
-                # 审核中的那一版在版本记录里根本不存在；而 `version_name` 本身
-                # 在 `app_releases` 上也没有唯一约束。
+                # 本地发布序号与 release_id 跟随最近一次投稿，供查询投稿记录。
                 "release_id": str(sync.release_id),
                 "scope": SCOPE_COMMUNITY_MARKET,
                 "share_status": status,
@@ -291,6 +302,10 @@ class MySharesService:
 
         latest: dict[uuid.UUID, MarketSync] = {}
         for sync in syncs:
+            # Failed submissions never became a market share. Exclude them before
+            # choosing the latest row so they cannot hide an earlier accepted one.
+            if sync.status == MarketSyncStatus.SYNC_FAILED:
+                continue
             current = latest.get(sync.asset_id)
             if current is None or (sync.created_at, sync.id) > (
                     current.created_at, current.id
@@ -407,8 +422,20 @@ class MySharesService:
                 status = UNKNOWN
             listing_status = _record_get(record, "listing_status")
             delist_actor = _record_get(record, "delist_actor")
+            submission_statuses = {}
+            # Market events are newest first. Ignore listing events and the
+            # synthetic submitted event when resolving a publication's status.
+            for event in _record_get(record, "events") or []:
+                publication_id = _record_get(event, "publication_id")
+                event_type = _record_get(event, "event_type")
+                if publication_id and event_type in _MARKET_STATUSES:
+                    submission_statuses.setdefault(str(publication_id), event_type)
             folded[str(key)] = {
                 "status": status,
+                "submission_statuses": submission_statuses,
+                "pending_publication_id": _record_get(record, "pending_publication_id"),
+                "current_version": _record_get(record, "current_version"),
+                "latest_version": _record_get(record, "latest_version"),
                 "listing_status": listing_status,
                 "delist_actor": delist_actor,
                 "can_delist": _can_delist(record, listing_status),

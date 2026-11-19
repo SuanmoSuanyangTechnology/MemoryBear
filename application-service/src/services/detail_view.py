@@ -151,6 +151,7 @@ def project_workflow(config: dict[str, Any]) -> dict[str, Any]:
         if node_id is None:
             continue
         node_type = str(raw.get("type") or "")
+        node_config = _as_dict(raw.get("config"))
         parent_id = raw.get("cycle")
         nodes.append(
             {
@@ -160,9 +161,12 @@ def project_workflow(config: dict[str, Any]) -> dict[str, Any]:
                 "position": _node_position(raw.get("position")),
                 # 循环 / 迭代容器归属：前端据此把孩子节点塞进容器
                 "parent_id": str(parent_id) if parent_id else None,
-                "branches": _branches_of(node_type, _as_dict(raw.get("config"))),
+                "branches": _branches_of(node_type, node_config),
             }
         )
+        if node_type == "notes":
+            text = node_config.get("text")
+            nodes[-1]["config"] = {"text": text if isinstance(text, str) else ""}
 
     edges: list[dict[str, Any]] = []
     for raw in _as_list(config.get("edges")):

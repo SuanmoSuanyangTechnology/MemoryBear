@@ -33,6 +33,13 @@ class ModelConfig(ReadOnlyBase):
     type = Column(String, nullable=False)
     is_active = Column(Boolean, nullable=False)
     is_public = Column(Boolean, nullable=False)
+    model_id = Column(UUID(as_uuid=True), nullable=True)
+    provider = Column(String, nullable=True)
+    capability = Column(ARRAY(String), nullable=True)
+    is_omni = Column(Boolean, nullable=True)
+    input_modalities = Column(ARRAY(String), nullable=True)
+    output_modalities = Column(ARRAY(String), nullable=True)
+    features = Column(ARRAY(String), nullable=True)
 
 
 class EndUserInfo(ReadOnlyBase):

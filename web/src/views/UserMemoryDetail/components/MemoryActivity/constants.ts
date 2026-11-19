@@ -68,4 +68,5 @@ export const searchModeIcons: Record<SearchMode, string> = {
   normal: "rb:bg-[url('@/assets/images/conversation/normalReply.svg')]",
   quick: "rb:bg-[url('@/assets/images/conversation/quickReply.svg')]",
   express: "rb:bg-[url('@/assets/images/conversation/quickReplyPlus.svg')]",
+  community: "rb:bg-[url('@/assets/images/conversation/community.svg')]",
 }

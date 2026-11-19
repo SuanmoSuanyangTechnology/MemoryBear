@@ -47,6 +47,9 @@ from ..workflow.adapters.registry import PlatformAdapterRegistry
 from ..workflow.error_info import workflow_error_info
 from ..workflow.executor import execute_workflow, execute_workflow_stream
 from ..utils.workflow_node_types import NodeType
+from ..utils.workflow_tool_snapshots import (
+    refresh_agent_tool_names as _refresh_agent_tool_names,
+)
 from ..workflow.variable.base_variable import VariableType, DEFAULT_VALUE
 from ..utils.workflow_validator import validate_workflow_config
 from ..aio_redis import aio_redis, aio_redis_delete, aio_redis_get, aio_redis_set, get_thread_safe_sync_redis
@@ -215,6 +218,29 @@ class WorkflowService:
             return None
         from ..repositories.tool_repository import ToolRepository
         return ToolRepository.get_tenant_id_by_workspace_id(self.db, str(app.workspace_id))
+
+    def refresh_agent_tool_names(
+        self,
+        app_id: uuid.UUID,
+        nodes: list[dict[str, Any]] | None,
+        stored_nodes: list[dict[str, Any]] | None = None,
+    ) -> list[dict[str, Any]]:
+        """Attach tool-name snapshots to the ``agent`` nodes of a saved config.
+
+        Called on every workflow save: the editor only sends
+        ``{tool_id, operation, enabled}`` per selector, so without a stored
+        fallback a single save would erase the name of a tool that has since been
+        deleted. Best effort — a missing tenant/db leaves the nodes untouched.
+        """
+
+        if self.db is None or self._is_async_db:
+            return list(nodes or [])
+        return _refresh_agent_tool_names(
+            self.db,
+            self._resolve_app_tenant_id(app_id),
+            nodes,
+            stored_nodes,
+        )
 
     async def _resolve_app_tenant_id_async(self, app_id: uuid.UUID) -> Optional[uuid.UUID]:
         from ..models.workspace_model import Workspace
@@ -1124,6 +1150,8 @@ class WorkflowService:
             workflow_type=workflow_type,
         )
         normalized_nodes = config_dict["nodes"]
+        normalized_nodes = self.refresh_agent_tool_names(app_id, normalized_nodes)
+        config_dict["nodes"] = normalized_nodes
         normalized_triggers = config_dict["triggers"]
 
         # Validate the config
@@ -1254,7 +1282,13 @@ class WorkflowService:
             triggers=triggers if triggers is not None else config.triggers,
             workflow_type=workflow_type if workflow_type is not None else config.workflow_type,
         )
-        updated_nodes = config_dict["nodes"]
+        # The editor sends only tool_id/operation/enabled per selector, so a tool
+        # deleted since the last save would lose its name right here; the stored
+        # nodes supply the previous snapshot.
+        updated_nodes = self.refresh_agent_tool_names(
+            app_id, config_dict["nodes"], config.nodes
+        )
+        config_dict["nodes"] = updated_nodes
         updated_edges = config_dict["edges"]
         updated_variables = config_dict["variables"]
         updated_environment_variables = config_dict["environment_variables"]

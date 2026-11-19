@@ -9,6 +9,7 @@ export const tool: ToolLocale = {
   mcpTitle: 'MCP Services',
   mcpDesc: 'Connect and manage MCP servers, allowing your applications to access external tools and services.',
   mcp_tip: 'Connect and manage MCP servers, allowing your applications to access external tools and services.',
+  builtin: 'Built-in Tools',
   inner: 'Built-in Tools',
   innerTitle: 'Built-in Tools',
   innerDesc: 'System built-in tools',
@@ -36,7 +37,8 @@ export const tool: ToolLocale = {
     available: 'Available',
     unconfigured: 'Unconfigured',
     configured_disabled: 'Configured but Disabled',
-    error: 'Connection Error'
+    error: 'Connection Error',
+    missing: 'Not Found'
   },
   available_desc: 'API is configured and enabled',
   unconfigured_desc: 'Need to configure API Key',

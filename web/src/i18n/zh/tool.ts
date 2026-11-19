@@ -3,11 +3,12 @@ export const tool = {
   parameterRequired: '必填',
   parameterOptional: '选填',
   detailLoadFailed: '工具详情加载失败',
-  detailMethodCount: '{{count}}个工具',
+  detailMethodCount: '{{count}} 个工具',
   mcp: 'MCP',
   mcpTitle: 'MCP 服务',
   mcpDesc: '连接并管理 MCP 服务器，让你的应用可以访问外部工具与服务。',
   mcp_tip: '连接并管理 MCP 服务器，让你的应用可以访问外部工具与服务。',
+  builtin: '内置工具',
   inner: '内置工具',
   innerTitle: '内置工具',
   innerDesc: '系统内置工具',
@@ -35,7 +36,8 @@ export const tool = {
     available: '可用',
     unconfigured: '未配置',
     configured_disabled: '已配置未启用',
-    error: '链接异常'
+    error: '链接异常',
+    missing: '不存在'
   },
   available_desc: 'API 已配置并启用',
   unconfigured_desc: '需要配置 API Key',

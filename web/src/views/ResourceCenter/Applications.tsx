@@ -33,7 +33,7 @@ const Applications = () => {
         if (active) setCategories([]);
       });
     return () => { active = false; };
-  }, []);
+  }, [category]);
   return (
     <Flex vertical className="rb:h-full rb:overflow-hidden!">
       <Flex align="center" justify="space-between" gap={24}>
@@ -89,7 +89,7 @@ const Applications = () => {
           </RbCard>
         )}
       />
-      <ApplicationDetailModal ref={detailModalRef} onAdd={(id) => addModalRef.current?.handleOpen(id)} />
+      <ApplicationDetailModal ref={detailModalRef} onAdd={(id) => addModalRef.current?.handleOpen(id)} categories={categories} />
       <AddToWorkspaceModal ref={addModalRef} />
     </Flex>
   );

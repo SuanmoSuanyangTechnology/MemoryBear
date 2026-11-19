@@ -42,7 +42,7 @@ const ToolManagement: React.FC = () => {
     getToolStatistics().then(res => {
       setTypeCounts(res.type_counts || {});
     }).catch(() => {});
-  }, []);
+  }, [activeTab]);
 
   const formatTabItems = () => {
     return tabKeys.map(value => {

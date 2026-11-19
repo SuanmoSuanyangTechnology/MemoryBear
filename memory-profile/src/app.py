@@ -14,6 +14,7 @@ from src.common.observability import setup_logging
 from src.common.observability.runtime_metrics import start_tracemalloc
 from src.common.redis_cache import clear_redis_cache, configure_redis_cache
 from src.config import ProfileSettings
+from src.core.composition import flush_read_side_effects
 from src.error_handlers import register_error_handlers
 from src.i18n import LanguageMiddleware, clear_i18n, configure_i18n
 from src.middleware.auth import (
@@ -26,6 +27,7 @@ from src.middleware.request_logging import RequestLoggingMiddleware
 from src.middleware.trace import TraceIdMiddleware
 from src.modules import router as modules_router
 from src.runtime import ProfileRuntime
+from src.storage.bootstrap import ensure_storage_indexes
 
 logger = logging.getLogger(__name__)
 
@@ -79,12 +81,19 @@ def create_app(
                 await gateway_auth.start()
             except Exception:
                 logger.exception("memory gateway auth refresh start failed")
+        if resolved_settings.storage_index_bootstrap:
+            # Host parity (api ``main.py``): confirm/upgrade the search indexes at
+            # boot. Never fatal — an unreachable cluster must not block serving.
+            await ensure_storage_indexes(process_runtime)
         try:
             yield
         finally:
             # Stop the subscription task before the redis pool closes.
             if gateway_auth is not None and hasattr(gateway_auth, "aclose"):
                 await gateway_auth.aclose()
+            # Detached display-card writes are the read path's only non-awaited
+            # work: drain them while the PostgreSQL pool is still open.
+            await flush_read_side_effects()
             clear_redis_cache()
             clear_i18n()
             await process_runtime.aclose()

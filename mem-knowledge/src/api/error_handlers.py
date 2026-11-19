@@ -43,8 +43,10 @@ _HTTP_ERRORS = {
 
 
 # The actual endpoint identity is independent of router prefixes and query strings.
-# ChunkRetrieve is the only public request schema with rerank fields today.
+# Only ChunkRetrieve receives the specialized rerank field mapping.
 _VALIDATION_CONTRACTS = {
+    ("src.api.routes.faq_import", "submit_import"): "KB_HTTP_VALIDATION_ERROR",
+    ("src.api.routes.wiki_faq", "export_faqs"): "KB_HTTP_VALIDATION_ERROR",
     ("src.api.routes.chunk", "retrieve_chunks"): "KB_RETRIEVAL_REQUEST_INVALID",
 }
 _RERANK_FIELDS = frozenset({"rerank_mode", "rerank_weights"})
@@ -304,7 +306,10 @@ def register_error_handlers(application: FastAPI) -> None:
             any(part in _RERANK_FIELDS for part in error.get("loc", ())) for error in exc.errors()
         ):
             code = "KB_RERANK_CONFIG_INVALID"
-        return render_error(request, KnowledgeError.from_code(code), validation_errors=exc.errors())
+        return render_error(
+            request, KnowledgeError.from_code(code, status_code=422),
+            validation_errors=exc.errors(),
+        )
 
     @application.exception_handler(KnowledgeError)
     async def knowledge_error_handler(request: Request, exc: KnowledgeError):
