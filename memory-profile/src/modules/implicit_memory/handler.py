@@ -10,7 +10,7 @@ from src.common.responses import ApiResponse
 from src.middleware.auth import MemoryPrincipal
 from src.runtime import ProfileRuntime
 from src.schemas.implicit_memory import ImplicitProfile, ProfileExists, SnapshotSection
-from src.services.implicit_memory import ImplicitMemoryService, implicit_read_error
+from src.services.implicit_memory.service import ImplicitMemoryService, implicit_read_error
 
 ExistsApiResponse = ApiResponse[ProfileExists]
 ObjectApiResponse = ApiResponse[SnapshotSection]
@@ -150,3 +150,18 @@ class ImplicitMemoryHandler:
             raise
         except Exception as exc:
             raise implicit_read_error(exc, operation_key, include_detail=include_detail) from exc
+
+    async def generate_profile(self, context, end_user_id):
+        try:
+            data = await self.service.generate_profile(
+                end_user_id=end_user_id, workspace_id=context.workspace_id
+            )
+            from src.common.responses import success
+
+            return success(data, msg="用户画像生成成功")
+        except ProfileError:
+            raise
+        except Exception as exc:
+            raise implicit_read_error(
+                exc, "memory.implicit.error.generate_profile_failed", include_detail=True
+            ) from exc

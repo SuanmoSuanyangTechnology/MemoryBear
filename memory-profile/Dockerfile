@@ -2,6 +2,8 @@ FROM python:3.12-slim AS builder
 
 ARG UV_VERSION=0.10.11
 ENV UV_PROJECT_ENVIRONMENT=/app/.venv
+RUN apt-get update && apt-get install -y --no-install-recommends build-essential \
+    && rm -rf /var/lib/apt/lists/*
 RUN pip install --no-cache-dir "uv==${UV_VERSION}"
 WORKDIR /build/memory-profile
 COPY packages /build/packages
@@ -17,7 +19,9 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PATH=/app/.venv/bin:$PATH \
     PROFILE_HOST=0.0.0.0 \
     PROFILE_PORT=8082
-RUN groupadd --gid 10001 profile && useradd --uid 10001 --gid 10001 --no-create-home profile
+RUN apt-get update && apt-get install -y --no-install-recommends libmagic1 default-jre-headless \
+    && rm -rf /var/lib/apt/lists/* \
+    && groupadd --gid 10001 profile && useradd --uid 10001 --gid 10001 --no-create-home profile
 WORKDIR /app
 COPY --from=builder --chown=10001:10001 /app/.venv ./.venv
 COPY --from=builder --chown=10001:10001 /build/memory-profile/alembic.ini ./alembic.ini

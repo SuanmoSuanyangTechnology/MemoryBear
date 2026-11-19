@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
 from src.common.errors import BizCode, LocalizedProfileError, ProfileError
+from src.common.datetime_utils import to_timestamp_ms, utcnow_naive
 from src.repositories.implicit_memory import ImplicitMemoryRepository
 
 if TYPE_CHECKING:
@@ -57,10 +58,11 @@ class ImplicitMemoryService:
         *,
         repository: ImplicitMemoryRepository | None = None,
     ) -> None:
+        self.runtime = runtime
         if repository is not None:
             self.repository = repository
         elif runtime is not None:
-            self.repository = ImplicitMemoryRepository(runtime.postgres)
+            self.repository = ImplicitMemoryRepository(runtime.postgres, runtime.neo4j)
         else:
             raise ValueError("Either runtime or repository must be provided")
 
@@ -169,3 +171,129 @@ class ImplicitMemoryService:
             "portrait": profile.get("portrait", {}),
             "interest_areas": profile.get("interest_areas", {}),
         }
+
+    def _build_empty_profile(self) -> dict:
+        """Build the empty profile when the combined summary count is insufficient."""
+        now_ms = to_timestamp_ms(utcnow_naive())
+        insufficient = "Insufficient data for analysis"
+
+        def _empty_dimension(name: str) -> dict:
+            return {
+                "evidence": [insufficient],
+                "reasoning": f"No clear evidence found for {name} dimension",
+                "percentage": 0.0,
+                "dimension_name": name,
+                "confidence_level": 20,
+            }
+
+        def _empty_category(name: str) -> dict:
+            return {
+                "evidence": [insufficient],
+                "percentage": 25.0,
+                "category_name": name,
+                "trending_direction": None,
+            }
+
+        return {
+            "habits": [],
+            "portrait": {
+                "aesthetic": _empty_dimension("aesthetic"),
+                "creativity": _empty_dimension("creativity"),
+                "literature": _empty_dimension("literature"),
+                "technology": _empty_dimension("technology"),
+                "historical_trends": None,
+                "analysis_timestamp": now_ms,
+                "total_summaries_analyzed": 0,
+            },
+            "preferences": [],
+            "interest_areas": {
+                "art": _empty_category("art"),
+                "tech": _empty_category("tech"),
+                "music": _empty_category("music"),
+                "lifestyle": _empty_category("lifestyle"),
+                "analysis_timestamp": now_ms,
+                "total_summaries_analyzed": 0,
+            },
+        }
+
+    async def generate_profile(self, *, end_user_id: str, workspace_id: UUID):
+        import asyncio
+
+        from src.services.implicit_memory.analyzers.dimension_analyzer import DimensionAnalyzer
+        from src.services.implicit_memory.analyzers.interest_analyzer import InterestAnalyzer
+        from src.services.implicit_memory.analyzers.preference_analyzer import PreferenceAnalyzer
+        from src.services.implicit_memory.data_source import MemoryDataSource
+        from src.services.implicit_memory.habit_detector import HabitDetector
+        from src.services.end_user import EndUserService
+        from src.services.model_config import ModelConfigService
+        from src.services.workspace import WorkspaceService
+
+        user = await EndUserService.from_postgres(self.runtime.postgres).resolve_in_workspace(
+            end_user_id, workspace_id
+        )
+        if user is None:
+            raise ValueError("User not found in workspace")
+        user_id = str(user.id)
+        workspace = await WorkspaceService.from_postgres(self.runtime.postgres).row(workspace_id)
+        model = await ModelConfigService.from_postgres(
+            self.runtime.postgres, self.runtime.model_service
+        ).chat_model_for_workspace(workspace)
+        source = MemoryDataSource(self.repository)
+        if await source.count_user_summaries(user_id) < 5:
+            profile = self._build_empty_profile()
+        else:
+            preference_analyzer = PreferenceAnalyzer(model)
+            dimension_analyzer = DimensionAnalyzer(model)
+            interest_analyzer = InterestAnalyzer(model)
+            habit_detector = HabitDetector(model)
+
+            async def get_preference_tags():
+                summaries = await source.get_user_summaries(user_id)
+                if not summaries:
+                    return []
+                tags = await preference_analyzer.analyze_preferences(user_id, summaries)
+                tags = [tag for tag in tags if not tag.confidence_score < 0.5]
+                tags.sort(key=lambda tag: (tag.confidence_score, tag.updated_at), reverse=True)
+                return tags
+
+            async def get_dimension_portrait():
+                summaries = await source.get_user_summaries(user_id)
+                if not summaries:
+                    return dimension_analyzer._create_empty_portrait(user_id)
+                return await dimension_analyzer.analyze_dimensions(user_id, summaries)
+
+            async def get_interest_area_distribution():
+                summaries = await source.get_user_summaries(user_id)
+                if not summaries:
+                    return interest_analyzer._create_empty_distribution(user_id)
+                return await interest_analyzer.analyze_interests(user_id, summaries)
+
+            async def get_behavior_habits():
+                summaries = await source.get_user_summaries(user_id)
+                if not summaries:
+                    return []
+                habits = await habit_detector.detect_habits(user_id, summaries)
+                habits.sort(
+                    key=lambda habit: (habit.confidence_level, habit.last_observed), reverse=True
+                )
+                return habits
+
+            preferences, portrait, interests, habits = await asyncio.gather(
+                get_preference_tags(),
+                get_dimension_portrait(),
+                get_interest_area_distribution(),
+                get_behavior_habits(),
+            )
+            profile = {
+                "preferences": [tag.model_dump(mode="json") for tag in preferences],
+                "portrait": portrait.model_dump(mode="json"),
+                "interest_areas": interests.model_dump(mode="json"),
+                "habits": [habit.model_dump(mode="json") for habit in habits],
+            }
+        try:
+            await self.repository.save_profile(user_id, workspace_id, profile)
+        except Exception:
+            logger.exception(
+                "Failed to persist generated implicit profile: end_user_id=%s", user_id
+            )
+        return {**profile, "end_user_id": user_id, "cached": False}

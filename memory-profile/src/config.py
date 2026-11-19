@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import logging
+from pathlib import Path
 from typing import Literal
 from urllib.parse import quote_plus, urlparse
 
@@ -70,17 +72,127 @@ class ProfileSettings(BaseSettings):
         validation_alias="ACL_RULES_CHANGED_CHANNEL",
     )
 
+    # Migrated extraction and attachment settings use the same keys and defaults as API.
+    oss_endpoint: str = Field("", validation_alias="OSS_ENDPOINT")
+    oss_access_key_id: str = Field("", validation_alias="OSS_ACCESS_KEY_ID")
+    oss_access_key_secret: str = Field("", validation_alias="OSS_ACCESS_KEY_SECRET")
+    oss_bucket_name: str = Field("", validation_alias="OSS_BUCKET_NAME")
+    s3_region: str = Field("", validation_alias="S3_REGION")
+    s3_access_key_id: str = Field("", validation_alias="S3_ACCESS_KEY_ID")
+    s3_secret_access_key: str = Field("", validation_alias="S3_SECRET_ACCESS_KEY")
+    s3_bucket_name: str = Field("", validation_alias="S3_BUCKET_NAME")
+    s3_endpoint_url: str = Field("", validation_alias="S3_ENDPOINT_URL")
+    minio_endpoint_url: str = Field("", validation_alias="MINIO_ENDPOINT_URL")
+    minio_access_key_id: str = Field("", validation_alias="MINIO_ACCESS_KEY_ID")
+    minio_secret_access_key: str = Field("", validation_alias="MINIO_SECRET_ACCESS_KEY")
+    minio_bucket_name: str = Field("", validation_alias="MINIO_BUCKET_NAME")
+    minio_region: str = Field("", validation_alias="MINIO_REGION")
+    storage_type: str = Field("local", validation_alias="STORAGE_TYPE")
+    file_path: str = Field("/files", validation_alias="FILE_PATH")
+    file_local_server_url: str = Field(
+        "http://localhost:8000/api", validation_alias="FILE_LOCAL_SERVER_URL"
+    )
+    max_file_size: int = Field(52428800, validation_alias="MAX_FILE_SIZE")
+    bert_url: str = Field("", validation_alias="BERT_URL")
+    statement_classifier_timeout_seconds: float = Field(
+        10, validation_alias="STATEMENT_CLASSIFIER_TIMEOUT_SECONDS"
+    )
+    statement_type_classifier_model: str = Field(
+        "", validation_alias="STATEMENT_TYPE_CLASSIFIER_MODEL"
+    )
+    statement_type_classifier_api_key: str = Field(
+        "", validation_alias="STATEMENT_TYPE_CLASSIFIER_API_KEY"
+    )
+    temporal_type_classifier_model: str = Field(
+        "", validation_alias="TEMPORAL_TYPE_CLASSIFIER_MODEL"
+    )
+    temporal_type_classifier_api_key: str = Field(
+        "", validation_alias="TEMPORAL_TYPE_CLASSIFIER_API_KEY"
+    )
+    unsolved_reference_classifier_model: str = Field(
+        "", validation_alias="UNSOLVED_REFERENCE_CLASSIFIER_MODEL"
+    )
+    unsolved_reference_classifier_api_key: str = Field(
+        "", validation_alias="UNSOLVED_REFERENCE_CLASSIFIER_API_KEY"
+    )
+    extract_pruning_enabled: bool = Field(True, validation_alias="EXTRACT_PRUNING_ENABLED")
+    extract_pruning_url: str = Field("", validation_alias="EXTRACT_PRUNING_URL")
+    extract_pruning_api_key: str = Field("", validation_alias="EXTRACT_PRUNING_API_KEY")
+    extract_pruning_model: str = Field("extract-pruning", validation_alias="EXTRACT_PRUNING_MODEL")
+    extract_pruning_request_timeout_seconds: float = Field(
+        60, validation_alias="EXTRACT_PRUNING_REQUEST_TIMEOUT_SECONDS"
+    )
+    trial_run_chat_history_rounds: int = Field(20, validation_alias="TRIAL_RUN_CHAT_HISTORY_ROUNDS")
+    memory_output_dir: str = Field("logs/memory-output", validation_alias="MEMORY_OUTPUT_DIR")
+
+    # API-compatible memory logging; PROFILE_LOG_* continues to configure the service root logger.
+    memory_log_level: str = Field("INFO", validation_alias="LOG_LEVEL")
+    memory_log_format: str = Field("%(asctime)s - [%(trace_id)s] -%(name)s - %(levelname)s - %(message)s", validation_alias="LOG_FORMAT")
+    log_file_path: str = Field("logs/app.log", validation_alias="LOG_FILE_PATH")
+    log_max_size: int = Field(10485760, validation_alias="LOG_MAX_SIZE")
+    log_to_console: bool = Field(True, validation_alias="LOG_TO_CONSOLE")
+    log_to_file: bool = Field(True, validation_alias="LOG_TO_FILE")
+    prompt_log_level: str = Field("INFO", validation_alias="PROMPT_LOG_LEVEL")
+    enable_template_logging: bool = Field(False, validation_alias="ENABLE_TEMPLATE_LOGGING")
+    timing_log_file: str = Field("logs/time.log", validation_alias="TIMING_LOG_FILE")
+    timing_log_to_console: bool = Field(True, validation_alias="TIMING_LOG_TO_CONSOLE")
+    agent_log_file: str = Field("logs/agent_service.log", validation_alias="AGENT_LOG_FILE")
+    agent_log_max_size: int = Field(5242880, validation_alias="AGENT_LOG_MAX_SIZE")
+    agent_log_backup_count: int = Field(20, validation_alias="AGENT_LOG_BACKUP_COUNT")
+    enable_sensitive_data_filter: bool = Field(True, validation_alias="ENABLE_SENSITIVE_DATA_FILTER")
+
+    @field_validator(
+        "log_to_console", "log_to_file", "enable_template_logging",
+        "timing_log_to_console", "enable_sensitive_data_filter", mode="before"
+    )
+    @classmethod
+    def normalize_memory_logging_boolean(cls, value: object) -> object:
+        return value.lower() == "true" if isinstance(value, str) else value
+
+
+    @field_validator(
+        "extract_pruning_url", "extract_pruning_api_key", "extract_pruning_model", mode="before"
+    )
+    @classmethod
+    def normalize_extract_pruning_text(cls, value: object) -> object:
+        return value.strip() if isinstance(value, str) else value
+
+    @field_validator("extract_pruning_enabled", mode="before")
+    @classmethod
+    def normalize_extract_pruning_enabled(cls, value: object) -> object:
+        if isinstance(value, str):
+            return value.strip().lower() == "true"
+        return value
+
+    @field_validator(
+        "extract_pruning_request_timeout_seconds",
+        "statement_classifier_timeout_seconds",
+        mode="before",
+    )
+    @classmethod
+    def normalize_extraction_timeout(cls, value: object) -> float:
+        return max(0.1, float(value))
+
+    @field_validator("trial_run_chat_history_rounds", mode="before")
+    @classmethod
+    def normalize_trial_history_rounds(cls, value: object) -> int:
+        try:
+            return max(0, int(value))
+        except (TypeError, ValueError):
+            logging.getLogger(__name__).warning(
+                "Invalid TRIAL_RUN_CHAT_HISTORY_ROUNDS=%r; falling back to 20", value
+            )
+            return 20
+
     # 生成类用例（memory insight / user summary / interest distribution）走模型服务
     # invoke 接缝；凭据、渠道选路与 failover 都在模型服务侧（与 api 同口径）。
     model_service_base_url: str = Field(
         "http://127.0.0.1:8080", validation_alias="MODEL_SERVICE_BASE_URL"
     )
     # Scene continuity BERT probe used only by the scene/split-demo endpoint.
-    # This is the single model credential this process holds; see README.
+    # Its credential is separate from the extraction classifier/pruning clients.
     scene_continuity_url: str = Field("", validation_alias="SCENE_CONTINUITY_URL")
-    scene_continuity_api_key: str = Field(
-        "", validation_alias="SCENE_CONTINUITY_API_KEY"
-    )
+    scene_continuity_api_key: str = Field("", validation_alias="SCENE_CONTINUITY_API_KEY")
     scene_continuity_model: str = Field(
         "topic-shift-detector", validation_alias="SCENE_CONTINUITY_MODEL"
     )
@@ -376,3 +488,25 @@ class ProfileSettings(BaseSettings):
             return [host]
         return [f"{host}:{self.elasticsearch_port}"]
 
+    def get_memory_output_path(self, filename: str = "") -> str:
+        """
+        Get the full path for memory module output files.
+
+        Args:
+            filename: Optional filename to append to the output directory
+
+        Returns:
+            Full path to the output file or directory
+        """
+        base_path = Path(self.memory_output_dir)
+        if filename:
+            return str(base_path / filename)
+        return str(base_path)
+
+    def ensure_memory_output_dir(self) -> None:
+        """
+        Ensure the memory output directory exists.
+        Creates the directory if it doesn't exist.
+        """
+        output_dir = Path(self.memory_output_dir)
+        output_dir.mkdir(parents=True, exist_ok=True)

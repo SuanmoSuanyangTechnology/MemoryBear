@@ -17,6 +17,7 @@ from src.modules.implicit_memory.handler import (
     ListApiResponse,
     ObjectApiResponse,
 )
+from src.schemas.implicit_memory import GenerateProfileRequest
 
 router = APIRouter(prefix="/memory/implicit-memory", tags=["Implicit Memory"])
 Context = Annotated[MemoryPrincipal, Depends(require_memory_context)]
@@ -106,3 +107,8 @@ async def habits(
         frequency_pattern=frequency_pattern,
         time_period=time_period,
     )
+
+
+@router.post("/generate_profile", response_model=ObjectApiResponse)
+async def generate_profile(request: Request, context: Context, payload: GenerateProfileRequest):
+    return await _handler(request).generate_profile(context, payload.end_user_id)

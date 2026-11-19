@@ -377,3 +377,19 @@ class MemoryConfigReadRepository:
                     Workspace.is_active.is_(True),
                 )
             )
+
+    async def resolve_trial_config_id(self, config_id, workspace_id):
+        try:
+            parsed = UUID(str(config_id))
+        except ValueError:
+            try:
+                legacy_id = int(config_id)
+            except (ValueError, TypeError):
+                return None
+            statement = select(MemoryConfigRow.config_id).where(
+                MemoryConfigRow.config_id_old == legacy_id,
+                MemoryConfigRow.workspace_id == workspace_id,
+            )
+            async with self.postgres.session() as session:
+                return await session.scalar(statement)
+        return parsed

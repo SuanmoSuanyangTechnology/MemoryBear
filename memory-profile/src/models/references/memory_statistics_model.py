@@ -3,6 +3,7 @@
 from sqlalchemy import JSON, Boolean, Column, DateTime, Integer, String, Text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 
+from src.common.datetime_utils import utcnow_naive
 from src.models.base import ReadOnlyBase
 
 
@@ -11,7 +12,7 @@ class Conversation(ReadOnlyBase):
 
     id = Column(UUID(as_uuid=True), primary_key=True)
     app_id = Column(UUID(as_uuid=True), nullable=False)
-    workspace_id = Column(UUID(as_uuid=True), nullable=True)
+    workspace_id = Column(UUID(as_uuid=True), nullable=False)
     user_id = Column(String, nullable=True)
     title = Column(String(255), nullable=True)
     write_cursor = Column(Integer, nullable=False)
@@ -126,8 +127,8 @@ class ImplicitEmotionsStorage(ReadOnlyBase):
     end_user_id = Column(String(255), nullable=False)
     implicit_profile = Column(JSONB, nullable=True)
     emotion_suggestions = Column(JSONB, nullable=True)
+    created_at = Column(DateTime, nullable=False, default=utcnow_naive, comment="创建时间")
+    implicit_generated_at = Column(DateTime, nullable=True, comment="隐性记忆画像生成时间")
 
-    created_at = Column(DateTime, nullable=False)
     updated_at = Column(DateTime, nullable=False)
-    implicit_generated_at = Column(DateTime, nullable=True)
     emotion_generated_at = Column(DateTime, nullable=True)

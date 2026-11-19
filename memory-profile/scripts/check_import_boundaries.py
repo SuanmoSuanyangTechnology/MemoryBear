@@ -11,7 +11,6 @@ FORBIDDEN_IMPORT_ROOTS = {"api", "app"}
 READ_ONLY_PG_REPOSITORIES = {
     SERVICE_ROOT / "src/repositories/display.py",
     SERVICE_ROOT / "src/repositories/perceptual.py",
-    SERVICE_ROOT / "src/repositories/implicit_memory.py",
     SERVICE_ROOT / "src/repositories/profile.py",
     SERVICE_ROOT / "src/repositories/end_user.py",
     SERVICE_ROOT / "src/repositories/memory_config.py",

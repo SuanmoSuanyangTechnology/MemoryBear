@@ -170,3 +170,13 @@ class ModelConfigRepository:
         async with self.postgres.session() as session:
             row = (await session.execute(statement)).mappings().one_or_none()
         return dict(row) if row is not None else None
+
+    async def trial_views(self, model_ids, tenant_id):
+        statement = select(*ModelConfig.__table__.c).where(
+            ModelConfig.id.in_(model_ids),
+            ModelConfig.is_active.is_(True),
+            or_(ModelConfig.tenant_id == tenant_id, ModelConfig.is_public.is_(True)),
+        )
+        async with self.postgres.session() as session:
+            rows = (await session.execute(statement)).mappings().all()
+        return {row["id"]: dict(row) for row in rows}
