@@ -355,6 +355,17 @@ class AppServiceSettings(BaseSettings):
         gt=0,
         validation_alias="MARKET_OPERATOR_IMPORT_CONTENT_MAX_TOTAL_BYTES",
     )
+    # Independent file service (core/file-service) internal API. An empty base
+    # URL or service token fails the upload paths closed at call time; the
+    # dependency is runtime-only, so startup is not gated on it.
+    file_service_base_url: str = Field(
+        default="",
+        validation_alias="FILE_SERVICE_BASE_URL",
+    )
+    file_service_internal_token: SecretStr = Field(
+        default=SecretStr(""),
+        validation_alias="FILE_SERVICE_INTERNAL_TOKEN",
+    )
     # Operator MCP availability probes (interface doc §8.8): loopback, link-local,
     # metadata and unspecified targets are always rejected; private ranges are
     # rejected unless listed here. Comma-separated CIDRs; empty means deny all

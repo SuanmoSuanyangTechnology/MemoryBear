@@ -1,0 +1,59 @@
+[build-system]
+requires = ["hatchling>=1.26"]
+build-backend = "hatchling.build"
+
+[project]
+name = "file-service"
+version = "0.1.0"
+description = "Independent MemoryBear generic file service"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "aiofiles>=23.0.0,<25",
+    "alembic>=1.17,<2",
+    "asyncpg>=0.31,<1",
+    "auth-sdk",
+    "boto3>=1.42,<2",
+    "error-core",
+    "fastapi>=0.119,<1",
+    "httpx>=0.28,<1",
+    "minio>=7.2,<8",
+    "oss2>=2.19,<3",
+    "prometheus-client>=0.21,<1",
+    "psycopg[binary]>=3.2,<4",
+    "pydantic-settings>=2.11,<3",
+    "python-dotenv>=1.1,<2",
+    "python-jose>=3.5,<4",
+    "python-multipart>=0.0.20,<1",
+    "sqlalchemy[asyncio]>=2.0.44,<3",
+    "uvicorn[standard]>=0.37,<1",
+]
+
+[dependency-groups]
+dev = ["aiosqlite>=0.21,<1", "httpx>=0.28,<1", "pytest>=9,<10",
+       "pytest-asyncio>=1.3,<2", "ruff>=0.16,<1"]
+
+[tool.uv.sources]
+auth-sdk = { path = "../packages/auth-sdk" }
+error-core = { path = "../packages/error-core" }
+
+[tool.ruff.lint.isort]
+known-first-party = ["src"]
+
+[tool.ruff.lint.per-file-ignores]
+# Mechanically copied from application-service (itself a frozen port of the host
+# monolith): kept verbatim for line-by-line comparison during coexistence. The
+# url_signer module and its test are also kept byte-for-byte as specified.
+"src/storage/*.py" = ["BLE001", "E722", "F401", "I001", "PIE790", "RUF010", "RUF012", "RUF022", "S110", "UP035", "UP045"]
+"src/services/file_storage_service.py" = ["BLE001", "I001", "RUF010", "UP035", "UP045"]
+"src/services/url_signer.py" = ["UP006", "UP035", "UP045"]
+"src/utils/datetime_utils.py" = ["BLE001", "FURB162", "PYI041", "S110", "TRY004", "UP017"]
+"src/models/file_metadata_model.py" = ["F401", "I001"]
+"src/models/generic_file_model.py" = ["F401", "I001"]
+"tests/test_storage_local.py" = ["I001"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src"]

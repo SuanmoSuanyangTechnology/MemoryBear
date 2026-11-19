@@ -84,6 +84,13 @@ _PUBLIC_PATH_PATTERNS = (
     # and the actor UUID, which is the authoritative gate on this cross-tenant
     # surface. POST only.
     (re.compile(r"^/internal/v1/operator/"), ("POST",)),
+    # Shared-link file upload: the viewer authenticates with a share access
+    # token (the route dependency `get_share_user_id` verifies it), so the
+    # gateway cannot assemble a platform principal. POST only, exact path.
+    (
+        re.compile(r"^/internal/v1/storage/share/files$"),
+        ("POST",),
+    ),
 )
 
 

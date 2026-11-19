@@ -63,6 +63,7 @@ from memorybear_grpc.metadata import traceparent_trace_id
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse
 
+from .anonymous import is_storage_public_read, is_storage_share_upload
 from .auth_strategy import AuthStrategy, load_strategy
 from .config import settings
 from .forward import TargetResolver
@@ -260,6 +261,18 @@ class GatewayMiddleware(BaseHTTPMiddleware):
                 and not _has_credentials(request)):
             self._public_citation_download_headers(request)
             return await call_next(request)
+        # File-service public reads (permanent/public/signed URL/status/info):
+        # the browser carries no platform credential; requests carrying one run
+        # the full pipeline (declared identity fails closed, never falls back).
+        if (is_storage_public_read(request.url.path, request.method)
+                and not _has_credentials(request)):
+            self._anonymous_headers(request)
+            return await call_next(request)
+        # Share-token upload: Authorization carries the viewer's share access
+        # token by contract; captured for the forwarder, same as /api/public/share.
+        if is_storage_share_upload(request.url.path, request.method):
+            self._public_share_api_headers(request)
+            return await call_next(request)
         result = await strategy.authenticate(request, deps)
         if result.status_code is not None:
             # Rejection: 401 semantics / 429 rate limit; rate-limit headers ride
@@ -372,3 +385,14 @@ class GatewayMiddleware(BaseHTTPMiddleware):
         headers["x-forwarded-proto"] = request.url.scheme
         headers["x-forwarded-host"] = request.headers.get("host", "")
         request.scope["headers"] = [(k.lower().encode(), v.encode()) for k, v in headers.items()]
+
+    @staticmethod
+    def _anonymous_headers(request: Request) -> None:
+        """Sanitize the identity namespace, inject no identity, and re-assert the
+        origin pair — file-service rebuilds remote-storage presigned URLs from
+        X-Forwarded-Proto, otherwise https pages get http redirects."""
+        headers = _sanitize_headers(request.headers)
+        headers["x-forwarded-proto"] = request.url.scheme
+        headers["x-forwarded-host"] = request.headers.get("host", "")
+        request.scope["headers"] = [
+            (k.lower().encode(), v.encode()) for k, v in headers.items()]

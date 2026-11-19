@@ -22,6 +22,7 @@ from .routes.prompt_optimizer import router as prompt_optimizer_router
 from .routes.public_share import router as public_share_router
 from .routes.release_shares import router as release_shares_router
 from .routes.skills import router as skills_router
+from .routes.storage_share import router as storage_share_router
 from .routes.tools import router as tools_router
 
 from ..plugins import get_registered_routers
@@ -49,6 +50,7 @@ internal_v1_router.include_router(prompt_optimizer_router)
 internal_v1_router.include_router(public_share_router)
 internal_v1_router.include_router(release_shares_router)
 internal_v1_router.include_router(skills_router)
+internal_v1_router.include_router(storage_share_router)
 internal_v1_router.include_router(tools_router)
 
 # Routers already attached by `mount_registered_routers` (idempotency guard).

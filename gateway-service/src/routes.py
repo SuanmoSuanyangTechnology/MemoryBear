@@ -17,6 +17,7 @@ from starlette.responses import Response
 
 from src import config
 from src.forward import Forwarder
+from src.metrics import gateway_unmatched_routes_total
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -100,11 +101,17 @@ async def api_key_stub(request: Request):
     }
 
 
+def unmatched_label(path: str) -> str:
+    parts = [p for p in path.split("/") if p][:2]
+    return "/" + "/".join(parts) if parts else "/"
+
+
 @router.api_route("/{path:path}", methods=["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD"])
 async def forward_route(request: Request):
     route = getattr(request.state, "target_route", None)
     if route is None:
         logger.warning("unmatched route: %s %s", request.method, request.url.path)
+        gateway_unmatched_routes_total.labels(unmatched_label(request.url.path)).inc()
         return JSONResponse(status_code=404, content={"detail": "not found"})
     grpc_forwarder = getattr(request.app.state, "grpc_forwarder", None)
     if grpc_forwarder is not None and grpc_forwarder.matches(request, route):
