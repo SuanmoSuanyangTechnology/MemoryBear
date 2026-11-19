@@ -6,6 +6,7 @@
 路由前缀: /memory/work
 最终路径: /v1/memory/work/{end_user_id}/conversations
          /v1/memory/work/{end_user_id}/messages
+         /v1/memory/work/{end_user_id}/source_messages
 认证方式: API Key (@require_api_key_self_db)
 """
 
@@ -89,6 +90,48 @@ async def get_messages(
     result = await memory_working_controller.get_messages(
         request=request,
         conversation_id=conversation_id,
+        page=page,
+        pagesize=pagesize,
+        keyword=keyword,
+        start_date=start_date,
+        end_date=end_date,
+        current_user=current_user,
+    )
+    return result
+
+
+@router.get("/{end_user_id}/source_messages", response_model=ApiResponse)
+@require_api_key_self_db(scopes=["memory"])
+async def get_source_messages(
+        request: Request,
+        end_user_id: str,
+        source: str = Query(..., description="来源：service_api 或 mcp"),
+        page: int = Query(default=1, ge=1, description="页码，从 1 开始"),
+        pagesize: int = Query(default=20, ge=1, le=100, description="每页数量，最大 100"),
+        keyword: str | None = Query(default=None, description="消息正文关键词"),
+        start_date: int | None = Query(default=None, ge=0, description="开始时间（毫秒时间戳，UTC）"),
+        end_date: int | None = Query(default=None, ge=0, description="结束时间（毫秒时间戳，UTC）"),
+        api_key_auth: ApiKeyAuth = None,
+):
+    """按来源分页获取终端用户的工作记忆消息，按 created_at 从旧到新排列。
+
+    仅 `service_api` 与 `mcp` 两种来源有数据；请求其他来源时返回空列表。
+    支持关键词与闭区间毫秒时间戳过滤；start_date 不能大于 end_date。
+    """
+    language = await get_current_language(request)
+    async with get_async_db_context() as db:
+        end_user = await validate_end_user_in_workspace_async(
+            db, end_user_id, api_key_auth.workspace_id, locale=language
+        )
+        # 合并路由：end_user 可能是合并目标（原 ID 已被合并且 is_active=False），
+        # 改用 end_user.id 继续查询。
+        resolved_end_user_id = end_user.id
+        current_user = await get_current_user_snapshot_from_api_key_async(db, api_key_auth)
+
+    result = await memory_working_controller.get_source_messages(
+        request=request,
+        end_user_id=resolved_end_user_id,
+        source=source,
         page=page,
         pagesize=pagesize,
         keyword=keyword,
