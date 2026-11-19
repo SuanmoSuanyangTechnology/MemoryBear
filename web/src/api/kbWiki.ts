@@ -21,6 +21,10 @@ import type {
   BatchEnabledFaq,
   FaqGenerationJobsResponse,
   FaqIndexStatusVo,
+  FaqImportPayload,
+  FaqImportSubmitResponse,
+  FaqImportCurrentTaskResponse,
+  FaqImportTaskVo,
 } from '@/views/KnowledgeBase/components/Private/FAQ/types';
 
 export interface WikiRevision {
@@ -179,4 +183,16 @@ export const deleteFaq = (kb_id: string, faq_id: string, expected_row_version: n
 // Fetch FAQ review context and the corresponding Wiki version
 export const getFaqReviewContext = (kb_id: string, faq_id: string) => {
   return request.get<GetReviewFaqContext>(`/knowledges/${kb_id}/faqs/${faq_id}/review-context`)
+};
+// Submit an asynchronous FAQ batch import task; HTTP 202 only means the task was accepted
+export const importFaqs = (kb_id: string, data: FaqImportPayload) => {
+  return request.post<FaqImportSubmitResponse>(`/knowledges/${kb_id}/faqs/import`, data)
+};
+// Query the knowledge base's current (pending or running) FAQ import task on page entry
+export const getCurrentFaqImportTask = (kb_id: string) => {
+  return request.get<FaqImportCurrentTaskResponse>(`/knowledges/${kb_id}/faqs/import`)
+};
+// Poll the FAQ batch import task; succeeded/failed are the only terminal statuses
+export const getFaqImportProgress = (kb_id: string, task_id: string) => {
+  return request.get<FaqImportTaskVo>(`/knowledges/${kb_id}/faqs/import/${task_id}`)
 };

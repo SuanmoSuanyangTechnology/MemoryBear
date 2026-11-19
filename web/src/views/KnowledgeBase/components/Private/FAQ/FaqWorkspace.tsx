@@ -3,6 +3,7 @@ import { App, Button, Flex, Form, Select, Space, Switch, Tooltip } from 'antd';
 import { useTranslation } from 'react-i18next';
 import type { ColumnsType } from 'antd/es/table';
 import type { TableProps } from 'antd';
+import clsx from 'clsx';
 
 import {
   getFaqListUrl,
@@ -18,12 +19,18 @@ import StatusTag from '@/components/StatusTag';
 import FaqEditModal, { type FaqEditModalRef } from './FaqEditModal';
 import FaqReviewModal, { type FaqReviewModalRef } from './FaqReviewModal';
 import FaqDetailDrawer, { type FaqDetailDrawerRef } from './FaqDetailDrawer';
+import FaqImportDrawer from './FaqImportDrawer';
+import FaqImportProgress from './FaqImportProgress';
+import useFaqImport from './hooks/useFaqImport';
+import { UPLOAD_ICON_SMALL_CLASS, TEMPLATE_ICON_CLASS } from './faqImportIcons';
 import { formatDateTime } from '@/utils/format'
 import type { FaqItem, FaqStatus, AllFaqStatus, FaqListResponse } from './types';
 import { statusColors } from './constants';
 import Tag from '@/components/Tag';
 
 const statuses: AllFaqStatus[] = ['all', 'pending', 'approved', 'change_pending'];
+/** 「全部」用空字符串表示：Table 的 dealSo 与 request 的 paramFilter 都会剔除空值，从而不向接口传筛选参数 */
+const ALL_FILTER_VALUE = '';
 
 export default function FaqWorkspace({ knowledgeBaseId, onOpenWikiPage }: {
   knowledgeBaseId: string;
@@ -31,7 +38,7 @@ export default function FaqWorkspace({ knowledgeBaseId, onOpenWikiPage }: {
 }) {
   const { t } = useTranslation();
   const { message, modal } = App.useApp();
-  const [form] = Form.useForm<{ review_status: FaqItem['review_status']; keywords?: string; is_enabled?: boolean; }>();
+  const [form] = Form.useForm<{ keyword?: string; review_status?: FaqStatus | ''; is_enabled?: boolean | '' }>();
   const values = Form.useWatch([], form) ?? {};
   
   const [totalAll, setTotalAll] = useState<number>(0);
@@ -61,6 +68,21 @@ export default function FaqWorkspace({ knowledgeBaseId, onOpenWikiPage }: {
     setSelected([])
     setSelectedList([])
   }
+
+  const {
+    open: importOpen,
+    mode: importMode,
+    setMode: setImportMode,
+    fileName: importFileName,
+    readId: importReadId,
+    parsing: importParsing,
+    parseResult: importParseResult,
+    stage: importStage,
+    task: importTask,
+    openImport,
+    closeImport: closeImportDrawer,
+    readFile: readImportFile,
+  } = useFaqImport({ knowledgeBaseId, onCompleted: refresh });
 
   const handleSwitch = (vo: FaqItem) => {
     setBusy(true)
@@ -160,6 +182,9 @@ export default function FaqWorkspace({ knowledgeBaseId, onOpenWikiPage }: {
             >
               {value}
             </span>
+            {row.origin === "manual" &&
+              <Tag color="default" className="rb:cursor-default">无 Wiki 来源</Tag>
+            }
             {row.source?.title && row.source.wiki_page_id && row.source.source_status === 'available' && (
               <Tag color="default" className="rb:hover:text-blue-500 rb:hover:border-[rgba(21,94,239,0.25)] rb:hover:bg-[rgba(21,94,239,0.06)]"
                 onClick={(event) => {
@@ -235,7 +260,7 @@ export default function FaqWorkspace({ knowledgeBaseId, onOpenWikiPage }: {
       <Flex justify="space-between" gap={16} wrap className="rb:shrink-0!">
         <Form
           form={form}
-          initialValues={{ review_status: null, is_enabled: null }}
+          initialValues={{ review_status: ALL_FILTER_VALUE, is_enabled: ALL_FILTER_VALUE }}
           layout="inline"
         >
           <Form.Item name="keyword">
@@ -251,7 +276,7 @@ export default function FaqWorkspace({ knowledgeBaseId, onOpenWikiPage }: {
                 const labelKey = isAll ? 'allReviewStatus' : key;
                 const count = (isAll ? totalAll : reviewCounts[key]) ?? 0
                 return {
-                  value: isAll ? null : key,
+                  value: isAll ? ALL_FILTER_VALUE : key,
                   label: `${t(`knowledgeBase.faq.${labelKey}`)} (${count.toLocaleString()})`,
                 }
               })}
@@ -261,7 +286,7 @@ export default function FaqWorkspace({ knowledgeBaseId, onOpenWikiPage }: {
           <Form.Item name="is_enabled">
             <Select
               options={['all', 'enable', 'disable'].map(value => ({
-                value: value == 'all' ? null : value === 'enable',
+                value: value === 'all' ? ALL_FILTER_VALUE : value === 'enable',
                 label: t(`knowledgeBase.faq.${value === 'all' ? 'allEnabledStatus' : value}`),
               }))}
               className="rb:w-36!"
@@ -269,13 +294,18 @@ export default function FaqWorkspace({ knowledgeBaseId, onOpenWikiPage }: {
           </Form.Item>
         </Form>
         <Space size={12} className="rb:shrink-0">
+          <Tooltip title={t('knowledgeBase.faq.importBatch.entry')}>
+            <Button className="rb:group/upload rb:px-2!" onClick={openImport}>
+              <div className={clsx(UPLOAD_ICON_SMALL_CLASS, "rb:group-hover/upload:bg-[url('@/assets/images/application/export_blue.svg')]")} />
+            </Button>
+          </Tooltip>
           <Tooltip title={t('knowledgeBase.faq.exportAll')}>
             <Button
               disabled={exporting || totalAll < 1 || busy}
-              className="rb:group rb:px-2!"
+              className="rb:group/export rb:px-2!"
               onClick={handleExportAll}
             >
-              <div className="rb:size-4.5 rb:bg-cover rb:bg-[url('@/assets/images/application/import.svg')] rb:group-hover:bg-[url('@/assets/images/application/import_blue.svg')]" />
+              <div className={TEMPLATE_ICON_CLASS} />
             </Button>
           </Tooltip>
           <Button type="primary" onClick={() => editModalRef.current?.handleOpen()}>
@@ -284,6 +314,7 @@ export default function FaqWorkspace({ knowledgeBaseId, onOpenWikiPage }: {
         </Space>
       </Flex>
       <Flex vertical className="rb:flex-1!">
+        <FaqImportProgress task={importTask} visible={importStage === 'submitting' || importStage === 'running'} />
         {selected.length > 0 && (
           <Flex align="center" gap={12} className="rb:bg-[#f7f9ff] rb:border-b rb:border-b-[#e8edf9] rb:px-3! rb:py-1!">
             <span className="rb:text-[12px] rb:text-gray-600">{t('knowledgeBase.faq.selectedCount', { count: selected.length })}</span>
@@ -357,6 +388,18 @@ export default function FaqWorkspace({ knowledgeBaseId, onOpenWikiPage }: {
         onOpenWikiPage={onOpenWikiPage}
         knowledgeBaseId={knowledgeBaseId}
         refresh={refresh}
+      />
+      <FaqImportDrawer
+        open={importOpen}
+        mode={importMode}
+        onModeChange={setImportMode}
+        fileName={importFileName}
+        readId={importReadId}
+        parsing={importParsing}
+        stage={importStage}
+        parseResult={importParseResult}
+        onFile={readImportFile}
+        onClose={closeImportDrawer}
       />
     </Flex>
   );
