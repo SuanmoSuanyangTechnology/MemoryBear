@@ -31,6 +31,36 @@ from ...nodes.configs import (
 from ....utils.workflow_node_types import NodeType
 
 
+_MISSING_HINTS = {
+    "tool_id": "请选择工具",
+    "input_list": "请选择要处理的输入列表",
+    "categories": "请配置分类列表",
+    "class_name": "请填写分类名称",
+    "cases": "请配置分支条件",
+}
+
+_VALIDATOR_HINTS = {
+    "query 与 image_query 必须填写其中一个": "未配置查询内容，请在文本查询和图片查询中选择一项",
+    "query 与 image_query 只能二选一，不能同时填写": "文本查询和图片查询不能同时填写，请只保留一项",
+    "At least one cases are required": "请至少配置一个分支条件",
+    "Custom auth header not specified": "请填写自定义认证请求头名称",
+    "API key for authentication not specified": "请填写认证用的 API Key",
+    "When content_type is 'form-data', data must be a list of HttpFormData": "请选择表单字段列表作为请求体",
+    "When content_type is JSON, data must be of type str": "请以字符串形式填写 JSON 请求体",
+    "When content_type is x-www-form-urlencoded, data must be an object(dict)": "请以键值对象填写表单请求体",
+    "When content_type is raw/binary, data must be a string (File descriptor)": "请以字符串形式填写 raw/binary 请求体",
+}
+
+_TYPE_HINTS = {
+    "string_type": "请填写文本",
+    "list_type": "请提供列表",
+    "dict_type": "请提供键值对象",
+    "int_parsing": "请填写整数",
+    "int_type": "请填写整数",
+    "uuid_parsing": "请提供有效的 UUID",
+}
+
+
 class MemoryBearConverter(BaseConverter):
     errors: list
     warnings: list
@@ -74,21 +104,24 @@ class MemoryBearConverter(BaseConverter):
         if not isinstance(exc, ValidationError):
             return str(exc)
         details = []
-        translated = False
         for issue in exc.errors(include_input=False, include_url=False):
             loc = issue["loc"]
-            if config_cls is IterationNodeConfig and issue["type"] == "missing" and loc in (("input",), ("output",)):
-                details.append("请选择要遍历的输入列表" if loc == ("input",) else "请选择迭代输出变量")
-                translated = True
-            elif (config_cls is KnowledgeRetrievalNodeConfig and not loc
-                  and issue["type"] == "value_error"
-                  and str(issue.get("ctx", {}).get("error")) == "query 与 image_query 必须填写其中一个"):
-                details.append("未配置查询内容，文本查询或图片查询至少填写一项")
-                translated = True
+            field = ".".join(map(str, loc))
+            kind = issue["type"]
+            if kind == "missing":
+                if config_cls is IterationNodeConfig and loc == ("input",):
+                    message = "请选择要遍历的输入列表"
+                elif config_cls is IterationNodeConfig and loc == ("output",):
+                    message = "请选择迭代输出变量"
+                else:
+                    message = _MISSING_HINTS.get(loc[-1] if loc else None, "请补全此必填配置")
+            elif kind == "value_error":
+                reason = str(issue.get("ctx", {}).get("error") or issue["msg"])
+                message = _VALIDATOR_HINTS.get(reason, reason)
             else:
-                field = ".".join(map(str, loc))
-                details.append(f"{field}: {issue['msg']}" if field else issue["msg"])
-        return "；".join(details) if translated else str(exc)
+                message = _TYPE_HINTS.get(kind, issue["msg"])
+            details.append(f"{field}: {message}" if field else message)
+        return "；".join(details)
 
     def config_validate(self, node_id: str, node_name: str, config_cls: type[BaseNodeConfig], value: dict):
         try:
