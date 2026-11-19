@@ -8,9 +8,10 @@ scope projection ported from ``api/app/core/memory/read_services/metadata_scope.
 The host resolves ``memory.metadata_scope`` through its plugin registry
 (enterprise only) to bound the profile to the calling application. This service
 asks the enterprise metadata-scope endpoint instead
-(:meth:`RetrievalQueries.metadata_scope`): the caller-provided app is not part
-of the read wire contract, so the end user's bound app is used, and any lookup
-failure degrades to the documented ``default_only`` projection.
+(:meth:`RetrievalQueries.metadata_scope`). The read wire contract does not carry
+a caller app yet, so reads without one apply the documented ``default_only``
+projection; the lookup stays behind that conditional for future app-aware calls,
+and any failure also degrades to ``default_only``.
 """
 
 from __future__ import annotations

@@ -22,7 +22,6 @@ import logging
 import uuid
 from typing import Any
 
-import sqlalchemy as sa
 from sqlalchemy import select
 
 from src.core.adapters.retrieval.constants import EXCLUDED_APP_ID, USER_ENTITY_TYPE
@@ -45,7 +44,6 @@ from src.core.adapters.storage import (
 from src.core.domain.enums import MemorySource
 from src.models.references import (
     Conversation,
-    EndUser,
     EndUserInfo,
     MemoryMessage,
     OntologySceneRow,
@@ -443,28 +441,26 @@ __all__ = ["RetrievalQueries"]
 
 
 async def _resolve_metadata_scope(
-    self: RetrievalQueries, end_user_id: str
+    self: RetrievalQueries,
+    end_user_id: str,
+    app_id: uuid.UUID | None = None,
 ) -> dict[str, Any] | None:
-    """Resolve the end user's app ontology boundary through memory-enterprise.
+    """Resolve the caller app's ontology boundary through memory-enterprise.
 
-    The profile service owns no ontology table; it looks the app up on the core
-    end-user row and asks the enterprise service for the boundary. Any failure
-    (service disabled, transport error, no binding) degrades to ``default_only``.
+    The read wire contract does not carry a caller app yet, so a read without
+    one uses the documented ``default_only`` projection. The conditional keeps
+    the enterprise lookup ready for the future app-aware calls. Any failure
+    (service disabled, transport error, no binding) degrades to
+    ``default_only``.
     """
 
-    if self._enterprise is None or not self._enterprise.enabled:
+    if app_id is None or self._enterprise is None or not self._enterprise.enabled:
         return None
     try:
         user_uuid = uuid.UUID(str(end_user_id))
     except (TypeError, ValueError):
         return None
     try:
-        async with self._postgres.session() as session:
-            app_id = await session.scalar(
-                sa.select(EndUser.app_id).where(EndUser.id == user_uuid)
-            )
-        if app_id is None:
-            return None
         return await self._enterprise.metadata_scope(
             app_id=app_id, end_user_id=user_uuid
         )
