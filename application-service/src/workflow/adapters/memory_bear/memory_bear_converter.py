@@ -1,5 +1,5 @@
 # -*- coding: UTF-8 -*-
-from pydantic import ValidationError
+from pydantic import BaseModel, ValidationError
 
 from ...adapters.base_converter import BaseConverter
 from ...adapters.errors import ExceptionDefinition, ExceptionType
@@ -61,6 +61,57 @@ _TYPE_HINTS = {
 }
 
 
+_ITERATION_HINTS = {
+    "input": "请选择要遍历的输入列表",
+    "output": "请选择迭代输出变量",
+}
+_QUERY_REQUIRED = "query 与 image_query 必须填写其中一个"
+
+
+def _unconfigured_fields(config_cls, value):
+    def is_empty(field):
+        item = value.get(field) if isinstance(value, dict) else getattr(value, field, None)
+        return item is None or isinstance(item, str) and not item.strip()
+
+    if config_cls is IterationNodeConfig:
+        return {(field,): hint for field, hint in _ITERATION_HINTS.items() if is_empty(field)}
+    if config_cls is KnowledgeRetrievalNodeConfig and all(is_empty(field) for field in ("query", "image_query")):
+        return {("query",): _VALIDATOR_HINTS[_QUERY_REQUIRED]}
+    return {}
+
+
+def validate_import_config(config_cls: type[BaseModel], value: dict | BaseModel) -> tuple[BaseModel | None, str | None]:
+    """Validate the full node config and retain all actionable import errors."""
+    pending = _unconfigured_fields(config_cls, value)
+    details = []
+    validated = None
+    try:
+        validated = config_cls.model_validate(value)
+    except ValidationError as exc:
+        for issue in exc.errors(include_input=False, include_url=False):
+            loc = issue["loc"]
+            kind = issue["type"]
+            fallback = issue.get("msg") or "配置校验失败"
+            if loc in pending and kind in ("missing", "string_type"):
+                message = pending.pop(loc)
+            elif kind == "missing":
+                message = _MISSING_HINTS.get(loc[-1] if loc else None, "请补全此必填配置")
+            elif kind == "value_error":
+                reason = str(issue.get("ctx", {}).get("error") or "").strip()
+                message = _VALIDATOR_HINTS.get(reason, reason or "配置校验失败")
+                if config_cls is KnowledgeRetrievalNodeConfig and not loc and reason == _QUERY_REQUIRED:
+                    pending.pop(("query",), None)
+            else:
+                message = _TYPE_HINTS.get(kind, fallback)
+            field = ".".join(map(str, loc))
+            details.append(f"{field}: {message}" if field else message)
+    except Exception as exc:
+        return None, str(exc) or "配置校验失败"
+
+    details.extend(f"{'.'.join(loc)}: {hint}" for loc, hint in pending.items())
+    return (None, "；".join(details)) if details else (validated, None)
+
+
 class MemoryBearConverter(BaseConverter):
     errors: list
     warnings: list
@@ -99,41 +150,16 @@ class MemoryBearConverter(BaseConverter):
     def _convert_array_file(var):
         return []
 
-    @staticmethod
-    def _validation_detail(config_cls, exc):
-        if not isinstance(exc, ValidationError):
-            return str(exc)
-        details = []
-        for issue in exc.errors(include_input=False, include_url=False):
-            loc = issue["loc"]
-            field = ".".join(map(str, loc))
-            kind = issue["type"]
-            if kind == "missing":
-                if config_cls is IterationNodeConfig and loc == ("input",):
-                    message = "请选择要遍历的输入列表"
-                elif config_cls is IterationNodeConfig and loc == ("output",):
-                    message = "请选择迭代输出变量"
-                else:
-                    message = _MISSING_HINTS.get(loc[-1] if loc else None, "请补全此必填配置")
-            elif kind == "value_error":
-                reason = str(issue.get("ctx", {}).get("error") or issue["msg"])
-                message = _VALIDATOR_HINTS.get(reason, reason)
-            else:
-                message = _TYPE_HINTS.get(kind, issue["msg"])
-            details.append(f"{field}: {message}" if field else message)
-        return "；".join(details)
-
     def config_validate(self, node_id: str, node_name: str, config_cls: type[BaseNodeConfig], value: dict):
-        try:
-            return config_cls.model_validate(value)
-        except Exception as e:
+        validated, detail = validate_import_config(config_cls, value)
+        if detail is not None:
             self.errors.append(ExceptionDefinition(
                 type=ExceptionType.CONFIG,
                 node_id=node_id,
                 node_name=node_name,
-                detail=self._validation_detail(config_cls, e)
+                detail=detail
             ))
-            return None
+        return validated
 
     def get_node_convert(self, node_type: NodeType):
         config_cls = self.CONFIG_CLASS_MAP.get(node_type)
