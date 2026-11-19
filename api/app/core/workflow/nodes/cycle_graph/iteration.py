@@ -8,6 +8,8 @@ from langchain_core.runnables import RunnableConfig
 from langgraph.graph.state import CompiledStateGraph
 from langgraph.config import get_stream_writer
 
+from app.core.error_codes import BizCode
+from app.core.exceptions import BusinessException
 from app.core.workflow.engine.state_manager import WorkflowState
 from app.core.workflow.engine.variable_pool import VariablePool
 from app.core.workflow.nodes.cycle_graph import IterationNodeConfig
@@ -70,6 +72,17 @@ class IterationRuntime:
         self.state = state
         self.node_id = node_id
         self.workflow_config = workflow_config
+        # 未选迭代输入/输出时字段可能整个缺失（前端不选值就不落库），直接构造 pydantic
+        # 会抛出 Field required 的堆栈、被包装成“服务内部错误”。这里给出可操作的提示。
+        missing = [
+            label for field, label in (("input", "迭代输入"), ("output", "迭代输出"))
+            if not str(config.get(field) or "").strip()
+        ]
+        if missing:
+            raise BusinessException(
+                f"迭代节点 {node_id} 未配置{'、'.join(missing)}，请先在工作流中补全后再运行",
+                code=BizCode.INVALID_PARAMETER,
+            )
         self.typed_config = IterationNodeConfig(**config)
         self.looping = True
         self.variable_pool = variable_pool
