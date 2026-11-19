@@ -1071,7 +1071,19 @@ def switch_workspace(
     business_logger.debug(f"用户 {user.username} 请求切换工作空间为 {workspace_id}")
 
     # 检查用户是否为成员或超级管理员
-    _check_workspace_member_permission(db, workspace_id, user)
+    db_workspace = _check_workspace_member_permission(db, workspace_id, user)
+
+    # SuperuserPolicy does not enforce tenant scope; reject cross-tenant switches
+    # as not-found to avoid leaking workspace existence.
+    if db_workspace is not None and db_workspace.tenant_id != user.tenant_id:
+        business_logger.warning(
+            f"拒绝跨租户切换工作空间: user_tenant={user.tenant_id}, "
+            f"workspace_tenant={db_workspace.tenant_id}"
+        )
+        raise BusinessException(
+            message="Workspace not found",
+            code=BizCode.WORKSPACE_NOT_FOUND
+        )
 
     # 更新当前用户的工作空间上下文
     try:
