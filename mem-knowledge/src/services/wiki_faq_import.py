@@ -4,7 +4,6 @@ import asyncio
 import json
 import logging
 import uuid
-from contextlib import suppress
 
 from redis.exceptions import LockNotOwnedError, RedisError
 from sqlalchemy import select
@@ -80,8 +79,12 @@ async def submit(runtime, scope, actor_id, payload):
         return await _submit_with_lock(runtime, scope, actor_id, payload, task_id, lock)
     finally:
         renewal.cancel()
-        with suppress(asyncio.CancelledError):
+        try:
             await renewal
+        except asyncio.CancelledError:
+            pass
+        except Exception:
+            logger.exception("FAQ 导入提交锁续期任务异常退出 task_id=%s", task_id)
         try:
             await lock.release()
         except RedisError:
