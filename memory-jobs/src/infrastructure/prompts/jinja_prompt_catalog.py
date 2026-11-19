@@ -10,6 +10,7 @@ from src.prompts import (
     render_tag_filter_user_prompt,
     render_user_summary_prompt,
 )
+from src.prompts.loader import render_prompt
 
 
 class JinjaPromptCatalog:
@@ -63,4 +64,67 @@ class JinjaPromptCatalog:
             language=language,
             evidence=evidence,
             existing_interests=existing_interests,
+        )
+
+    def rag_profile_summary(
+        self, chunk_texts: str, json_schema: dict, max_words: int, language: str
+    ) -> str:
+        return render_prompt(
+            "rag_memory_summary",
+            chunk_texts=chunk_texts,
+            json_schema=json_schema,
+            max_words=max_words,
+            language=language,
+        )
+
+    def rag_profile_tags(self, chunk: str, language: str) -> str:
+        return render_prompt("rag_tags", chunk=chunk, language=language)
+
+    def rag_profile_domain(self, chunk: str) -> str:
+        return render_prompt("rag_domain", chunk=chunk)
+
+    def rag_profile_personas(self, chunks: list[str], language: str) -> str:
+        return render_prompt("rag_personas", chunks=chunks, language=language)
+
+    def rag_profile_insight(
+        self,
+        domain_distribution: str,
+        active_periods: object,
+        social_connections: object,
+        language: str,
+    ) -> str:
+        return render_prompt(
+            "rag_memory_insight",
+            domain_distribution=domain_distribution,
+            active_periods=active_periods,
+            social_connections=social_connections,
+            language=language,
+        )
+
+    def emotion_suggestions(
+        self,
+        health_data: dict,
+        patterns: dict,
+        user_profile: dict,
+        language: str,
+        emotion_distribution_json: str,
+    ) -> str:
+        return render_prompt(
+            "generate_emotion_suggestions",
+            health_data=health_data,
+            patterns=patterns,
+            user_profile=user_profile,
+            language=language,
+            emotion_distribution_json=emotion_distribution_json,
+        )
+
+    def forgetting_summary(self, pair: dict) -> str:
+        return render_prompt("forget_summary", pair=pair)
+
+    def conversation_summary_system(self) -> str:
+        return render_prompt("conversation_summary_system")
+
+    def conversation_summary_user(self, language: str, conversation: str) -> str:
+        return render_prompt(
+            "conversation_summary_user", language=language, conversation=conversation
         )

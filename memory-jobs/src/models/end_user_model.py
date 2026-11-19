@@ -23,6 +23,8 @@ class EndUser(Base):
     key_findings = Column(Text, nullable=True)
     growth_trajectory = Column(Text, nullable=True)
     memory_insight_updated_at = Column(DateTime, nullable=True)
+    rag_tags = Column(Text, nullable=True)
+    rag_personas = Column(Text, nullable=True)
     user_summary = Column(Text, nullable=True)
     personality_traits = Column(Text, nullable=True)
     core_values = Column(Text, nullable=True)

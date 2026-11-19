@@ -29,10 +29,14 @@ from src.application.dto import (
     MetadataMigrationScanReport,
     ScanReport,
 )
+from src.application.emotion.dto import EmotionSuggestionsResult
+from src.application.forgetting.dto import ForgettingResult
 from src.application.interest.generate import InterestDistributionResult
 from src.application.jobs.health_ping import HealthReport
 from src.application.jobs.interest_prewarm import PrewarmJobResult
 from src.application.profile_cache.generate import ProfileCacheResult
+from src.application.rag_profile.dto import RAGProfileResult
+from src.application.working_memory.dto import ConversationDetailResult
 
 
 def _health(report: HealthReport) -> dict[str, Any]:
@@ -119,6 +123,10 @@ def _metadata_migration(result: MetadataMigrationResult) -> dict[str, Any]:
 
 
 _SERIALIZERS: dict[type, Callable[[Any], dict[str, Any]]] = {
+    RAGProfileResult: lambda result: {"data": result.data},
+    EmotionSuggestionsResult: lambda result: {"data": result.data},
+    ForgettingResult: lambda result: {"data": result.data},
+    ConversationDetailResult: lambda result: {"data": result.data},
     HealthReport: _health,
     ScanReport: _scan,
     FanOutReport: _fan_out,

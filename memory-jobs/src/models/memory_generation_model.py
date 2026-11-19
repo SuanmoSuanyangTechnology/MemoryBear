@@ -7,7 +7,7 @@ them. The one write this service performs (the generated insight/summary text on
 
 from __future__ import annotations
 
-from sqlalchemy import Boolean, Column, DateTime, String
+from sqlalchemy import Boolean, Column, DateTime, Float, Integer, String
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 
 from src.models.base import Base
@@ -18,6 +18,10 @@ class MemoryConfigRow(Base):
 
     config_id = Column(UUID(as_uuid=True), primary_key=True)
     workspace_id = Column(UUID(as_uuid=True), nullable=True)
+    updated_at = Column(DateTime, nullable=True)
+    config_id_old = Column(Integer, nullable=True)
+    enable_llm_summary = Column(Boolean, nullable=True)
+    forgetting_threshold = Column(Float, nullable=True)
 
 
 class WorkspaceDefaultModelPreset(Base):
@@ -40,6 +44,7 @@ class ModelConfig(Base):
     tenant_id = Column(UUID(as_uuid=True), nullable=True)
     name = Column(String, nullable=True)
     type = Column(String, nullable=True)
+    provider = Column(String, nullable=True)
     is_active = Column(Boolean, nullable=True)
     is_public = Column(Boolean, nullable=True)
 

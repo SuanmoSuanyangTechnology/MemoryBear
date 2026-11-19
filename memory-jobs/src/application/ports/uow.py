@@ -13,6 +13,11 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Protocol
 
+from src.application.emotion.ports import EmotionSuggestionsRepository
+from src.application.forgetting.ports import ForgettingRepository
+from src.application.ports.task_context import TaskContextRepository
+from src.application.rag_profile.ports import RAGProfileRepository
+from src.application.working_memory.ports import ConversationDetailRepository
 from src.domain.end_user.repository import EndUserDirectoryRepository
 from src.domain.model_config.repository import ModelConfigRepository
 from src.domain.profile.read_models import (
@@ -63,6 +68,11 @@ class Repositories:
     insights: MemoryInsightRepository
     summaries: UserSummaryRepository
     metadata_migration: MetadataMigrationRepository
+    task_context: TaskContextRepository
+    rag_profiles: RAGProfileRepository
+    emotion_suggestions: EmotionSuggestionsRepository
+    forgetting: ForgettingRepository
+    conversation_details: ConversationDetailRepository
 
 
 class UnitOfWork(Protocol):
