@@ -8,6 +8,7 @@ from typing import Annotated, Literal
 from fastapi import APIRouter, Depends, Query, Request
 
 from src.common.external_api import external_api
+from src.common.responses import ApiResponse
 from src.middleware.auth import MemoryPrincipal
 from src.middleware.identity import require_memory_context
 from src.modules.implicit_memory.handler import (
@@ -109,6 +110,6 @@ async def habits(
     )
 
 
-@router.post("/generate_profile", response_model=ObjectApiResponse)
-async def generate_profile(request: Request, context: Context, payload: GenerateProfileRequest):
-    return await _handler(request).generate_profile(context, payload.end_user_id)
+@router.post("/generate_profile", response_model=ApiResponse)
+async def generate_implicit_memory_profile(request: Request, context: Context, payload: GenerateProfileRequest):
+    return await _handler(request).generate_profile(context, payload)

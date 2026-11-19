@@ -11,7 +11,7 @@ import logging
 import re
 from typing import List, Tuple
 
-from src.schemas.extraction_engine.ontology_scenario_models import OntologyClass
+from src.models.ontology_scenario_models import OntologyClass
 
 
 logger = logging.getLogger(__name__)

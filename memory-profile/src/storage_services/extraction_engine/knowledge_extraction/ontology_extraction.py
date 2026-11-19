@@ -13,7 +13,7 @@ import logging
 import time
 from typing import List, Optional
 
-from src.schemas.extraction_engine.ontology_scenario_models import (
+from src.models.ontology_scenario_models import (
     OntologyClass,
     OntologyExtractionResponse,
 )

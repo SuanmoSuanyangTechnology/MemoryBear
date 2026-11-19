@@ -7,9 +7,9 @@ from uuid import uuid4
 from src.common.datetime_utils import utcnow_naive
 from src.logging_config import get_memory_logger
 
-from src.schemas.extraction_engine.base_response import RobustLLMResponse
-from src.schemas.extraction_engine.graph_models import MemorySummaryNode
-from src.schemas.extraction_engine.message_models import DialogData
+from src.models.base_response import RobustLLMResponse
+from src.models.graph_models import MemorySummaryNode
+from src.models.message_models import DialogData
 from src.common.prompt.prompt_utils import render_memory_summary_prompt # 相关内容也需要删除
 from src.common.prompt.prompt_utils import render_neo4j_memory_summary_prompt
 from src.common.language_utils import validate_language  # 使用集中化的语言校验

@@ -6,7 +6,7 @@
 import re
 from typing import List, Optional, Tuple
 
-from src.schemas.extraction_engine.graph_models import ExtractedEntityNode
+from src.models.graph_models import ExtractedEntityNode
 
 # 名称相似度「路径内」权重：向量相似度 vs 名称文字重叠。
 # 注意：这两个权重与 EntityDedupConfig.alpha/beta 语义不同，不要混淆——

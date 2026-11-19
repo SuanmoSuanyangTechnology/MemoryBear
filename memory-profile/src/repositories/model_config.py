@@ -180,3 +180,39 @@ class ModelConfigRepository:
         async with self.postgres.session() as session:
             rows = (await session.execute(statement)).mappings().all()
         return {row["id"]: dict(row) for row in rows}
+
+    async def default_model_preset(self):
+        statement = select(*WorkspaceDefaultModelPreset.__table__.c).where(
+            WorkspaceDefaultModelPreset.singleton_key == DEFAULT_PRESET_KEY
+        )
+        async with self.postgres.session() as session:
+            row = (await session.execute(statement)).mappings().first()
+        return dict(row) if row is not None else None
+
+    async def get_runtime_model(self, model_id: UUID, tenant_id: UUID | None = None):
+        from types import SimpleNamespace
+
+        from src.models.references.memory_generation_model import ModelBase
+
+        query = select(
+            *ModelConfig.__table__.c,
+            ModelBase.id.label("model_base_id"),
+            ModelBase.is_deprecated.label("model_base_is_deprecated"),
+        ).outerjoin(ModelBase, ModelBase.id == ModelConfig.model_id).where(
+            ModelConfig.id == model_id
+        )
+        if tenant_id:
+            query = query.where(
+                or_(ModelConfig.tenant_id == tenant_id, ModelConfig.is_public)
+            )
+        async with self.postgres.session() as session:
+            row = (await session.execute(query)).mappings().first()
+        if row is None:
+            return None
+        values = dict(row)
+        base_id = values.pop("model_base_id")
+        deprecated = values.pop("model_base_is_deprecated")
+        values["model_base"] = (
+            SimpleNamespace(id=base_id, is_deprecated=deprecated) if base_id is not None else None
+        )
+        return SimpleNamespace(**values)

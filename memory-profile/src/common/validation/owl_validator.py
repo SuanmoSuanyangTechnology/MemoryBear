@@ -20,7 +20,7 @@ from owlready2 import (
     OwlReadyInconsistentOntologyError,
 )
 
-from src.schemas.extraction_engine.ontology_scenario_models import OntologyClass
+from src.models.ontology_scenario_models import OntologyClass
 logger = logging.getLogger(__name__)
 
 

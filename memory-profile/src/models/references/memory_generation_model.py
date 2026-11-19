@@ -6,7 +6,7 @@ text on ``end_users``) goes through ``EndUser`` in ``end_user_model``.
 """
 
 from sqlalchemy import ARRAY, Boolean, Column, DateTime, String, text
-from sqlalchemy.dialects.postgresql import JSONB, UUID
+from sqlalchemy.dialects.postgresql import JSON, JSONB, UUID
 
 from src.models.base import ReadOnlyBase
 
@@ -41,8 +41,18 @@ class ModelConfig(ReadOnlyBase):
     is_active = Column(Boolean, nullable=False)
     is_public = Column(Boolean, nullable=False)
     model_id = Column(UUID(as_uuid=True), nullable=True)
+    config = Column(JSON, nullable=True)
     capability = Column(ARRAY(String), nullable=True)
     is_omni = Column(Boolean, nullable=True)
+
+
+class ModelBase(ReadOnlyBase):
+    """API-owned base model identity and runtime deprecation flag."""
+
+    __tablename__ = "model_bases"
+
+    id = Column(UUID(as_uuid=True), primary_key=True)
+    is_deprecated = Column(Boolean, nullable=False)
 
 
 class EndUserInfo(ReadOnlyBase):

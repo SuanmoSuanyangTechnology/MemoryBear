@@ -19,7 +19,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PATH=/app/.venv/bin:$PATH \
     PROFILE_HOST=0.0.0.0 \
     PROFILE_PORT=8082
-RUN apt-get update && apt-get install -y --no-install-recommends libmagic1 default-jre-headless \
+RUN apt-get update && apt-get install -y --no-install-recommends libmagic1 \
     && rm -rf /var/lib/apt/lists/* \
     && groupadd --gid 10001 profile && useradd --uid 10001 --gid 10001 --no-create-home profile
 WORKDIR /app

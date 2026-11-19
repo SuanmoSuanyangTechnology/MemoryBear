@@ -1,7 +1,4 @@
-"""Active extraction configuration helpers and backward-compatible exports."""
-
-from src.services.memory_config.service import get_pipeline_config, get_pruning_config
-
+"""Default configuration for extraction chunking strategies."""
 
 def get_chunker_config(chunker_strategy: str) -> dict:
     """Retrieves the configuration for a specific chunker strategy."""

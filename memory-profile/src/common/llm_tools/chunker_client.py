@@ -14,8 +14,8 @@ from chonkie import (
     TokenChunker,
 )
 
-from src.schemas.extraction_engine.config_models import ChunkerConfig
-from src.schemas.extraction_engine.message_models import DialogData, Chunk
+from src.models.config_models import ChunkerConfig
+from src.models.message_models import DialogData, Chunk
 
 # Initialize logger
 logger = logging.getLogger(__name__)

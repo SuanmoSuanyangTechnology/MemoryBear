@@ -6,12 +6,12 @@ extraction, personality dimension analysis, interest categorization, and habit d
 """
 
 import logging
-from typing import Any
+from typing import Any, Optional
 
 from pydantic import BaseModel, Field
 
 from src.common.datetime_utils import to_iso_z
-from src.services.implicit_memory.errors import LLMClientException
+from src.common.llm_tools.llm_client import LLMClientException
 from src.services.implicit_memory.prompts import (
     get_dimension_analysis_prompt,
     get_habit_analysis_prompt,
@@ -58,11 +58,64 @@ class ImplicitMemoryLLMClient:
     interests, and behavioral habits.
     """
 
-    def __init__(self, model):
-        self.model = model
+    def __init__(self, runtime, default_model_id: Optional[str] = None, tenant_id=None):
+        """Initialize the LLM client wrapper.
+        
+        Args:
+            runtime: Service-owned database and model clients
+            default_model_id: Default LLM model ID to use if none specified
+            tenant_id: Tenant ID for SpeedBear public model API key resolution
+        """
+        self.runtime = runtime
+        self.default_model_id = default_model_id
+        self._tenant_id = tenant_id
+        self._cached_client = None
+        
+        logger.debug("ImplicitMemoryLLMClient initialized")
 
-    def _get_llm_client(self, model_id=None):
-        return self.model
+    async def _get_llm_client(self, model_id: Optional[str] = None):
+        """Get LLM client instance.
+        
+        Uses cached client when requesting the default model to avoid
+        redundant DB queries. Non-default model_id bypasses cache.
+        
+        Args:
+            model_id: LLM model ID to use, defaults to default_model_id
+            
+        Returns:
+            RedBearLLM client instance
+            
+        Raises:
+            LLMClientException: If no model ID is provided and no default is set
+        """
+        effective_model_id = model_id or self.default_model_id
+        if not effective_model_id:
+            raise ValueError("No LLM model ID provided and no default model ID set")
+        
+        # 缓存命中：仅当使用默认 model_id 时复用
+        if self._cached_client is not None and effective_model_id == self.default_model_id:
+            return self._cached_client
+        
+        try:
+            from uuid import UUID
+
+            from src.repositories.model_config import ModelConfigRepository
+
+            model = await ModelConfigRepository(self.runtime.postgres).get_slot_view(
+                UUID(str(effective_model_id)), self._tenant_id
+            )
+            if not model or not model["is_active"]:
+                raise ValueError(f"模型配置不可用: {effective_model_id}")
+            tenant_id = UUID(str(self._tenant_id or model["tenant_id"]))
+            client = await self.runtime.model_service.chat_model(model["id"], tenant_id)
+            logger.debug(f"Created LLM client for model: {effective_model_id}")
+            # 缓存默认 model 的 client
+            if effective_model_id == self.default_model_id:
+                self._cached_client = client
+            return client
+        except Exception as e:
+            logger.error(f"Failed to create LLM client for model {effective_model_id}: {e}")
+            raise LLMClientException(f"Failed to create LLM client: {e}") from e
 
     def _prepare_summaries_for_analysis(
         self, user_summaries: list[UserMemorySummary]
@@ -119,7 +172,7 @@ class ImplicitMemoryLLMClient:
             prompt = get_preference_analysis_prompt(formatted_summaries, user_id)
 
             # Get LLM client and perform analysis
-            llm_client = self._get_llm_client(model_id)
+            llm_client = await self._get_llm_client(model_id)
 
             messages = [{"role": "user", "content": prompt}]
 
@@ -166,7 +219,7 @@ class ImplicitMemoryLLMClient:
             prompt = get_dimension_analysis_prompt(formatted_summaries, user_id)
 
             # Get LLM client and perform analysis
-            llm_client = self._get_llm_client(model_id)
+            llm_client = await self._get_llm_client(model_id)
 
             messages = [{"role": "user", "content": prompt}]
 
@@ -212,7 +265,7 @@ class ImplicitMemoryLLMClient:
             prompt = get_interest_analysis_prompt(formatted_summaries, user_id)
 
             # Get LLM client and perform analysis
-            llm_client = self._get_llm_client(model_id)
+            llm_client = await self._get_llm_client(model_id)
 
             messages = [{"role": "user", "content": prompt}]
 
@@ -258,7 +311,7 @@ class ImplicitMemoryLLMClient:
             prompt = get_habit_analysis_prompt(formatted_summaries, user_id)
 
             # Get LLM client and perform analysis
-            llm_client = self._get_llm_client(model_id)
+            llm_client = await self._get_llm_client(model_id)
 
             messages = [{"role": "user", "content": prompt}]
 

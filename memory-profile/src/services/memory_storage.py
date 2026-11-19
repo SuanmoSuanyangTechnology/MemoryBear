@@ -7,13 +7,14 @@ import re
 from collections import Counter, defaultdict
 from datetime import datetime
 from enum import Enum
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Dict, List, Optional
 from uuid import UUID
 
 from neo4j.time import DateTime as Neo4jDateTime
 
 from src.common.errors import BizCode, ProfileError
-from src.common.normalization import as_utc_naive, datetime_to_epoch_ms
+from src.common.datetime_utils import parse_iso_to_utc_naive, to_timestamp_ms
+from src.models.event_category_models import EVENT_CATEGORY_NAMES, EVENT_CATEGORY_NAME_TO_ID
 from src.emotion.emotion_buckets import emotion_valence
 from src.repositories.end_user import EndUserRepository
 from src.repositories.memory_storage import MemoryStorageRepository
@@ -33,9 +34,9 @@ from src.common.llm_error_utils import ClassifiedLLMError, classify_llm_error
 from src.common.sse_utils import format_sse_message
 from src.i18n import t
 from src.services.multimodal_service import MultimodalService
-from src.schemas.memory_storage import FileType, ModelInfo, TransferMethod, TrialRunChatInput
-from src.schemas.memory_config import MemoryConfig
-from src.schemas.extraction_engine.message_models import DialogData
+from src.schemas.memory_storage import FileInput, FileType, ModelInfo, PilotRunInput, TransferMethod, TrialRunChatInput, WriteMessageItem
+from src.schemas.memory_config import ConfigurationError, MemoryConfig
+from src.models.message_models import DialogData
 from src.bootstrap import get_settings
 
 logger = logging.getLogger(__name__)
@@ -62,29 +63,6 @@ speech or audio, and the timeline. Do not answer the user's overall question and
 not omit an attachment. If an attachment cannot be understood, state the failure
 under that attachment label.
 """.strip()
-
-
-def parse_iso_to_utc_naive(value):
-    return as_utc_naive(datetime.fromisoformat(value.replace("Z", "+00:00")))
-
-
-to_timestamp_ms = datetime_to_epoch_ms
-
-EVENT_CATEGORY_NAME_TO_ID = {
-    "教育学习": "education_learning",
-    "职业工作": "career_work",
-    "项目里程碑": "project_milestone",
-    "居住迁移": "residence_relocation",
-    "关系家庭": "relationship_family",
-    "宠物照护": "pet_care",
-    "健康医疗": "health_medical",
-    "旅行到访": "travel_visit",
-    "购买资产": "purchase_asset",
-    "创作发布": "creation_publication",
-    "成就荣誉": "achievement_award",
-    "财务法务行政": "finance_legal_admin",
-    "其他生活事件": "other_life_event",
-}
 
 
 class TimelineSort(Enum):
@@ -142,57 +120,89 @@ class MemoryStorageService:
             )
         return str(user_id)
 
-    async def timeline_memories(self, *, id: str, label: str, workspace_id: UUID):
+    async def get_workspace_models_configs_async(self, workspace_id):
+        from src.repositories.workspace import WorkspaceRepository
+
+        return await WorkspaceRepository(self.runtime.postgres).workspace_row(workspace_id)
+
+    async def get_timeline_memories_server(self, id, label, model_id, language_type, *, workspace_id):
+        """
+        获取时间线记忆数据
+
+        Args:
+            id: 节点ID
+            table: 节点类型/标签
+
+        Returns:
+            Dict包含：
+            - success: 是否成功
+            - data: 时间线数据列表
+            - total: 数据总数
+            - error: 错误信息（如果有）
+
+        根据不同标签返回相应字段：
+        - MemorySummary: content字段
+        - Statement: statement字段
+        - ExtractedEntity: name字段
+        """
         await self._owner(id, workspace_id)
-        rows = await self.repository.timeline(id, label)
-        return await self._process_timeline_results(rows, None, "zh")
+        try:
+            logger.info(f"获取时间线记忆数据 - ID: {id}, Table: {label}")
 
-    async def entity_timeline(
+            # Query selection and execution belong to the repository.
+            results = await self.repository.timeline(id, label)
+
+            # 记录查询结果的类型和内容用于调试
+            logger.info(f"时间线查询结果类型: {type(results)}, 长度: {len(results) if isinstance(results, list) else 'N/A'}")
+            
+            # 处理查询结果
+            timeline_data =await self._process_timeline_results(results, model_id, language_type)
+
+            logger.info(f"成功获取时间线记忆数据: 总计 {len(timeline_data.get('timelines_memory', []))} 条")
+
+            return timeline_data
+            
+        except Exception as e:
+            logger.error(f"获取时间线记忆数据失败: {str(e)}", exc_info=True)
+            return  str(e)
+
+    async def get_end_user_id_by_element_id(self, element_id):
+        return await self.repository.owner(element_id)
+
+    async def get_unified_timeline(
         self,
-        *,
-        workspace_id: UUID,
-        id=None,
-        end_user_id=None,
-        type="all",
-        sort="time_desc",
-        from_ts=None,
-        to_ts=None,
-        page=1,
-        pagesize=10,
-    ):
-        if (id is None) == (end_user_id is None) or (id is not None and not id.strip()):
-            raise ProfileError(
-                BizCode.INVALID_PARAMETER, "id 和 end_user_id 必须且只能提供一个", status_code=200
-            )
-        if (
-            type not in {"all", "key_node", "statement", "memory_summary"}
-            or sort not in TimelineSort.values()
-        ):
-            raise ProfileError(BizCode.INVALID_PARAMETER, "type 或 sort 取值非法", status_code=200)
-        if from_ts is not None and to_ts is not None and from_ts > to_ts:
-            raise ProfileError(BizCode.INVALID_PARAMETER, "from_ts 不能大于 to_ts", status_code=200)
-        element_id = id
-        if id is not None:
-            await self._owner(id, workspace_id)
-        else:
-            try:
-                user_id = UUID(end_user_id)
-            except ValueError as exc:
-                raise ProfileError(
-                    BizCode.INVALID_USER_ID, "无效的终端用户ID格式", status_code=200
-                ) from exc
-            user = await self.end_users.resolve_user_in_workspace(user_id, workspace_id)
-            if user is None:
-                raise ProfileError(BizCode.USER_NOT_FOUND, "终端用户不存在", status_code=200)
-            entities = await self.repository.user_entities(str(user["id"]))
-            if len(entities) > 1:
-                raise ProfileError(
-                    BizCode.INTERNAL_ERROR, "用户自身实体定位不唯一", status_code=200
-                )
-            element_id = entities[0]["element_id"] if entities else None
-        return await self._unified(element_id, type, page, pagesize, sort, from_ts, to_ts)
+        id,
+        source_type: str = "all",
+        page: int = 1,
+        pagesize: int = 10,
+        sort: str = "time_desc",
+        from_ts: int = None,
+        to_ts: int = None,
+        end_user_id: str | None = None,
+    ) -> dict:
+        """ExtractedEntity 合并时间线（关键节点 / 来源陈述 / 长期沉淀），分页 + 按来源筛选 + 排序 + 日期过滤。
 
-    async def _unified(self, element_id, source_type, page, pagesize, sort, from_ts, to_ts):
+        本方法仅服务 ExtractedEntity 节点：
+        - 关键节点：读自身 event_timeline 结构化事件。created_at = 发生时间（valid_at）。
+        - 来源陈述 / 长期沉淀：走图遍历查询，取关联 Statement / MemorySummary。created_at = 记录时间。
+
+        排序规则（基于 created_at，不同类型语义不同）：
+        - time_asc/desc: 全部按 created_at 排序
+        - occurred_asc/desc: key_node 按 created_at（发生时间），其他为 null → 永远最后
+        - recorded_asc/desc: statement/memory_summary 按 created_at（记录时间），key_node 为 null → 永远最后
+
+        日期过滤：from_ts / to_ts 为 UTC 毫秒时间戳，由前端传入，后端直接数值比较。
+
+        total_count / type_stats 始终基于全量，不受筛选影响。
+        """
+        repository = self.repository
+        element_id = id
+        if element_id is None and end_user_id is not None:
+            entities = await repository.user_entities(end_user_id)
+            if len(entities) > 1:
+                raise ProfileError(BizCode.INTERNAL_ERROR, "用户自身实体定位不唯一", status_code=200)
+            element_id = entities[0]["element_id"] if entities else None
+
         # 解析排序参数
         sort_mode, sort_asc = self._parse_sort(sort)
 
@@ -271,7 +281,7 @@ class MemoryStorageService:
         # 8. 分页
         total = len(filtered)
         start = (page - 1) * pagesize
-        items = filtered[start : start + pagesize]
+        items = filtered[start:start + pagesize]
         hasnext = page * pagesize < total
 
         logger.info(
@@ -324,13 +334,13 @@ class MemoryStorageService:
             return []
 
         events = []
-        for item in event_timeline.split("；"):
+        for item in event_timeline.split('；'):
             item = item.strip()
             if not item:
                 continue
 
             # 抠出 [valid_at|invalid_at]
-            m = re.match(r"^\[([^|]*)\|([^\]]*)\]\s*(.*)", item)
+            m = re.match(r'^\[([^|]*)\|([^\]]*)\]\s*(.*)', item)
             if m:
                 valid_at = m.group(1).strip() or None
                 invalid_at = m.group(2).strip() or None
@@ -347,7 +357,7 @@ class MemoryStorageService:
                 invalid_at = None
 
             # 按 | 切正文段（新格式为 4 段：fact|title|category|category_id）
-            parts = body.split("|")
+            parts = body.split('|')
 
             # 旧格式（仅 fact，1 段）字段残缺，不展示给前端
             if len(parts) < 4:
@@ -381,14 +391,12 @@ class MemoryStorageService:
                 continue
 
             # 不返回 invalid_at / category_id（前端不需要）
-            events.append(
-                {
-                    "title": title,
-                    "fact": fact,
-                    "category": category,
-                    "valid_at": display_at_ms,
-                }
-            )
+            events.append({
+                "title": title,
+                "fact": fact,
+                "category": category,
+                "valid_at": display_at_ms,
+            })
 
         # 排序：valid_at 降序（最新在前）
         events.sort(key=lambda e: e["valid_at"], reverse=True)
@@ -417,16 +425,14 @@ class MemoryStorageService:
 
             category = "source_statement" if source_type == "statement" else "long_term_memory"
 
-            items.append(
-                {
-                    "type": source_type,
-                    "category": category,
-                    "title": None,
-                    "text": text,
-                    "created_at": created_at,
-                    "timetype": "recording",
-                }
-            )
+            items.append({
+                "type": source_type,
+                "category": category,
+                "title": None,
+                "text": text,
+                "created_at": created_at,
+                "timetype": "recording",
+            })
         return items
 
     @staticmethod
@@ -523,17 +529,15 @@ class MemoryStorageService:
         except Exception:
             return None
 
-    async def _process_timeline_results(
-        self, results: list[dict[str, Any]], model_id: str, language_type: str
-    ) -> dict[str, Any]:
+    async def _process_timeline_results(self, results: List[Dict[str, Any]], model_id: str, language_type: str) -> Dict[str, Any]:
         """
         处理时间线查询结果
-
+        
         Args:
             results: Neo4j查询结果
             model_id: 模型ID用于翻译
             language_type: 语言类型 ('zh' 或其他)
-
+            
         Returns:
             处理后的时间线数据字典
         """
@@ -544,167 +548,161 @@ class MemoryStorageService:
                 "MemorySummary": [],
                 "Statement": [],
                 "ExtractedEntity": [],
-                "timelines_memory": [],
+                "timelines_memory": []
             }
-
+        
         memory_summary_list = []
         statement_list = []
         extracted_entity_list = []
-
+        
         for data in results:
             # 检查data是否为字典类型
             if not isinstance(data, dict):
                 logger.warning(f"跳过非字典类型的记录: {type(data)} - {data}")
                 continue
-
+            
             # 处理MemorySummary
-            summary = data.get("MemorySummary")
+            summary = data.get('MemorySummary')
             if summary is not None:
                 processed_summary = await self._process_field_value(summary, "MemorySummary")
                 memory_summary_list.extend(processed_summary)
-
+            
             # 处理Statement
-            statement = data.get("statement")
+            statement = data.get('statement')
             if statement is not None:
                 processed_statement = await self._process_field_value(statement, "Statement")
                 statement_list.extend(processed_statement)
-
+            
             # 处理ExtractedEntity
-            extracted_entity = data.get("ExtractedEntity")
+            extracted_entity = data.get('ExtractedEntity')
             if extracted_entity is not None:
-                processed_entity = await self._process_field_value(
-                    extracted_entity, "ExtractedEntity"
-                )
+                processed_entity = await self._process_field_value(extracted_entity, "ExtractedEntity")
                 extracted_entity_list.extend(processed_entity)
-
+        
         # 去重 - 现在处理的是字典列表，需要更智能的去重
         memory_summary_list = self._deduplicate_dict_list(memory_summary_list)
         statement_list = self._deduplicate_dict_list(statement_list)
         extracted_entity_list = self._deduplicate_dict_list(extracted_entity_list)
-
+        
         # 合并所有数据并处理相同text的合并
         all_timeline_data = memory_summary_list + statement_list
         all_timeline_data = self._merge_same_text_items(all_timeline_data)
-
+        
         # 如果需要翻译（非中文），对整个结果进行翻译
 
         result = {
             "MemorySummary": memory_summary_list,
             "Statement": statement_list,
             "ExtractedEntity": extracted_entity_list,
-            "timelines_memory": all_timeline_data,
+            "timelines_memory": all_timeline_data
         }
-
-        logger.info(
-            f"时间线数据处理完成: MemorySummary={len(memory_summary_list)}, Statement={len(statement_list)}, ExtractedEntity={len(extracted_entity_list)}"
-        )
-
+        
+        logger.info(f"时间线数据处理完成: MemorySummary={len(memory_summary_list)}, Statement={len(statement_list)}, ExtractedEntity={len(extracted_entity_list)}")
+        
         return result
 
-    def _deduplicate_dict_list(self, dict_list: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    def _deduplicate_dict_list(self, dict_list: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """
         对字典列表进行去重
-
+        
         Args:
             dict_list: 字典列表
-
+            
         Returns:
             去重后的字典列表
         """
         seen = set()
         result = []
-
+        
         for item in dict_list:
             # 使用text作为去重的键
-            text = item.get("text", "")
+            text = item.get('text', '')
             if text and text not in seen:
                 seen.add(text)
                 result.append(item)
-
+        
         return result
 
-    def _merge_same_text_items(self, items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    def _merge_same_text_items(self, items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """
         合并具有相同text的项目，合并type字段，保留一个时间
-
+        
         Args:
             items: 项目列表
-
+            
         Returns:
             合并后的项目列表
         """
         text_groups = {}
-
+        
         # 按text分组
         for item in items:
-            text = item.get("text", "")
+            text = item.get('text', '')
             if not text:
                 continue
-
+                
             if text not in text_groups:
                 text_groups[text] = {
-                    "text": text,
-                    "types": set(),
-                    "created_at": item.get("created_at"),
-                    "latest_time": item.get("created_at"),
+                    'text': text,
+                    'types': set(),
+                    'created_at': item.get('created_at'),
+                    'latest_time': item.get('created_at')
                 }
-
+            
             # 添加type到集合中
-            item_type = item.get("type")
+            item_type = item.get('type')
             if item_type:
-                text_groups[text]["types"].add(item_type)
-
+                text_groups[text]['types'].add(item_type)
+            
             # 保留最新的时间（如果有的话）
-            current_time = item.get("created_at")
-            if current_time and (
-                not text_groups[text]["latest_time"]
-                or self._is_later_time(current_time, text_groups[text]["latest_time"])
-            ):
-                text_groups[text]["latest_time"] = current_time
-
+            current_time = item.get('created_at')
+            if current_time and (not text_groups[text]['latest_time'] or 
+                               self._is_later_time(current_time, text_groups[text]['latest_time'])):
+                text_groups[text]['latest_time'] = current_time
+        
         # 转换为最终格式
         result = []
         for text, group_data in text_groups.items():
             merged_item = {
-                "text": text,
-                "type": ", ".join(sorted(group_data["types"])),  # 合并多个type
-                "created_at": group_data["latest_time"],
+                'text': text,
+                'type': ', '.join(sorted(group_data['types'])),  # 合并多个type
+                'created_at': group_data['latest_time']
             }
             result.append(merged_item)
-
+        
         # 按时间排序（最新的在前）
-        result.sort(key=lambda x: x.get("created_at", ""), reverse=True)
-
+        result.sort(key=lambda x: x.get('created_at', ''), reverse=True)
+        
         return result
 
     def _is_later_time(self, time1: str, time2: str) -> bool:
         """
         比较两个时间字符串，判断time1是否晚于time2
-
+        
         Args:
             time1: 时间字符串1
             time2: 时间字符串2
-
+            
         Returns:
             time1是否晚于time2
         """
         try:
             if not time1 or not time2:
                 return bool(time1)  # 如果time2为空，time1存在就算更晚
-
+            
             # 简单的字符串比较（适用于ISO格式的时间）
             return time1 > time2
         except Exception:
             return False
 
-    async def _process_field_value(self, value: Any, field_name: str) -> list[dict[str, Any]]:
+    async def _process_field_value(self, value: Any, field_name: str) -> List[Dict[str, Any]]:
         """
         处理字段值，支持字符串、列表等类型
-
+        
         Args:
             value: 字段值
             field_name: 字段名称（用于日志）
-
+            
         Returns:
             处理后的字典列表
         """
@@ -726,64 +724,71 @@ class MemoryStorageService:
                         processed_values.append(processed_item)
             elif isinstance(value, str):
                 # 如果是字符串，转换为字典格式
-                if value.strip() != "" and "MemorySummaryChunk" not in value:
-                    processed_values.append({"text": value, "type": field_name, "created_at": None})
+                if value.strip() != '' and "MemorySummaryChunk" not in value:
+                    processed_values.append({
+                        'text': value,
+                        'type': field_name,
+                        'created_at': None
+                    })
             elif value is not None:
                 # 其他类型转换为字符串
                 str_value = str(value)
-                if str_value.strip() != "" and "MemorySummaryChunk" not in str_value:
-                    processed_values.append(
-                        {"text": str_value, "type": field_name, "created_at": None}
-                    )
+                if str_value.strip() != '' and "MemorySummaryChunk" not in str_value:
+                    processed_values.append({
+                        'text': str_value,
+                        'type': field_name,
+                        'created_at': None
+                    })
         except Exception as e:
-            logger.warning(
-                f"处理字段 {field_name} 的值时出错: {e}, 值类型: {type(value)}, 值: {value}"
-            )
-
+            logger.warning(f"处理字段 {field_name} 的值时出错: {e}, 值类型: {type(value)}, 值: {value}")
+        
         return processed_values
 
     def _is_valid_item(self, item: Any) -> bool:
         """
         检查项目是否有效
-
+        
         Args:
             item: 要检查的项目
-
+            
         Returns:
             是否有效
         """
         if item is None:
             return False
-
+            
         if isinstance(item, dict):
-            text = item.get("text")
-            return (
-                text is not None
-                and str(text).strip() != ""
-                and "MemorySummaryChunk" not in str(text)
-            )
+            text = item.get('text')
+            return (text is not None and 
+                   str(text).strip() != '' and 
+                   "MemorySummaryChunk" not in str(text))
+        
+        return (str(item).strip() != '' and 
+               "MemorySummaryChunk" not in str(item))
 
-        return str(item).strip() != "" and "MemorySummaryChunk" not in str(item)
-
-    async def _process_single_item(self, item: dict[str, Any]) -> dict[str, Any] | None:
+    async def _process_single_item(self, item: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """
         处理单个项目
-
+        
         Args:
             item: 要处理的项目字典
-
+            
         Returns:
             处理后的项目字典
         """
         try:
-            text = item.get("text")
-            created_at = item.get("created_at")
-            item_type = item.get("type", "未知类型")
-
+            text = item.get('text')
+            created_at = item.get('created_at')
+            item_type = item.get('type', '未知类型')
+            
             # 转换Neo4j时间格式
             formatted_time = self._convert_neo4j_datetime(created_at)
-
-            return {"text": text, "type": item_type, "created_at": formatted_time}
+            
+            return {
+                'text': text,
+                'type': item_type,
+                'created_at': formatted_time
+            }
         except Exception as e:
             logger.warning(f"处理单个项目时出错: {e}, 项目: {item}")
             return None
@@ -791,188 +796,313 @@ class MemoryStorageService:
     def _convert_neo4j_datetime(self, dt: Any) -> str:
         """
         转换Neo4j时间格式为标准时间字符串
-
+        
         Args:
             dt: Neo4j时间对象或其他时间格式
-
+            
         Returns:
             格式化的时间字符串
         """
         if dt is None:
             return None
-
+            
         try:
             # 处理Neo4j DateTime对象
             if isinstance(dt, Neo4jDateTime):
-                return dt.iso_format().replace("T", " ").split(".")[0]
-
+                return dt.iso_format().replace('T', ' ').split('.')[0]
+            
             # 处理其他neo4j时间类型
-            if hasattr(dt, "iso_format"):
-                return dt.iso_format().replace("T", " ").split(".")[0]
-
+            if hasattr(dt, 'iso_format'):
+                return dt.iso_format().replace('T', ' ').split('.')[0]
+            
             # 处理字符串格式的时间
             if isinstance(dt, str):
                 # 尝试解析ISO格式
                 try:
-                    parsed_dt = datetime.fromisoformat(dt.replace("Z", "+00:00"))
+                    parsed_dt = datetime.fromisoformat(dt.replace('Z', '+00:00'))
                     return parsed_dt.strftime("%Y-%m-%d %H:%M:%S")
                 except ValueError:
                     return dt
-
+            
             # 其他情况直接转换为字符串
             return str(dt)
-
+            
         except Exception as e:
             logger.warning(f"转换时间格式失败: {e}, 原始值: {dt}")
             return str(dt) if dt is not None else None
 
-    async def relationship_evolution(self, *, id: str, label: str, workspace_id: UUID):
-        await self._owner(id, workspace_id)
-        emotion_rows = await self.repository.emotions(id, label)
-        interaction_rows = await self.repository.interactions(id)
-        emotions = self._convert_emotion_types(self._process_emotion_results(emotion_rows))
-        interactions = self._convert_interaction_types(
-            self._process_interaction_results(interaction_rows)
-        )
-        return {"emotion": emotions, "interaction": interactions}
+    async def require_memory_owner(self, id, workspace_id):
+        return await self._owner(id, workspace_id)
 
-    async def _trial_config(self, config_id, workspace_id, tenant_id):
-        from types import SimpleNamespace
-
-        from src.services.memory_config.service import _build_memory_config
-        from src.repositories.memory_config import MemoryConfigReadRepository
-        from src.repositories.model_config import ModelConfigRepository
-        from src.repositories.workspace import WorkspaceRepository
-
-        configs = MemoryConfigReadRepository(self.runtime.postgres)
-        config_id = await configs.resolve_trial_config_id(config_id, workspace_id)
-        row = await configs.get_owned(config_id, workspace_id) if config_id else None
-        workspace = await WorkspaceRepository(self.runtime.postgres).workspace_row(workspace_id)
-        if row is None or workspace is None or workspace["tenant_id"] != tenant_id:
-            raise ProfileError(
-                BizCode.MEMORY_CONFIG_NOT_FOUND, "配置不存在或无权访问", status_code=200
-            )
-        models = ModelConfigRepository(self.runtime.postgres)
-        ids = {}
-        for slot in ("llm", "embedding", "rerank", "vision", "audio", "video"):
-            raw_id = workspace.get(slot)
-            resolved = await models.resolve_model(
-                config_id=config_id,
-                slot=slot,
-                is_default_config=bool(workspace["is_default_config"]),
-                workspace_model_id=UUID(str(raw_id)) if raw_id else None,
-            )
-            model_id = resolved["model_id"] if resolved else None
-            if model_id is None and slot in {"llm", "embedding"}:
-                raise ProfileError(BizCode.MODEL_NOT_FOUND, f"未配置 {slot} 模型", status_code=200)
-            ids[slot] = model_id
-        views = await models.trial_views([value for value in ids.values() if value], tenant_id)
-        for value in ids.values():
-            if value is not None and value not in views:
-                raise ProfileError(
-                    BizCode.MODEL_NOT_FOUND, "模型不存在、停用或无权访问", status_code=200
-                )
-        arguments = {}
-        for slot, model_id in ids.items():
-            arguments[slot + "_uuid"] = model_id
-            arguments[slot + "_name"] = views[model_id]["name"] if model_id else None
-        config = _build_memory_config(
-            SimpleNamespace(**row), SimpleNamespace(**workspace), **arguments
-        )
-        model_views = {
-            key: ModelInfo(
-                model_name=value["name"],
-                provider=value["provider"],
-                model_type=value["type"],
-                model_config_id=str(key),
-                tenant_id=str(tenant_id),
-                input_modalities=value["input_modalities"],
-                output_modalities=value["output_modalities"],
-                features=value["features"],
-            )
-            for key, value in views.items()
-        }
-        return config, model_views
-
-    async def pilot_run_stream(self, payload, *, workspace_id, tenant_id, language="zh"):
-        import asyncio
-        import time
-        from contextlib import suppress
-        from pathlib import Path
-
-        from src.common.sse_utils import format_sse_message
-        from src.services.memory_config.service import get_pipeline_config
-
-        def event(stage, message, **fields):
-            return format_sse_message(
-                stage, {"message": message, "time": int(time.time() * 1000), **fields}
-            )
-
-        yield event("starting", "开始试运行...")
+    async def get_emotion(self, id, label, model_id: str = None, language_type: str = 'zh') -> Dict[str, Any]:
+        """
+        获取情绪随时间变化数据
+        
+        Args:
+            model_id: 模型ID用于翻译
+            language_type: 语言类型 ('zh' 或其他)
+        
+        Returns:
+            包含情绪数据的字典
+        """
         try:
-            config, views = await self._trial_config(payload.config_id, workspace_id, tenant_id)
-            model = await self.runtime.model_service.chat_model(config.llm_model_id, tenant_id)
-            temperature = get_pipeline_config(config).statement_extraction.temperature
-            if temperature is not None:
-                model = model.model_copy(
-                    update={"default_params": {**model.default_params, "temperature": temperature}}
-                )
-            snapshots = await self._pilot_snapshots(payload.messages, config, views)
-            manager = self.runtime.model_service
+            logger.info(f"获取情绪数据 - ID: {id}, Table: {label}, language_type={language_type}")
 
-            class Embedder:
-                async def aembed_documents(self, texts):
-                    return await manager.embed_texts(config.embedding_model_id, tenant_id, texts)
+            if label == 'Statement':
+                results = await self.repository.emotions(id, "Statement")
+            elif label == 'ExtractedEntity':
+                results = await self.repository.emotions(id, "ExtractedEntity")
+            else:
+                # MemorySummary/Chunk类型查询
+                results = await self.repository.emotions(id, label)
 
-            queue = asyncio.Queue(maxsize=64)
+            # 处理查询结果
+            emotion_data = self._process_emotion_results(results)
+            
+            # 转换Neo4j类型
+            final_data = self._convert_emotion_types(emotion_data)
+            
+            # 如果需要翻译（非中文）
+            if language_type != 'zh' and model_id and final_data:
+                final_data = await self._translate_emotion_data(final_data, model_id)
+            
+            logger.info(f"成功获取 {len(final_data)} 条情绪数据")
+            
+            return final_data
+            
+        except Exception as e:
+            logger.error(f"获取情绪数据失败: {str(e)}")
+            return e
 
-            async def emit(stage, message, data=None):
-                await queue.put((stage, message, data))
+    async def get_interaction_frequency(self, id, label) -> Dict[str, Any]:
+        """
+        获取交互频率数据
+        
+        Returns:
+            包含交互数据的字典
+        """
+        try:
+            logger.info(f"获取交互数据 - ID: {id}, Table: {label}")
+            ori_data= await self.repository.interaction_entity(id)
+            if ori_data!=[]:
+                # name = ori_data[0]['name']
+                end_user_id = [i['end_user_id'] for i in ori_data][0]
+                Space_User = await self.repository.interaction_user(end_user_id)
+                if not Space_User:
+                    return []
+                user_id=Space_User[0]['id']
+                results = await self.repository.interaction_associative(id, user_id)
 
-            task = None
+
+
+                # 处理查询结果
+                interaction_data = self._process_interaction_results(results)
+
+                # 转换Neo4j类型
+                final_data = self._convert_interaction_types(interaction_data)
+
+                logger.info(f"成功获取 {len(final_data)} 条交互数据")
+
+                return final_data
+            return []
+            
+        except Exception as e:
+            logger.error(f"获取交互数据失败: {str(e)}")
+            return e
+
+    async def resolve_trial_config_id(self, config_id, workspace_id):
+        from src.repositories.memory_config import MemoryConfigReadRepository
+
+        return await MemoryConfigReadRepository(self.runtime.postgres).resolve_trial_config_id(
+            config_id, workspace_id
+        )
+
+    async def _trial_config(self, config_id, workspace_id, tenant_id, *, include_runtime_views=True):
+        from src.services.memory_config.service import load_memory_config_async
+
+        return await load_memory_config_async(
+            self.runtime, config_id, workspace_id, tenant_id, include_runtime_views=include_runtime_views
+        )
+
+    async def pilot_run_stream(self, payload: PilotRunInput, language: str = "zh", *, workspace_id, tenant_id) -> AsyncGenerator[str, None]:
+        """
+        流式执行试运行，产生 SSE 格式的进度事件
+
+        db session 生命周期策略：
+        - 阶段1（短 session）：用 get_db_read() 查配置、初始化 llm_client，with 块结束立即归还连接
+        - 阶段2（无 session）：LLM 调用可能耗时数十秒，完全不持有 db 连接
+        - 本方法不依赖 FastAPI Depends(get_db)，自行管理 session 生命周期
+
+        Args:
+            payload: 试运行配置和 QA 格式消息列表（v0.3.13：config_id + messages）
+            language: 语言类型 ("zh" 中文, "en" 英文)，默认中文
+
+        Yields:
+            SSE 格式的字符串，包含以下事件类型：
+            - 各种阶段名称: 进度更新 (如 starting, knowledge_extraction_complete 等)
+            - result: 最终结果
+            - error: 错误信息
+            - done: 完成标记
+
+        Raises:
+            ValueError: 当配置无效或参数缺失时
+            RuntimeError: 当管线执行失败时
+        """
+        from pathlib import Path
+        from src.bootstrap import get_settings
+
+        project_root = str(Path(__file__).resolve().parents[2])
+
+        try:
+            # 发出初始进度事件
+            yield format_sse_message("starting", {
+                "message": "开始试运行...",
+                "time": int(time.time() * 1000)
+            })
+
+            # ── 阶段1：短 session，只读查询，with 块结束立即归还连接 ──────────
+            payload_cid = str(getattr(payload, "config_id", "") or "").strip()
+            cid: Optional[str] = payload_cid if payload_cid else None
+
+            if not cid:
+                raise ValueError("未提供 payload.config_id，禁止启动试运行")
+
+            # v0.3.13: 直接透传 messages，不再解析 dialogue_text / custom_text
+            messages = payload.messages
+            if not messages:
+                raise ValueError("试运行模式必须提供至少一条 message")
+
+            # Load configuration through service-owned repository sessions.
+            # 1a. 加载记忆配置
             try:
+                memory_config, views = await self._trial_config(cid, workspace_id, tenant_id)
+                logger.info(f"Configuration loaded successfully: {memory_config.config_name}")
+            except ConfigurationError as e:
+                raise RuntimeError(f"Configuration loading failed: {e}")
 
-                async def execute():
-                    try:
-                        await self._run_pilot_extraction(
-                            config,
-                            payload.messages,
-                            model,
-                            emit,
-                            language,
-                            perceptual_snapshots=snapshots,
-                            embedder_client=Embedder(),
-                        )
-                    except Exception as exc:
-                        await queue.put(("__error__", "", exc))
-                    else:
-                        await queue.put(("__done__", "", None))
+            logger.info(f"[PILOT_RUN_STREAM] messages count={len(messages)}")
 
-                task = asyncio.create_task(execute())
-                while True:
-                    stage, message, data = await queue.get()
-                    if stage == "__error__":
-                        raise data
-                    if stage == "__done__":
+            # 1c. 初始化 LLM 客户端（只需查一次模型配置，之后 llm_client 是独立对象）
+            try:
+                llm_client = await self.runtime.model_service.chat_model(memory_config.llm_model_id, tenant_id)
+                logger.info("[PILOT_RUN_STREAM] LLM client initialized")
+            except Exception as e:
+                raise RuntimeError(f"LLM client initialization failed: {e}")
+            logger.info("[PILOT_RUN_STREAM] db session closed, starting LLM pipeline")
+
+            # ── 阶段2：无 session，LLM 管线执行 ──────────────────────────────
+            # 使用队列在回调和生成器之间传递进度事件
+            progress_queue: asyncio.Queue = asyncio.Queue()
+
+            async def progress_callback(stage: str, message: str, data: Optional[Dict[str, Any]] = None) -> None:
+                """
+                进度回调函数，将进度事件放入队列
+
+                Args:
+                    stage: 阶段标识
+                    message: 进度消息
+                    data: 可选的结果数据（用于传递节点执行结果）
+                """
+                await progress_queue.put((stage, message, data))
+
+            # 步骤 3: 在后台任务中执行管线（无 db 依赖）
+            async def run_pipeline():
+                """在后台执行管线并捕获异常"""
+                try:
+                    logger.info(
+                        f"[PILOT_RUN_STREAM] Calling run_pilot_extraction with messages count: {len(messages)}"
+                    )
+                    await self._run_pilot_extraction(
+                        memory_config=memory_config,
+                        messages=messages,
+                        llm_client=llm_client,
+                        progress_callback=progress_callback,
+                        language=language,
+                        model_views=views,
+                    )
+                    logger.info("[PILOT_RUN_STREAM] pipeline_main completed")
+
+                    # 标记管线完成
+                    await progress_queue.put(("__PIPELINE_COMPLETE__", "", None))
+                except Exception as e:
+                    # 将异常放入队列
+                    await progress_queue.put(("__PIPELINE_ERROR__", str(e), None))
+
+            # 启动后台任务
+            pipeline_task = asyncio.create_task(run_pipeline())
+
+            # 步骤 4: 从队列中读取进度事件并发出
+            while True:
+                try:
+                    # 等待进度事件，设置超时以检测客户端断开
+                    stage, message, data = await asyncio.wait_for(
+                        progress_queue.get(),
+                        timeout=0.5
+                    )
+
+                    # 检查特殊标记
+                    if stage == "__PIPELINE_COMPLETE__":
                         break
-                    fields = {"data": data} if data else {}
-                    yield event(stage, message, **fields)
-                await task
-                result = json.loads(
-                    Path(get_settings().get_memory_output_path("extracted_result.json")).read_text(encoding="utf-8")
-                )
-                yield format_sse_message("result", result)
-                yield event("done", "试运行完成")
-            finally:
-                if task is not None and not task.done():
-                    task.cancel()
-                    with suppress(asyncio.CancelledError):
-                        await task
+                    elif stage == "__PIPELINE_ERROR__":
+                        raise RuntimeError(message)
+
+                    # 构建进度事件数据
+                    progress_data = {
+                        "message": message,
+                        "time": int(time.time() * 1000)
+                    }
+
+                    # 如果有结果数据，添加到事件中
+                    if data:
+                        progress_data["data"] = data
+
+                    # 发出进度事件，使用 stage 作为事件类型
+                    yield format_sse_message(stage, progress_data)
+
+                except TimeoutError:
+                    # 超时，继续等待（这允许检测客户端断开）
+                    continue
+
+            # 等待管线任务完成
+            await pipeline_task
+
+            # 步骤 5: 读取提取结果
+            settings = get_settings()
+            result_path = settings.get_memory_output_path("extracted_result.json")
+            if not os.path.isfile(result_path):
+                raise FileNotFoundError(f"试运行完成，但未找到提取结果文件: {result_path}")
+
+            with open(result_path, "r", encoding="utf-8") as rf:
+                extracted_result = json.load(rf)
+
+            # 步骤 6: 组装结果（试运行不做额外覆盖率后处理）
+            result_data = {
+                "config_id": cid,
+                "time_log": os.path.join(project_root, "logs", "time.log"),
+                "extracted_result": extracted_result,
+            }
+
+            yield format_sse_message("result", result_data)
+
+            # 步骤 7: 发出完成事件
+            yield format_sse_message("done", {
+                "message": "试运行完成",
+                "time": int(time.time() * 1000)
+            })
+
         except asyncio.CancelledError:
+            # 客户端断开连接
+            logger.info("[PILOT_RUN_STREAM] Client disconnected during streaming")
             raise
-        except Exception as exc:
-            logger.exception("Pilot extraction failed")
-            yield event("error", "试运行失败", code=5000, error=str(exc))
+        except Exception as e:
+            # 发出错误事件
+            logger.error(f"[PILOT_RUN_STREAM] Error during streaming: {e}", exc_info=True)
+            yield format_sse_message("error", {
+                "code": 5000,
+                "message": "试运行失败",
+                "error": str(e),
+                "time": int(time.time() * 1000)
+            })
 
     @staticmethod
     def _trial_run_media_model_id(memory_config, file_type: FileType) -> uuid.UUID:
@@ -1006,7 +1136,10 @@ class MemoryStorageService:
 
     @staticmethod
     def _normalize_modalities(modalities) -> set[str]:
-        return {str(getattr(modality, "value", modality)).lower() for modality in modalities or []}
+        return {
+            str(getattr(modality, "value", modality)).lower()
+            for modality in modalities or []
+        }
 
     @staticmethod
     def _unsupported_file_part(file_type: FileType, language: str) -> dict[str, str]:
@@ -1051,9 +1184,9 @@ class MemoryStorageService:
 
     @staticmethod
     def _replace_local_media_url(
-        parts: list[dict[str, Any]],
-        content: bytes,
-        mime_type: str,
+            parts: list[dict[str, Any]],
+            content: bytes,
+            mime_type: str,
     ) -> None:
         """将 URL 型多模态 part 中的本地地址替换为 Base64 Data URL。"""
         data_url: str | None = None
@@ -1083,16 +1216,16 @@ class MemoryStorageService:
                 part["video"] = get_data_url()
 
     async def _process_trial_run_files(
-        self,
-        files,
-        multimodal_service,
-        workspace_id: uuid.UUID,
-        tenant_id: uuid.UUID,
-        input_modalities,
-        language: str,
+            cls,
+            files,
+            multimodal_service,
+            workspace_id: uuid.UUID,
+            tenant_id: uuid.UUID,
+            input_modalities,
+            language: str,
     ) -> list[dict[str, Any]]:
         """按请求顺序处理附件，对模型不支持的类型生成可见文本提示。"""
-        normalized_modalities = self._normalize_modalities(input_modalities)
+        normalized_modalities = cls._normalize_modalities(input_modalities)
         required_modalities = {
             FileType.IMAGE: "image",
             FileType.AUDIO: "audio",
@@ -1102,14 +1235,14 @@ class MemoryStorageService:
         for position, file in enumerate(files or [], start=1):
             required = required_modalities.get(file.type)
             if required and required not in normalized_modalities:
-                processed_parts.append(self._file_marker_part(file, position, language))
-                processed_parts.append(self._unsupported_file_part(file.type, language))
+                processed_parts.append(cls._file_marker_part(file, position, language))
+                processed_parts.append(cls._unsupported_file_part(file.type, language))
                 continue
 
             local_media: tuple[bytes, str] | None = None
             if file.transfer_method == TransferMethod.LOCAL_FILE:
                 try:
-                    content, mime_type = await self._load_trial_run_local_file(
+                    content, mime_type = await cls._load_trial_run_local_file(
                         file,
                         workspace_id,
                         tenant_id,
@@ -1124,8 +1257,8 @@ class MemoryStorageService:
                         file.upload_file_id,
                         exc_info=True,
                     )
-                    processed_parts.append(self._file_marker_part(file, position, language))
-                    processed_parts.append(self._local_file_error_part(language))
+                    processed_parts.append(cls._file_marker_part(file, position, language))
+                    processed_parts.append(cls._local_file_error_part(language))
                     continue
 
             parts = await multimodal_service.process_files(
@@ -1135,8 +1268,8 @@ class MemoryStorageService:
                 include_processing_errors=True,
             )
             if local_media:
-                self._replace_local_media_url(parts, *local_media)
-            processed_parts.append(self._file_marker_part(file, position, language))
+                cls._replace_local_media_url(parts, *local_media)
+            processed_parts.append(cls._file_marker_part(file, position, language))
             processed_parts.extend(parts)
         return processed_parts
 
@@ -1174,11 +1307,7 @@ class MemoryStorageService:
             generations = output.get("generations")
             if isinstance(generations, list):
                 for generation_group in generations:
-                    items = (
-                        generation_group
-                        if isinstance(generation_group, list)
-                        else [generation_group]
-                    )
+                    items = generation_group if isinstance(generation_group, list) else [generation_group]
                     for generation in items:
                         message = getattr(generation, "message", None)
                         if message is not None:
@@ -1201,9 +1330,9 @@ class MemoryStorageService:
 
     @staticmethod
     def _classified_llm_error_data(
-        classified: ClassifiedLLMError,
-        language: str,
-        message: str | None = None,
+            classified: ClassifiedLLMError,
+            language: str,
+            message: str | None = None,
     ) -> dict[str, Any]:
         return {
             "code": int(classified.biz_code),
@@ -1219,9 +1348,14 @@ class MemoryStorageService:
             "message": t("errors.llm.api_key_missing", locale=language),
         }
 
-    async def _load_trial_run_local_file(self, file, workspace_id, tenant_id):
+    async def _load_trial_run_local_file(
+            self,
+            file,
+            workspace_id: uuid.UUID,
+            tenant_id: uuid.UUID,
+    ) -> tuple[bytes, str]:
+        """校验本地附件归属并从配置的存储后端读取原始字节。"""
         import magic
-
         from src.infrastructure.file_storage import FileStorageService
 
         metadata = await self.repository.metadata(
@@ -1229,32 +1363,37 @@ class MemoryStorageService:
         )
         if metadata is None:
             raise ValueError("local attachment is unavailable in the current workspace")
-        content = await FileStorageService().download_file(metadata.file_key)
+        file_key = metadata.file_key
+        metadata_content_type = metadata.content_type
+        metadata_file_ext = metadata.file_ext
+        metadata_file_name = metadata.file_name
+
+        content = await FileStorageService().download_file(file_key)
         if not content:
             raise ValueError("local attachment is empty")
-        mime_type = (
-            magic.from_buffer(content, mime=True)
-            or metadata.content_type
-            or "application/octet-stream"
-        )
+
+        detected_mime = magic.from_buffer(content, mime=True)
+        mime_type = detected_mime or metadata_content_type or "application/octet-stream"
         file.set_content(content)
         file.url = file.url or f"local-file://{file.upload_file_id}"
-        file.file_type = (
-            f"audio/{metadata.file_ext.lstrip('.').lower()}"
-            if file.type == FileType.AUDIO and metadata.file_ext
-            else mime_type
-        )
-        file.name = file.name or metadata.file_name
+        if file.type == FileType.AUDIO and metadata_file_ext:
+            audio_ext = metadata_file_ext.lstrip(".").lower()
+            file.file_type = f"audio/{audio_ext}"
+        else:
+            file.file_type = mime_type
+        if not file.name:
+            file.name = metadata_file_name
         return content, mime_type
 
     async def trial_run_chat_stream(
-        self,
-        payload: TrialRunChatInput,
-        language: str = "zh",
-        workspace_id: uuid.UUID | None = None,
-        tenant_id: uuid.UUID | None = None,
+            self,
+            payload: TrialRunChatInput,
+            language: str = "zh",
+            workspace_id: uuid.UUID | None = None,
+            tenant_id: uuid.UUID | None = None,
     ) -> AsyncGenerator[str, None]:
         """按附件类型分别解析，再由文本模型合并生成流式回答。"""
+        from src.services.model_config import ModelConfigService, ModelConfigurationError
         from langchain.agents import create_agent
         from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
@@ -1269,13 +1408,11 @@ class MemoryStorageService:
         attachment_type_counts = {file_type: 0 for file_type in attachment_groups}
         for file_index, file in enumerate(payload.files):
             attachment_type_counts[file.type] += 1
-            attachment_groups[file.type].append(
-                {
-                    "file_index": file_index,
-                    "type_index": attachment_type_counts[file.type],
-                    "file": file,
-                }
-            )
+            attachment_groups[file.type].append({
+                "file_index": file_index,
+                "type_index": attachment_type_counts[file.type],
+                "file": file,
+            })
 
         def attachment_label(ref: dict[str, Any]) -> str:
             file = ref["file"]
@@ -1296,30 +1433,37 @@ class MemoryStorageService:
         def group_failure_text(refs: list[dict[str, Any]], reason: str) -> str:
             return "\n".join(f"{attachment_label(ref)}\n{reason}" for ref in refs)
 
-        def build_llm(model_info: ModelInfo, *, streaming: bool, max_tokens: int) -> Any:
-            """远端壳：凭据与选路在模型服务；streaming=True 使 astream_events 回调面出 token 事件。"""
-            model = model_clients[UUID(str(model_info.model_config_id))]
-            return model.model_copy(
-                update={
-                    "default_params": {
-                        **model.default_params,
-                        "temperature": 0.2 if not streaming else 0.7,
-                        "max_tokens": max_tokens,
-                    }
-                }
+        async def build_llm(model_info: ModelInfo, *, streaming: bool, max_tokens: int) -> Any:
+            """Build the API's parameterized model through the service-owned invoke client."""
+            model = await self.runtime.model_service.chat_model(
+                UUID(str(model_info.model_config_id)), memory_config.tenant_id
             )
+            return model.model_copy(update={"default_params": {
+                **model.default_params,
+                "temperature": 0.2 if not streaming else 0.7,
+                "max_tokens": max_tokens,
+            }})
 
         try:
-            memory_config, runtime_cache = await self._trial_config(
-                payload.config_id, workspace_id, tenant_id
+            memory_config, _ = await self._trial_config(
+                payload.config_id, workspace_id, tenant_id, include_runtime_views=False
             )
-            model_clients = {
-                key: await self.runtime.model_service.chat_model(key, tenant_id)
-                for key in runtime_cache
-            }
+            runtime_cache: dict[uuid.UUID, ModelInfo | None] = {}
 
-            async def get_runtime(model_config_id):
-                return runtime_cache.get(model_config_id)
+            async def get_runtime(model_config_id: uuid.UUID):
+                """非解密视图缓存；模型缺失/弃用/未启用按旧口径软降级为 None。"""
+                if model_config_id not in runtime_cache:
+                    try:
+                        runtime_cache[model_config_id] = (
+                            await ModelConfigService.get_runtime_model_view_async(
+                                self.runtime.postgres,
+                                model_config_id,
+                                tenant_id=memory_config.tenant_id,
+                            )
+                        )
+                    except ModelConfigurationError:
+                        runtime_cache[model_config_id] = None
+                return runtime_cache[model_config_id]
 
             final_runtime = await get_runtime(memory_config.llm_model_id)
             if final_runtime is None:
@@ -1338,9 +1482,7 @@ class MemoryStorageService:
                 model_config_id = self._trial_run_media_model_id(memory_config, file_type)
                 runtime = await get_runtime(model_config_id)
                 required = required_modalities[file_type]
-                if runtime is not None and required not in self._normalize_modalities(
-                    runtime.input_modalities
-                ):
+                if runtime is not None and required not in self._normalize_modalities(runtime.input_modalities):
                     runtime = None
                 if runtime is None and model_config_id != memory_config.llm_model_id:
                     fallback = final_runtime
@@ -1353,14 +1495,11 @@ class MemoryStorageService:
 
             final_model_info = final_runtime
 
-            yield format_sse_message(
-                "start",
-                {
-                    "conversation_id": "",
-                    "message_id": str(uuid.uuid4()),
-                    "user_message_id": str(uuid.uuid4()),
-                },
-            )
+            yield format_sse_message("start", {
+                "conversation_id": "",
+                "message_id": str(uuid.uuid4()),
+                "user_message_id": str(uuid.uuid4()),
+            })
 
             async def analyze_media_group(file_type: FileType) -> dict[str, Any]:
                 refs = attachment_groups[file_type]
@@ -1398,14 +1537,12 @@ class MemoryStorageService:
                     f"{TRIAL_RUN_ATTACHMENT_ANALYSIS_PROMPT}\n"
                     f"Reply in {requested_language}.\n{mapping}"
                 )
-                parser_llm = build_llm(model_info, streaming=False, max_tokens=2000)
+                parser_llm = await build_llm(model_info, streaming=False, max_tokens=2000)
                 try:
-                    response = await parser_llm.ainvoke(
-                        [
-                            SystemMessage(content=parser_prompt),
-                            HumanMessage(content=parts),
-                        ]
-                    )
+                    response = await parser_llm.ainvoke([
+                        SystemMessage(content=parser_prompt),
+                        HumanMessage(content=parts),
+                    ])
                 except asyncio.CancelledError:
                     raise
                 except Exception as e:
@@ -1445,7 +1582,7 @@ class MemoryStorageService:
                 refs = attachment_groups[FileType.DOCUMENT]
                 documents: list[str] = []
                 # 文档字节在短会话关闭后下载和解析，避免长时间占用连接。
-                multimodal_service = MultimodalService(self.repository, final_model_info)
+                multimodal_service = MultimodalService(None, final_model_info)
                 for ref in refs:
                     file = ref["file"]
                     if file.transfer_method == TransferMethod.LOCAL_FILE:
@@ -1481,9 +1618,10 @@ class MemoryStorageService:
                 ]
                 combined_message = parts[0]
                 if len(parts) > 1:
-                    combined_message = t(
-                        "errors.llm.attachment_prefix", locale=language
-                    ) + "；".join(parts)
+                    combined_message = (
+                        t("errors.llm.attachment_prefix", locale=language)
+                        + "；".join(parts)
+                    )
                 first_classified = attachment_errors[0][1]
                 yield format_sse_message(
                     "error",
@@ -1530,7 +1668,7 @@ class MemoryStorageService:
                 )
             messages.append(HumanMessage(content=current_content))
 
-            final_llm = build_llm(final_model_info, streaming=True, max_tokens=2000)
+            final_llm = await build_llm(final_model_info, streaming=True, max_tokens=2000)
             requested_language = "English" if language == "en" else "Chinese"
             system_prompt = f"{TRIAL_RUN_CHAT_SYSTEM_PROMPT}\nThe requested interface language is {requested_language}."
             agent = create_agent(model=final_llm, tools=[], system_prompt=system_prompt)
@@ -1542,9 +1680,7 @@ class MemoryStorageService:
                     event_type = event.get("event")
                     if event_type == "on_chat_model_stream":
                         chunk = event.get("data", {}).get("chunk")
-                        for text_chunk in self._stream_content_to_texts(
-                            getattr(chunk, "content", None)
-                        ):
+                        for text_chunk in self._stream_content_to_texts(getattr(chunk, "content", None)):
                             full_content += text_chunk
                             yield format_sse_message("message", {"content": text_chunk})
                     elif event_type == "on_chat_model_end":
@@ -1567,39 +1703,36 @@ class MemoryStorageService:
 
             if attachment_context:
                 details_title = (
-                    "Current attachment details" if language == "en" else "当前附件详细信息"
+                    "Current attachment details"
+                    if language == "en"
+                    else "当前附件详细信息"
                 )
-                attachment_details = f"\n\n---\n\n## {details_title}\n\n{attachment_context}"
+                attachment_details = (
+                    f"\n\n---\n\n## {details_title}\n\n"
+                    f"{attachment_context}"
+                )
                 for offset in range(0, len(attachment_details), 2000):
-                    details_chunk = attachment_details[offset : offset + 2000]
+                    details_chunk = attachment_details[offset:offset + 2000]
                     full_content += details_chunk
                     yield format_sse_message("message", {"content": details_chunk})
 
             total_tokens += final_tokens
 
-            yield format_sse_message(
-                "end",
-                {
-                    "elapsed_time": time.perf_counter() - start_time,
-                    "message_length": len(full_content),
-                    "usage": {"total_tokens": total_tokens},
-                },
-            )
+            yield format_sse_message("end", {
+                "elapsed_time": time.perf_counter() - start_time,
+                "message_length": len(full_content),
+                "usage": {"total_tokens": total_tokens},
+            })
         except asyncio.CancelledError:
             logger.info("[TRIAL_RUN_CHAT_STREAM] Client disconnected during streaming")
             raise
-        except ProfileError:
+        except ConfigurationError:
             logger.error("[TRIAL_RUN_CHAT_STREAM] Configuration loading failed", exc_info=True)
-            yield format_sse_message(
-                "error",
-                {
-                    "code": int(BizCode.MEMORY_CONFIG_NOT_FOUND),
-                    "error": "config_error",
-                    "message": "Configuration loading failed"
-                    if language == "en"
-                    else "配置读取失败",
-                },
-            )
+            yield format_sse_message("error", {
+                "code": int(BizCode.MEMORY_CONFIG_NOT_FOUND),
+                "error": "config_error",
+                "message": "Configuration loading failed" if language == "en" else "配置读取失败",
+            })
 
     async def _pilot_snapshots(self, messages, config, views):
         from pathlib import Path
@@ -1719,68 +1852,123 @@ class MemoryStorageService:
         results = await asyncio.gather(*tasks)
         return [result for result in results if result is not None]
 
-    async def delete_end_user(self, end_user_id, *, workspace_id):
-        import redis
 
-        from src.infrastructure.redis_lock import RedisFairLock
-        from src.repositories.workspace import WorkspaceRepository
 
-        user = await self.end_users.resolve_user_in_workspace(end_user_id, workspace_id)
-        if user is None or user["id"] != end_user_id:
-            raise ProfileError(BizCode.NOT_FOUND, "终端用户不存在或已删除", status_code=200)
-        client = redis.Redis.from_url(
-            self.runtime.settings.resolved_redis_url, decode_responses=True
-        )
-        lock = RedisFairLock(
-            key=f"memory_write:{end_user_id}",
-            redis_client=client,
-            expire=1200,
-            timeout=60,
-            auto_renewal=True,
-        )
+    async def delete_all_nodes_by_end_user_id(self, end_user_id: str) -> int:
+        """删除指定用户的全部记忆。
+
+        - RAG 空间：删除独立索引中该宿主的消息，返回条数。
+        - 图空间：删除 Neo4j 记忆节点和边，返回节点数。
+        - 归属无法判定（宿主不存在 / 未关联 workspace）：两种存储都清理，
+          返回「删除条目总数」（RAG 消息条数 + 图节点数）。
+
+        注意返回值口径：RAG 分支统计的是「消息条数」，图侧统计的是「节点数」；
+        正常分支只会命中其中一种，只有归属未知的兜底分支才会相加，
+        结果仅用于粗略反馈，调用方不应把它当作单一存储的精确计数做对账。
+        """
+
+
         try:
-            if not await asyncio.to_thread(lock.acquire):
-                raise RuntimeError("memory write lock acquisition timed out")
-            user = await self.end_users.resolve_user_in_workspace(end_user_id, workspace_id)
-            if user is None or user["id"] != end_user_id:
-                raise ProfileError(BizCode.NOT_FOUND, "终端用户不存在或已删除", status_code=200)
-            workspace = await WorkspaceRepository(self.runtime.postgres).workspace_row(workspace_id)
-            storage_type = (workspace["storage_type"] or "neo4j").lower() if workspace else None
-            if storage_type == "rag":
-                total = await self.repository.delete_user_rag(str(end_user_id))
-            elif storage_type == "neo4j":
-                total = await self.repository.delete_user_graph(str(end_user_id))
-            else:
-                rag_error = None
-                try:
-                    total = await self.repository.delete_user_rag(str(end_user_id))
-                except Exception as exc:
-                    rag_error = exc
-                    total = 0
-                total += await self.repository.delete_user_graph(str(end_user_id))
-                if rag_error is not None:
-                    raise rag_error
-            await self.repository.finalize_user_delete(end_user_id, workspace_id)
-            return {
-                "deleted": True,
-                "end_user_id": str(end_user_id),
-                "effective_end_user_id": str(end_user_id),
-                "total_deleted": total,
-            }
-        finally:
-            await asyncio.to_thread(lock.release)
-            await asyncio.to_thread(client.close)
-
-    async def delete_node(self, payload, *, workspace_id, tenant_id, operator):
-        if payload.element_id.startswith("virtual:preferencegroup:"):
-            raise ProfileError(
-                BizCode.INVALID_PARAMETER,
-                "偏好汇总节点不可删除",
-                detail="请先删除具体的偏好记忆节点",
-                status_code=200,
+            end_user_uuid = uuid.UUID(str(end_user_id))
+        except (ValueError, TypeError, AttributeError):
+            # 非法 id 不应继续走删除分支：用原始字符串去 ES term 查询没有意义，
+            # 同时再跑一遍图删除只会放大误操作面。直接返回 0 并留 error 日志
+            logger.error(
+                "[MemoryService] invalid end_user_id, abort delete: %s",
+                end_user_id,
             )
+            return 0
+
+        # ES term 查询与图节点都按规范形式写入（各写入入口均已解析为
+        # str(end_user.id)）；这里统一用解析后的规范 id，避免调用方传入
+        # 大写/无连字符 UUID 时精确匹配查不到文档、静默漏删
+        canonical_end_user_id = str(end_user_uuid)
+
+        row = await self.repository.deletion_workspace(end_user_uuid)
+
+        if row is not None and row[1] is None:
+            storage_type = "neo4j"
+        else:
+            storage_type = row[1] if row is not None else None
+
+        normalized_type = str(storage_type or "").strip().lower()
+        if normalized_type not in ("rag", "neo4j"):
+            # 查不到归属（宿主不存在 / 未关联 workspace）或取值无法识别时，
+            # 不能默认当成图空间：RAG 记忆只在 ES 里，落到图分支会静默漏删。
+            # 归属未知时两种存储都尝试清理，任一失败也不阻断另一条路径。
+            logger.warning(
+                "[MemoryService] storage_type unresolved, delete both rag and graph: "
+                "end_user=%s, storage_type=%r",
+                end_user_id,
+                storage_type,
+            )
+
+            # 两种存储都尝试清理，但失败必须上抛：调用层拿到返回值后会立刻
+            # finalize_memory_delete，吞掉 RAG 失败会留下「宿主已删除、ES 记忆
+            # 仍在」且没有重试入口。删除本身幂等，交由调用方重试收敛
+            rag_error: Exception | None = None
+            try:
+                rag_deleted = await self.repository.delete_user_rag(canonical_end_user_id)
+            except Exception as exc:
+                logger.error(
+                    "[MemoryService] fallback rag delete failed: end_user=%s, err=%s",
+                    end_user_id,
+                    exc,
+                    exc_info=True,
+                )
+                rag_deleted = 0
+                rag_error = exc
+
+            try:
+                graph_deleted = await self.repository.delete_user_graph(
+                    canonical_end_user_id
+                )
+            except Exception as exc:
+                # 图侧失败必须上抛，不能按 0 吞掉：调用层（memory_storage_controller）
+                # 拿到返回值后会立刻把宿主落库为 is_active=False / memory_count=0
+                # （finalize_memory_delete_async），吞异常会留下「用户显示已删除、
+                # 图记忆仍在」且再无重试入口。删除本身是幂等的，交由调用方重试收敛
+                logger.error(
+                    "[MemoryService] fallback graph delete failed: end_user=%s, err=%s",
+                    end_user_id,
+                    exc,
+                    exc_info=True,
+                )
+                raise
+            logger.info(
+                "[MemoryService] fallback delete done: end_user=%s "
+                "rag_messages=%s graph_nodes=%s",
+                end_user_id,
+                rag_deleted,
+                graph_deleted,
+            )
+            if rag_error is not None:
+                # 图侧已尽量清理，但 RAG 失败仍要上抛，交由调用方重试
+                raise rag_error
+            # 两者单位不同（消息条数 vs 节点数），只能加总用于「删除条目总数」
+            # 的粗略反馈；正常分支按 storage_type 只命中一种，不会出现混算
+            return rag_deleted + graph_deleted
+
+        if normalized_type == "rag":
+
+            return await self.repository.delete_user_rag(canonical_end_user_id)
+
+        return await self.repository.delete_user_graph(
+            canonical_end_user_id
+        )
+
+    async def get_end_user_by_id_async(self, end_user_id):
+        from types import SimpleNamespace
+
+        row = await self.end_users.memory_user_snapshot(end_user_id)
+        return SimpleNamespace(**row) if row is not None else None
+
+    async def finalize_memory_delete_async(self, end_user_id, workspace_id):
+        return await self.repository.finalize_user_delete(end_user_id, workspace_id)
+
+    async def require_end_user_in_workspace(self, end_user_id, workspace_id):
         try:
-            user_id = UUID(payload.end_user_id)
+            user_id = UUID(end_user_id)
         except ValueError as exc:
             raise ProfileError(
                 BizCode.INVALID_USER_ID, "无效的终端用户ID格式", status_code=200
@@ -1790,50 +1978,63 @@ class MemoryStorageService:
             raise ProfileError(
                 BizCode.PERMISSION_DENIED, "该终端用户不属于当前工作空间", status_code=200
             )
-        deleted = await self.repository.manual_delete(payload.element_id, str(user_id), operator)
-        if not deleted:
-            raise ProfileError(
-                BizCode.NOT_FOUND,
-                "节点未找到或不属于该用户",
-                detail=f"element_id={payload.element_id}",
-                status_code=200,
-            )
-        try:
-            count = await self.repository.sync_count(user_id)
-            limit = (await self.runtime.quota.effective_limits(tenant_id))["end_user_memory_limit"]
-            redis = await self.runtime.redis.client()
-            if count > limit:
-                await redis.sadd("forget:candidates", str(user_id))
-            else:
-                await redis.srem("forget:candidates", str(user_id))
-        except Exception:
-            logger.warning("Failed to synchronize memory count after node deletion", exc_info=True)
-        return {"deleted": True, "element_id": payload.element_id}
 
-    @staticmethod
+    async def delete_node_by_element_id(self, element_id, end_user_id, operator):
+        """通过 elementId 删除 Neo4j 图节点（同时 DETACH DELETE 关联边）。"""
+        return await self.repository.manual_delete(element_id, end_user_id, operator)
+
+    async def sync_end_user_memory_count_from_neo4j(self, end_user_id, tenant_id):
+        """Sync the counts using the runtime-owned Neo4j, PostgreSQL and Redis clients."""
+        if not end_user_id:
+            return 0
+
+        node_count, memory_node_count = await self.repository.sync_count(UUID(end_user_id))
+        memory_limit = (await self.runtime.quota.effective_limits(tenant_id))["end_user_memory_limit"]
+        redis_client = await self.runtime.redis.client()
+        if redis_client:
+            if memory_node_count > memory_limit:
+                await redis_client.sadd("forget:candidates", end_user_id)
+                logger.info(
+                    f"[MEMORY_COUNT_SYNC] 加入遗忘候选: end_user_id={end_user_id}, "
+                    f"count={memory_node_count}, limit={memory_limit}"
+                )
+            else:
+                await redis_client.srem("forget:candidates", end_user_id)
+
+        logger.info(f"[MEMORY_COUNT_SYNC] 同步完成: end_user_id={end_user_id}, count={node_count}")
+        return node_count
+
     async def _run_pilot_extraction(
-        memory_config,
-        messages,
+        self,
+        memory_config: MemoryConfig,
+        messages: List[WriteMessageItem],
         llm_client,
-        progress_callback=None,
+        progress_callback: Optional[ProgressCallback] = None,
         language: str = "zh",
         *,
-        perceptual_snapshots=None,
-        embedder_client=None,
+        model_views=None,
     ) -> None:
-        """Run the trial use case using injected models and engine helpers."""
+        """执行试运行模式的知识提取流水线（v0.3.13 QA 消息格式）。
+
+        流程：
+        1. 文件 URL 解析 + 感知记忆内存快照（persist=False）
+        2. 构建 DialogData → 语义剪枝 → 语义分块
+        3. 调用 PilotWritePipeline 执行萃取链路
+        4. 将萃取结果写入输出文件，并注入 perceptual 字段 / 移除 disambiguation
+
+        Args:
+            memory_config: 从数据库加载的内存配置对象
+            messages: QA 格式消息列表（role: user/assistant，files 可选）
+            llm_client: 预先初始化的 LLM 客户端（调用方负责在 db session 关闭前完成初始化）
+            progress_callback: 可选的进度回调 (stage, message, data)
+            language: 语言类型 ("zh" | "en")
+        """
         from src.common.datetime_utils import ensure_dialog_at, utcnow_naive
         from src.logging_config import log_time
-        from src.schemas.extraction_engine.message_models import (
-            ConversationContext,
-            ConversationMessage,
-            DialogData,
-        )
+        from src.models.message_models import ConversationContext, ConversationMessage, DialogData
         from src.storage_services.extraction_engine.pipeline_help import (
-            _write_extracted_result_summary,
-            export_test_input_doc,
+            _write_extracted_result_summary, export_test_input_doc,
         )
-
 
         log_file = get_settings().get_memory_output_path("time.log")
         os.makedirs(os.path.dirname(log_file), exist_ok=True)
@@ -1843,7 +2044,7 @@ class MemoryStorageService:
             f.write(f"\n=== Pilot Run Started: {timestamp} ===\n")
 
         # 统一使用 emit，避免到处判断 callback 是否为 None
-        emit = progress_callback or _noop_progress
+        emit: ProgressCallback = progress_callback or _noop_progress
         pipeline_start = time.time()
 
         try:
@@ -1851,16 +2052,13 @@ class MemoryStorageService:
             step_start = time.time()
             await emit("perceptual_extract", "开始提取感知记忆", None)
 
-            perceptual_snapshots = perceptual_snapshots or []
+            perceptual_snapshots = await self._pilot_snapshots(messages, memory_config, model_views or {})
 
             await emit(
-                "perceptual_result",
-                "感知记忆结果",
+                "perceptual_result", "感知记忆结果",
                 {"perceptual_nodes": _collect_perceptual_nodes_data(perceptual_snapshots)},
             )
-            await emit(
-                "perceptual_complete", "感知记忆提取完成", {"count": len(perceptual_snapshots)}
-            )
+            await emit("perceptual_complete", "感知记忆提取完成", {"count": len(perceptual_snapshots)})
             log_time("Perceptual Snapshot Generation", time.time() - step_start, log_file)
 
             # 将 file_summary 注入回对应 message.content（对齐 WritePipeline._preprocess_files）
@@ -1927,13 +2125,19 @@ class MemoryStorageService:
 
             from src.pipelines.pilot_write_pipeline import PilotWritePipeline
 
+            manager = self.runtime.model_service
+
+            class Embedder:
+                async def aembed_documents(self, texts):
+                    return await manager.embed_texts(memory_config.embedding_model_id, memory_config.tenant_id, texts)
+
             pilot_result = await PilotWritePipeline(
                 memory_config=memory_config,
                 end_user_id=str(memory_config.workspace_id),
                 language=language,
                 progress_callback=emit,
                 llm_client=llm_client,
-                embedder_client=embedder_client,
+                embedder_client=Embedder(),
             ).run(chunked_dialogs)
 
             log_time("Extraction Pipeline", time.time() - step_start, log_file)
@@ -1967,9 +2171,7 @@ class MemoryStorageService:
         total_time = time.time() - pipeline_start
         log_time("TOTAL PILOT RUN TIME", total_time, log_file)
         with open(log_file, "a", encoding="utf-8") as f:
-            f.write(
-                f"=== Pilot Run Completed: {utcnow_naive().strftime('%Y-%m-%d %H:%M:%S')} ===\n\n"
-            )
+            f.write(f"=== Pilot Run Completed: {utcnow_naive().strftime('%Y-%m-%d %H:%M:%S')} ===\n\n")
         logger.info(f"Pilot run complete. Total time: {total_time:.2f}s")
 
     def _convert_emotion_types(self, obj: Any) -> Any:
@@ -2014,48 +2216,45 @@ class MemoryStorageService:
             # 如果解析失败，返回原始字符串
             return iso_string
 
-    def _process_emotion_results(self, results: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    def _process_emotion_results(self, results: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """
         处理情绪查询结果，按emotion_type和created_at分组并累加emotion_intensity
-
+        
         Args:
             results: Neo4j查询结果
-
+            
         Returns:
             处理后的情绪数据列表，相同emotion_type和created_at的记录会合并并累加intensity
         """
-        length_data = []
-
+        length_data=[]
+        from collections import defaultdict
+        
         # 用于按(emotion_type, created_at)分组累加intensity
         emotion_groups = defaultdict(float)
-
+        
         # 检查results是否为空或不是列表
         if not results or not isinstance(results, list):
             logger.warning(f"情绪查询结果为空或格式不正确: {type(results)}")
             return []
-
+        
         for record in results:
             # 检查record是否为字典类型
             if not isinstance(record, dict):
                 logger.warning(f"跳过非字典类型的记录: {type(record)} - {record}")
                 continue
-
+                
             # 获取创建时间并格式化
-            created_at = record.get("created_at")
+            created_at = record.get('created_at')
             formatted_created_at = created_at
-
+            
             # 如果created_at是字符串格式，尝试格式化
             if isinstance(created_at, str):
-                formatted_created_at = self._format_emotion_datetime(created_at)
-            emotion_type = record.get("emotion_type")
-            emotion_intensity = record.get("emotion_intensity")
-            if emotion_type != None:
+                formatted_created_at = self._format_datetime(created_at)
+            emotion_type = record.get('emotion_type')
+            emotion_intensity = record.get('emotion_intensity')
+            if emotion_type !=None:
                 length_data.append(emotion_intensity)
-            if (
-                emotion_type is not None
-                and emotion_intensity is not None
-                and formatted_created_at is not None
-            ):
+            if emotion_type is not None and emotion_intensity is not None and formatted_created_at is not None:
                 # 使用(emotion_type, created_at)作为分组键
                 # 折叠为效价（D5：10 类 + 旧值 fear/surprise）；未知值保留原值
                 valence = emotion_valence(emotion_type)
@@ -2071,16 +2270,17 @@ class MemoryStorageService:
         # 转换为最终格式
         emotion_data = [
             {
-                "emotion_intensity": round(intensity / len(length_data) * 100, 2),
-                "emotion_type": emotion_type,
-                "created_at": created_at,
+                'emotion_intensity':  round(intensity / len(length_data) * 100, 2),
+                'emotion_type': emotion_type,
+                'created_at': created_at
             }
             for (emotion_type, created_at), intensity in emotion_groups.items()
         ]
-
+        
         # 按时间排序（最新的在前）
-        emotion_data.sort(key=lambda x: x.get("created_at", ""), reverse=True)
+        emotion_data.sort(key=lambda x: x.get('created_at', ''), reverse=True)
 
+        
         return emotion_data
 
     def _convert_interaction_types(self, obj: Any) -> Any:
@@ -2125,36 +2325,37 @@ class MemoryStorageService:
             # 如果解析失败，返回原始字符串
             return iso_string
 
-    def _process_interaction_results(self, results: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    def _process_interaction_results(self, results: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """
         处理交互查询结果，按季度统计交互频率
-
+        
         Args:
             results: Neo4j查询结果
-
+            
         Returns:
             按季度统计的交互数据列表，格式: [{"created_at": "2026Q1", "count": 3}]
         """
+        from collections import defaultdict
         from datetime import datetime
-
+        
         # 用于按季度分组计数
         quarterly_counts = defaultdict(int)
-
+        
         for record in results:
             # 过滤掉statement为None的记录
-            if not isinstance(record, dict) or record.get("statement") is None:
+            if not isinstance(record, dict) or record.get('statement') is None:
                 continue
-
-            created_at = record.get("created_at")
+                
+            created_at = record.get('created_at')
             if not created_at:
                 continue
-
+                
             try:
                 # 处理不同类型的时间格式
                 if isinstance(created_at, str):
                     # 解析ISO格式时间字符串
-                    dt = datetime.fromisoformat(created_at.replace("Z", "+00:00"))
-                elif hasattr(created_at, "year") and hasattr(created_at, "month"):
+                    dt = datetime.fromisoformat(created_at.replace('Z', '+00:00'))
+                elif hasattr(created_at, 'year') and hasattr(created_at, 'month'):
                     # 处理Neo4j DateTime对象
                     dt = datetime(created_at.year, created_at.month, created_at.day)
                 else:
@@ -2164,19 +2365,20 @@ class MemoryStorageService:
                 quarter_key = f"{dt.year}.Q{quarter}"
                 # 增加该季度的计数
                 quarterly_counts[quarter_key] += 1
-
+                
             except (ValueError, AttributeError) as e:
                 logger.warning(f"解析时间失败: {e}, 原始值: {created_at}")
                 continue
-
+        
         # 转换为所需格式并按时间排序
         interaction_data = [
-            {"created_at": quarter, "count": count} for quarter, count in quarterly_counts.items()
+            {"created_at": quarter, "count": count}
+            for quarter, count in quarterly_counts.items()
         ]
-
+        
         # 按季度排序（最新的在前）
         interaction_data.sort(key=lambda x: x["created_at"], reverse=True)
-
+        
         return interaction_data
 
 
@@ -2188,7 +2390,7 @@ _ROLE_TO_CN = {"user": "用户", "assistant": "AI"}
 logger = logging.getLogger(__name__)
 
 
-async def _noop_progress(stage: str, message: str, data: dict | None = None) -> None:
+async def _noop_progress(stage: str, message: str, data: Optional[dict] = None) -> None:
     """空回调，用于 progress_callback 为 None 时的兜底。"""
 
 
@@ -2233,17 +2435,15 @@ def _collect_perceptual_nodes_data(snapshots: list[PerceptualEntry]) -> list[dic
     result: list[dict] = []
     for _, snap, file_type, url in snapshots:
         content = (snap.meta_data or {}).get("content", {}) or {}
-        result.append(
-            {
-                "file_type": file_type,
-                "file_name": snap.file_name,
-                "url": url,
-                "summary": snap.summary,
-                "topic": content.get("topic"),
-                "keywords": content.get("keywords", []),
-                "domain": content.get("domain"),
-            }
-        )
+        result.append({
+            "file_type": file_type,
+            "file_name": snap.file_name,
+            "url": url,
+            "summary": snap.summary,
+            "topic": content.get("topic"),
+            "keywords": content.get("keywords", []),
+            "domain": content.get("domain"),
+        })
     return result
 
 
@@ -2253,7 +2453,9 @@ def _build_perceptual_summary(snapshots: list[PerceptualEntry]) -> dict:
     type_counter = Counter(file_types)
     return {
         "count": len(snapshots),
-        "file_type_distribution": [{"file_type": t, "count": c} for t, c in type_counter.items()],
+        "file_type_distribution": [
+            {"file_type": t, "count": c} for t, c in type_counter.items()
+        ],
         "samples": _collect_perceptual_nodes_data(snapshots),
     }
 
@@ -2265,7 +2467,7 @@ def _patch_extracted_result_json(perceptual_summary: dict) -> None:
         logger.warning(f"[PILOT_RUN] extracted_result.json 不存在，跳过 patch: {result_path}")
         return
     try:
-        with open(result_path, encoding="utf-8") as rf:
+        with open(result_path, "r", encoding="utf-8") as rf:
             data = json.load(rf)
         data["perceptual"] = perceptual_summary
         data.pop("disambiguation", None)
@@ -2291,10 +2493,10 @@ async def _run_pruning(
 
     enabled 始终反映配置开关（与 status 解耦），避免“启用但失败”被误读成“未启用”。
     """
+    from src.models.config_models import PruningConfig
     from src.storage_services.extraction_engine.data_preprocessing.data_pruning import (
         SemanticPruner,
     )
-    from src.schemas.extraction_engine.config_models import PruningConfig
 
     await emit("pruning_extract", "开始语义剪枝", None)
 
@@ -2321,8 +2523,7 @@ async def _run_pruning(
                 "changed_count": 0,
             }
             await emit(
-                "pruning_result",
-                "语义剪枝结果",
+                "pruning_result", "语义剪枝结果",
                 {"user_message_changes": [], "fallback": "剪枝后为空，使用原始对话"},
             )
             await emit("pruning_complete", "语义剪枝完成", fallback_stats)
@@ -2335,11 +2536,7 @@ async def _run_pruning(
             pruned_user_map[orig_idx] = pmsg.msg
 
         user_message_changes = [
-            {
-                "index": idx,
-                "original": original_user_msgs[idx],
-                "pruned": pruned_user_map.get(idx, ""),
-            }
+            {"index": idx, "original": original_user_msgs[idx], "pruned": pruned_user_map.get(idx, "")}
             for idx in original_user_msgs
             if pruned_user_map.get(idx, "") != original_user_msgs[idx]
         ]
@@ -2426,7 +2623,8 @@ def _split_user_and_context(dialog: DialogData) -> DialogData:
         "after_msgs": [],
     }
     logger.info(
-        f"[PILOT_RUN] user-only 拆分完成：user={len(user_msgs)}, context_msgs={len(before_msgs)}"
+        f"[PILOT_RUN] user-only 拆分完成：user={len(user_msgs)}, "
+        f"context_msgs={len(before_msgs)}"
     )
     return dialog
 
@@ -2454,13 +2652,10 @@ async def _run_chunking(
     for dlg in chunked_dialogs:
         for i, chunk in enumerate(dlg.chunks or []):
             await emit(
-                "chunking_result",
-                f"分块 {i + 1} 处理完成",
+                "chunking_result", f"分块 {i + 1} 处理完成",
                 {
                     "chunk_index": i + 1,
-                    "content": chunk.content[:200] + "..."
-                    if len(chunk.content) > 200
-                    else chunk.content,
+                    "content": chunk.content[:200] + "..." if len(chunk.content) > 200 else chunk.content,
                     "full_length": len(chunk.content),
                     "dialog_id": dlg.id,
                     "chunker_strategy": memory_config.chunker_strategy,
@@ -2468,8 +2663,7 @@ async def _run_chunking(
             )
 
     await emit(
-        "chunking_complete",
-        "分块完成",
+        "chunking_complete", "分块完成",
         {
             "total_chunks": sum(len(dlg.chunks or []) for dlg in chunked_dialogs),
             "total_dialogs": len(chunked_dialogs),

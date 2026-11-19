@@ -6,11 +6,12 @@ providing percentage distribution that totals 100%.
 """
 
 import logging
+from typing import Optional
 
 from pydantic import BaseModel, Field
 
 from src.common.datetime_utils import utcnow_naive
-from src.services.implicit_memory.errors import LLMClientException
+from src.common.llm_tools.llm_client import LLMClientException
 from src.services.implicit_memory.llm_client import ImplicitMemoryLLMClient
 from src.schemas.implicit_memory import (
     InterestAreaDistribution,
@@ -41,9 +42,17 @@ class InterestAnalyzer:
     # Define the four interest categories we analyze
     INTEREST_CATEGORIES = ["tech", "lifestyle", "music", "art"]
 
-    def __init__(self, model):
-        self.llm_model_id = None
-        self._llm_client = ImplicitMemoryLLMClient(model)
+    def __init__(self, runtime, llm_model_id: Optional[str] = None, tenant_id=None):
+        """Initialize the interest analyzer.
+        
+        Args:
+            runtime: Service-owned database and model clients
+            llm_model_id: Optional LLM model ID to use for analysis
+            tenant_id: Tenant ID for SpeedBear public model API key resolution
+        """
+        self.runtime = runtime
+        self.llm_model_id = llm_model_id
+        self._llm_client = ImplicitMemoryLLMClient(runtime, llm_model_id, tenant_id=tenant_id)
 
     async def analyze_interests(
         self,

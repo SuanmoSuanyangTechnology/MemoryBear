@@ -8,7 +8,7 @@ import logging
 from typing import Any
 
 from src.common.enums import TripletPredicate
-from src.schemas.extraction_engine.triplet_models import TripletExtractionResponse
+from src.models.triplet_models import TripletExtractionResponse
 from src.storage_services.extraction_engine.deduplication.deduped_and_disamb import (
     _USER_PLACEHOLDER_NAMES,
 )

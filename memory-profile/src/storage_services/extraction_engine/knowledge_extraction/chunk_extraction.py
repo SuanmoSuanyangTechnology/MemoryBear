@@ -4,9 +4,9 @@ from enum import Enum
 from pathlib import Path
 
 from src.logging_config import get_memory_logger
-from src.schemas.extraction_engine.message_models import DialogData, Chunk
-from src.schemas.extraction_engine.config_models import ChunkerConfig
-from src.llm_tools.chunker_client import ChunkerClient
+from src.models.message_models import DialogData, Chunk
+from src.models.config_models import ChunkerConfig
+from src.common.llm_tools.chunker_client import ChunkerClient
 from src.common.config.config_utils import get_chunker_config
 
 logger = get_memory_logger(__name__)

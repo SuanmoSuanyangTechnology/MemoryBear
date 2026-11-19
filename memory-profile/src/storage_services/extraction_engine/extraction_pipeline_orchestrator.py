@@ -20,8 +20,8 @@ import asyncio
 import logging
 from typing import Any, Awaitable, Callable, Dict, List, Optional, Tuple
 
-from src.schemas.extraction_engine.message_models import DialogData
-from src.schemas.extraction_engine.variate_config import ExtractionPipelineConfig
+from src.models.message_models import DialogData
+from src.models.variate_config import ExtractionPipelineConfig
 
 from src.storage_services.extraction_engine.steps.base import ExtractionStep, StepContext
 from src.storage_services.extraction_engine.steps.embedding_step import EmbeddingStep
@@ -919,11 +919,11 @@ class NewExtractionOrchestrator:
         outputs, because the new orchestrator generates its own statement IDs
         that don't match the original chunk statement IDs.
         """
-        from src.schemas.extraction_engine.message_models import (
+        from src.models.message_models import (
             Statement,
             TemporalValidityRange,
         )
-        from src.schemas.extraction_engine.triplet_models import (
+        from src.models.triplet_models import (
             TripletExtractionResponse,
             Entity as TripletEntity,
             Triplet as TripletRelation,

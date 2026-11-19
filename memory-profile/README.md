@@ -244,11 +244,11 @@ Generation is a later, explicitly scoped extension over the read service:
   timeouts follow the existing client configuration without a per-route override.
 - The complete extraction engine keeps `steps`, `knowledge_extraction`,
   `data_preprocessing` and `deduplication` under `src/storage_services/extraction_engine`.
-  Engine data structures live in `src/schemas/extraction_engine/`; runtime
+  Engine data structures live directly under `src/models/`; runtime
   configuration is defined in `src/schemas/memory_config.py` and assembled
-  in `src/services/memory_config/service.py`. Memory-specific utilities live in `src/common/memory/`; shared date helpers
+  in `src/services/memory_config/service.py`. Utilities retain their API subdirectories under `src/common/`; shared date helpers
   live in `src/common/datetime_utils.py`. The chunker client lives in
-  `src/llm_tools/chunker_client.py`; prompt rendering lives beside its templates.
+  `src/common/llm_tools/chunker_client.py`; prompt rendering lives under `src/common/prompt/`.
   Prompt templates live in
   `src/prompt/extraction_engine/` and `src/prompt/implicit_memory/`; business
   orchestration is `MemoryStorageService._run_pilot_extraction`, with no
@@ -271,7 +271,8 @@ Generation is a later, explicitly scoped extension over the read service:
   helpers are separate from the process `PROFILE_LOG_LEVEL`/`PROFILE_LOG_FORMAT`.
 - The migrated ontology and tabular-input capabilities use the API's locked
   versions of Owlready2, RDFLib and pandas. The Docker builder includes native
-  build tools; the runtime includes a headless JRE for the OWL reasoner.
+  build tools; the runtime includes libmagic for attachment type detection.
+  Java is not installed because the migrated interfaces do not invoke OWL reasoning.
   Deprecated emotion extraction stays unregistered; the old placeholder
   `data_chunker.py` is replaced by the actual `data_preprocessing/chunker.py`.
 
@@ -520,7 +521,7 @@ match the complete API files; existing memory locale extensions are retained.
 API-aligned support layout: memory utils keep their `data/`, `validation/`,
 `log/`, `prompt/` and `config/` subdirectories under `src/common/`; Redis locking
 stays under infrastructure. Emotion buckets live under `src/emotion/`, ontology
-merging under `src/ontology_services/`, and the ontology registry/file metadata
-models under `src/models/`. Chunking lives under `src/llm_tools/`. Multimodal and
+merging under `src/services/ontology_services/`, and the ontology registry alongside its merger under `src/services/ontology_services/`. API-owned file metadata mappings
+live under `src/models/references/`. Chunking lives under `src/common/llm_tools/`. Multimodal and
 permanent-file URL helpers are separate services, as in the API. Existing
 `src.common.validation` imports continue to work through its package initializer.

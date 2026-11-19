@@ -7,13 +7,14 @@ habit distinction.
 """
 
 import logging
+from typing import Optional
 from datetime import timedelta
 
 from src.common.datetime_utils import utcnow_naive
 from src.services.implicit_memory.analyzers.habit_analyzer import (
     HabitAnalyzer,
 )
-from src.services.implicit_memory.errors import LLMClientException
+from src.common.llm_tools.llm_client import LLMClientException
 from src.schemas.implicit_memory import (
     BehaviorHabit,
     FrequencyPattern,
@@ -26,9 +27,22 @@ logger = logging.getLogger(__name__)
 class HabitDetector:
     """Detects and ranks behavioral habits from user memory summaries."""
 
-    def __init__(self, model):
-        self.llm_model_id = None
-        self.habit_analyzer = HabitAnalyzer(model)
+    def __init__(
+        self,
+        runtime,
+        llm_model_id: Optional[str] = None,
+        tenant_id=None
+    ):
+        """Initialize the habit detector.
+        
+        Args:
+            runtime: Service-owned database and model clients
+            llm_model_id: Optional LLM model ID to use for analysis
+            tenant_id: Tenant ID for SpeedBear public model API key resolution
+        """
+        self.runtime = runtime
+        self.llm_model_id = llm_model_id
+        self.habit_analyzer = HabitAnalyzer(runtime, llm_model_id, tenant_id=tenant_id)
 
     async def detect_habits(
         self,

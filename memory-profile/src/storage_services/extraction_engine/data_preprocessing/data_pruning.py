@@ -16,12 +16,12 @@ from typing import List, Optional, Dict, NamedTuple
 from pydantic import BaseModel, Field
 from src.services import extract_pruning_client
 
-from src.schemas.extraction_engine.message_models import (
+from src.models.message_models import (
     DialogData,
     ConversationMessage,
     ConversationContext,
 )
-from src.schemas.extraction_engine.config_models import PruningConfig
+from src.models.config_models import PruningConfig
 from src.common.prompt.prompt_utils import (
     prompt_env,
     log_prompt_rendering,

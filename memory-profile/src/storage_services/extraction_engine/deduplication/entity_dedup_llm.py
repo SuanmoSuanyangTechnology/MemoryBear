@@ -10,8 +10,8 @@ import logging
 from typing import List, Tuple, Dict
 import anyio
 
-from src.schemas.extraction_engine.graph_models import ExtractedEntityNode, StatementEntityEdge, EntityEntityEdge
-from src.schemas.extraction_engine.dedup_models import EntityDedupDecision, EntityDisambDecision
+from src.models.graph_models import ExtractedEntityNode, StatementEntityEdge, EntityEntityEdge
+from src.models.dedup_models import EntityDedupDecision, EntityDisambDecision
 from src.common.prompt.prompt_utils import render_entity_dedup_prompt
 from src.storage_services.extraction_engine.deduplication.deduped_and_disamb import (
     _merge_attribute,

@@ -13,9 +13,24 @@ from src.storage.outbox.types import OutboxEventInput, OutboxOperation
 from src.storage.outbox.producer import enqueue_events
 from src.storage.custom.end_user_delete import delete_end_user_memory_nodes
 from src.infrastructure.neo4j import Neo4jManager
-from src.models.file_metadata_model import FileMetadata
+from src.models.references.file_metadata_model import FileMetadata
 
 logger = logging.getLogger(__name__)
+
+SEARCH_FOR_ALL_BATCH = """
+    MATCH (n) WHERE n.end_user_id IN $end_user_ids AND n.delete_at is NULL
+    RETURN 
+        n.end_user_id as user_id,
+        count(n) as total
+    ORDER BY user_id
+    """
+
+FORGET_COUNT_ACTIVE_NODES = """
+    MATCH (n {end_user_id: $end_user_id})
+    WHERE n.delete_at IS NULL
+      AND (n:Statement OR n:Chunk OR n:ExtractedEntity)
+    RETURN count(n) AS cnt
+"""
 
 Memory_Timeline_Entity_Events = """
 MATCH (e:ExtractedEntity)
@@ -247,11 +262,17 @@ class MemoryStorageRepository:
         return await self.neo4j.read_query(Memory_Timeline_Entity_Events, id=element_id)
 
     async def timeline(self, element_id, label):
-        query = {
-            "Statement": Memory_Timeline_Statement,
-            "ExtractedEntity": Memory_Timeline_ExtractedEntity,
-        }.get(label, Memory_Timeline_MemorySummary)
-        return await self.neo4j.read_query(query, id=element_id)
+        # 根据表类型选择查询
+        if   label == 'Statement':
+            # Statement只需要输入ID，使用简化查询
+            results = await self.neo4j.read_query(Memory_Timeline_Statement, id=element_id)
+        elif  label == 'ExtractedEntity':
+            # ExtractedEntity类型查询
+            results = await self.neo4j.read_query(Memory_Timeline_ExtractedEntity, id=element_id)
+        else:
+            # MemorySummary类型查询
+            results = await self.neo4j.read_query(Memory_Timeline_MemorySummary, id=element_id)
+        return results
 
     async def user_entities(self, end_user_id):
         return await self.neo4j.read_query(
@@ -268,18 +289,14 @@ class MemoryStorageRepository:
         }.get(label, Memory_Space_Emotion_MemorySummary)
         return await self.neo4j.read_query(query, id=element_id)
 
-    async def interactions(self, element_id):
-        entities = await self.neo4j.read_query(Memory_Space_Entity, id=element_id)
-        if not entities:
-            return []
-        users = await self.neo4j.read_query(
-            Memory_Space_User, end_user_id=entities[0]["end_user_id"]
-        )
-        if not users:
-            return []
-        return await self.neo4j.read_query(
-            Memory_Space_Associative, id=element_id, user_id=users[0]["id"]
-        )
+    async def interaction_entity(self, element_id):
+        return await self.neo4j.read_query(Memory_Space_Entity, id=element_id)
+
+    async def interaction_user(self, end_user_id):
+        return await self.neo4j.read_query(Memory_Space_User, end_user_id=end_user_id)
+
+    async def interaction_associative(self, element_id, user_id):
+        return await self.neo4j.read_query(Memory_Space_Associative, id=element_id, user_id=user_id)
 
     async def execute_query(self, query, **params):
         driver = await self.neo4j.driver()
@@ -374,6 +391,16 @@ class MemoryStorageRepository:
             raise RuntimeError("RAG deletion incomplete")
         return int(result.get("deleted", 0))
 
+    async def deletion_workspace(self, end_user_id):
+        from src.models.references import EndUser, Workspace
+
+        async with self.postgres.session() as session:
+            return (await session.execute(
+                select(Workspace.id, Workspace.storage_type)
+                .join(EndUser, EndUser.workspace_id == Workspace.id)
+                .where(EndUser.id == end_user_id)
+            )).first()
+
     async def finalize_user_delete(self, user_id, workspace_id):
         import sqlalchemy as sa
 
@@ -385,9 +412,8 @@ class MemoryStorageRepository:
                 .where(EndUser.id == user_id, EndUser.workspace_id == workspace_id)
                 .values(memory_count=0, is_active=False)
             )
-            if not result.rowcount:
-                raise RuntimeError("End user disappeared during memory deletion")
             await session.commit()
+            return bool(result.rowcount)
 
     async def manual_delete(self, element_id, end_user_id, operator):
         from uuid import UUID
@@ -501,22 +527,20 @@ class MemoryStorageRepository:
 
         from src.models.references import EndUser
 
-        rows = await self.neo4j.read_query(
-            "MATCH (n {end_user_id: $id}) WHERE n.delete_at IS NULL RETURN count(n) AS total",
-            id=str(user_id),
+        result = await self.neo4j.read_query(
+            SEARCH_FOR_ALL_BATCH, end_user_ids=[str(user_id)]
         )
-        count = int(rows[0]["total"]) if rows else 0
+        node_count = int(result[0]["total"]) if result else 0
+        result = await self.neo4j.read_query(
+            FORGET_COUNT_ACTIVE_NODES, end_user_id=str(user_id)
+        )
+        memory_node_count = result[0]["cnt"] if result else 0
         async with self.postgres.session() as session:
             await session.execute(
-                sa.update(EndUser).where(EndUser.id == user_id).values(memory_count=count)
+                sa.update(EndUser).where(EndUser.id == user_id).values(memory_count=node_count)
             )
             await session.commit()
-        rows = await self.neo4j.read_query(
-            "MATCH (n {end_user_id: $id}) WHERE n.delete_at IS NULL "
-            "AND (n:Chunk OR n:Statement OR n:ExtractedEntity) RETURN count(n) AS total",
-            id=str(user_id),
-        )
-        return int(rows[0]["total"]) if rows else 0
+        return node_count, memory_node_count
 
     async def metadata(self, file_id, *, workspace_id=None, tenant_id=None, completed_only=True):
         if file_id is None:

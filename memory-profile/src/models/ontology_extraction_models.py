@@ -91,7 +91,7 @@ class OntologyTypeList:
         """
         hints = []
         try:
-            from src.ontology_services.ontology_type_merger import OntologyTypeMerger
+            from src.services.ontology_services.ontology_type_merger import OntologyTypeMerger
             
             merger = OntologyTypeMerger()
             for type_info in self.types:

@@ -3,8 +3,8 @@ from typing import Dict
 
 from src.logging_config import get_memory_logger
 from src.common.log.logging_utils import prompt_logger
-from src.schemas.extraction_engine.message_models import DialogData, Statement
-from src.schemas.extraction_engine.triplet_models import TripletExtractionResponse
+from src.models.message_models import DialogData, Statement
+from src.models.triplet_models import TripletExtractionResponse
 from src.common.prompt.prompt_utils import render_triplet_extraction_prompt
 from src.common.data.ontology import PREDICATE_DEFINITIONS
 

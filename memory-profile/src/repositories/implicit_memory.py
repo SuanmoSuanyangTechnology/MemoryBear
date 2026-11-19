@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from datetime import datetime
 from typing import Any
 from uuid import UUID
@@ -11,8 +12,11 @@ from sqlalchemy import select
 from src.common.normalization import parse_uuid
 from src.infrastructure.postgres import PostgresManager
 from src.models.references import EndUser
-from src.models.references.memory_statistics_model import ImplicitEmotionsStorage
+from src.models.references.implicit_emotions_storage_model import ImplicitEmotionsStorage
 from src.repositories.end_user import owned_user_select
+
+
+logger = logging.getLogger(__name__)
 
 
 class ImplicitMemoryRepository:
@@ -111,25 +115,33 @@ class ImplicitMemoryRepository:
     async def save_profile(self, end_user_id, workspace_id, profile):
         from uuid import uuid4
 
-        from sqlalchemy.dialects.postgresql import insert
-
         from src.common.datetime_utils import utcnow_naive
 
-        now = utcnow_naive()
         async with self.postgres.session() as session:
             if not await session.scalar(select(self._scope(UUID(end_user_id), workspace_id))):
                 raise ValueError("User not found in workspace")
-            statement = insert(ImplicitEmotionsStorage).values(
-                id=uuid4(),
-                end_user_id=end_user_id,
-                implicit_profile=profile,
-                created_at=now,
-                updated_at=now,
-                implicit_generated_at=now,
+
+            stmt = select(ImplicitEmotionsStorage).where(
+                ImplicitEmotionsStorage.end_user_id == end_user_id
             )
-            statement = statement.on_conflict_do_update(
-                index_elements=[ImplicitEmotionsStorage.end_user_id],
-                set_={"implicit_profile": profile, "updated_at": now, "implicit_generated_at": now},
-            )
-            await session.execute(statement)
+            storage = (await session.execute(stmt)).scalar_one_or_none()
+            if storage is None:
+                storage = ImplicitEmotionsStorage(
+                    id=uuid4(),
+                    end_user_id=end_user_id,
+                    created_at=utcnow_naive(),
+                    updated_at=utcnow_naive()
+                )
+                session.add(storage)
+                await session.flush()
+                await session.refresh(storage)
+                logger.info(f"创建用户存储记录成功: end_user_id={end_user_id}")
+
+            storage.implicit_profile = profile
+            storage.implicit_generated_at = utcnow_naive()
+            storage.updated_at = utcnow_naive()
+
+            await session.flush()
+            await session.refresh(storage)
+            logger.info(f"更新隐性记忆画像成功: end_user_id={end_user_id}")
             await session.commit()
