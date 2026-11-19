@@ -5,10 +5,12 @@ The shared parsing/projection helpers live in :mod:`src.core.domain.profile`
 read-only pieces the L0 profile builder needs, plus the request-local metadata
 scope projection ported from ``api/app/core/memory/read_services/metadata_scope.py``.
 
-Known gap: the host resolves ``memory.metadata_scope`` through its plugin
-registry (enterprise only) to bound the profile to the calling application. That
-plugin is not available in this service, so :func:`scoped_metadata` always
-applies the documented ``default_only`` behaviour (no application scope).
+The host resolves ``memory.metadata_scope`` through its plugin registry
+(enterprise only) to bound the profile to the calling application. This service
+asks the enterprise metadata-scope endpoint instead
+(:meth:`RetrievalQueries.metadata_scope`): the caller-provided app is not part
+of the read wire contract, so the end user's bound app is used, and any lookup
+failure degrades to the documented ``default_only`` projection.
 """
 
 from __future__ import annotations
@@ -19,22 +21,13 @@ from uuid import UUID
 
 from src.core.domain.profile import (
     IDENTITY_BACKGROUND_SUBCATEGORIES,
+    LEGACY_METADATA_FIELDS,
     PROFILE_DISPLAY_KEYS,
     RELATION_TYPES,
     normalize_new_metadata,
     split_metadata_entry,
 )
 
-LEGACY_METADATA_FIELDS: tuple[str, ...] = (
-    "core_facts",
-    "traits",
-    "relations",
-    "goals",
-    "interests",
-    "beliefs_or_stances",
-    "anchors",
-    "events",
-)
 NEW_METADATA_FIELDS: tuple[str, ...] = (
     "identity_background",
     "relationships",

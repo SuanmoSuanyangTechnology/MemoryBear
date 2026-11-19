@@ -452,7 +452,7 @@ async def _resolve_metadata_scope(
     (service disabled, transport error, no binding) degrades to ``default_only``.
     """
 
-    if self._enterprise is None:
+    if self._enterprise is None or not self._enterprise.enabled:
         return None
     try:
         user_uuid = uuid.UUID(str(end_user_id))

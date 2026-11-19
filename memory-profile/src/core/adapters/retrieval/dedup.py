@@ -10,9 +10,9 @@ from __future__ import annotations
 
 from typing import Literal, TypedDict
 
-from src.core.adapters.retrieval.constants import USER_ENTITY_TYPE
 from src.core.domain.enums import MemorySource
 from src.core.domain.models import MemoryItem
+from src.core.domain.profile import is_user_profile
 
 SuppressionReason = Literal[
     "CHUNK_REPLACED_BY_SUMMARY",
@@ -34,16 +34,6 @@ class SuppressionRecord(TypedDict):
 def _source_value(memory: MemoryItem) -> str:
     source = memory.source
     return source.value if isinstance(source, MemorySource) else str(source)
-
-
-def is_user_profile(memory: MemoryItem, end_user_id: str) -> bool:
-    """Identify the user-profile node independently of its list position."""
-
-    if _source_value(memory) != MemorySource.EXTRACTED_ENTITY.value:
-        return False
-    if end_user_id and memory.id == end_user_id:
-        return True
-    return memory.data.get("entity_type") == USER_ENTITY_TYPE
 
 
 def _chunk_id(value: object) -> str | None:

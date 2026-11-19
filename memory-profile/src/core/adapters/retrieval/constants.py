@@ -11,6 +11,7 @@ markers and the ontology predicates offered to the relation agent.
 from __future__ import annotations
 
 from src.core.domain.enums import MemorySource
+from src.core.domain.profile import USER_PROFILE_ENTITY_TYPE
 
 # ── Ranking policy (host ``Neo4jSearchService`` defaults) ──────────────────────
 
@@ -32,7 +33,7 @@ DEFAULT_INCLUDES: tuple[str, ...] = (
 )
 
 #: The user-profile ExtractedEntity is located by ``entity_type`` (not by name).
-USER_ENTITY_TYPE = "用户"
+USER_ENTITY_TYPE = USER_PROFILE_ENTITY_TYPE
 #: Sentry application excluded from the RECENT conversation lookup.
 EXCLUDED_APP_ID = "00000000-0000-0000-0000-000000000001"
 
