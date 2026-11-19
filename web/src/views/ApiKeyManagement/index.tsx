@@ -1,9 +1,3 @@
-/*
- * @Author: ZhaoYing 
- * @Date: 2026-02-03 15:52:50 
- * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-08-14 18:52:25
- */
 import React, { useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Button, App, Flex, Space } from 'antd';
@@ -135,10 +129,12 @@ const ApiKeyManagement: React.FC = () => {
               headerClassName="rb:min-h-[42px]!"
               titleClassName="rb:line-clamp-1!"
             >
-              <Flex gap={6} className="rb:-mt-2! rb:mb-4!">
+              <Flex gap={6} className="rb:-mt-2! rb:mb-4! rb:flex-wrap!">
                 {apiKeyItem.scopes?.includes('memory') && <Tag>{t('apiKey.memoryEngine')}</Tag>}
                 {apiKeyItem.scopes?.includes('rag') && <Tag color="success">{t('apiKey.knowledgeBase')}</Tag>}
-                {!apiKeyItem.scopes?.includes('memory') && !apiKeyItem.scopes?.includes('rag') && <div className="rb:font-regular! rb:text-[#5B6167]">{t('apiKey.noScopes')}</div>}
+                {apiKeyItem.scopes?.includes('app_mgmt') && <Tag>{t('apiKey.app_mgmt')}</Tag>}
+                {apiKeyItem.scopes?.includes('asset') && <Tag color="success">{t('apiKey.asset')}</Tag>}
+                {!apiKeyItem.scopes?.some(scope => ['memory', 'rag', 'app_mgmt', 'asset'].includes(scope)) && <div className="rb:font-regular! rb:text-gray-600">{t('apiKey.noScopes')}</div>}
               </Flex>
               <RbDescriptions
                 items={['id', 'is_expired', 'created_at'].map(key => ({
@@ -160,7 +156,7 @@ const ApiKeyManagement: React.FC = () => {
                 }}
               />
 
-              <Flex align="center" justify="space-between" className="rb:h-8! rb:mt-4! rb:py-1! rb:pl-2.5! rb:pr-1! rb:bg-[#F6F6F6] rb:rounded-md rb:leading-5">
+              <Flex align="center" justify="space-between" className="rb:h-8! rb:mt-4! rb:py-1! rb:pl-2.5! rb:pr-1! rb:bg-gray-100 rb:rounded-md rb:leading-5">
                 {maskApiKeys(apiKeyItem.api_key)}
                 
                 <div onClick={() => handleCopy(apiKeyItem.api_key)} className="rb:cursor-pointer rb:rounded-md rb:size-6 rb:bg-[url('@/assets/images/common/copy_dark.svg')] rb:bg-size-[16px_16px] rb:bg-center rb:bg-no-repeat rb:hover:bg-[rgba(0,0,0,0.08)]"></div>

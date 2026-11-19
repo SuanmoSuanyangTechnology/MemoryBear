@@ -391,6 +391,8 @@ export const space = {
       enable: '启用',
       baseInfo: '基础信息',
       permissionInfo: '授权信息',
+      app_mgmt: 'Agent 管理',
+      asset: '资源管理',
       is_expired: '状态',
       active: '活跃',
       inactive: '过期',
