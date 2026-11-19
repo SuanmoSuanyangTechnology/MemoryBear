@@ -198,13 +198,13 @@ class JobsSettings(BaseSettings):
         False, validation_alias="JOBS_METADATA_MIGRATION_ENABLED"
     )
     metadata_migration_page_size: int = Field(
-        ..., ge=1, le=10_000, validation_alias="JOBS_METADATA_MIGRATION_PAGE_SIZE"
+        100, ge=1, le=10_000, validation_alias="JOBS_METADATA_MIGRATION_PAGE_SIZE"
     )
     metadata_migration_interval_minutes: int = Field(
-        ..., ge=1, le=7 * 24 * 60, validation_alias="JOBS_METADATA_MIGRATION_INTERVAL_MINUTES"
+        60, ge=1, le=7 * 24 * 60, validation_alias="JOBS_METADATA_MIGRATION_INTERVAL_MINUTES"
     )
     metadata_migration_circuit_breaker_seconds: int = Field(
-        ..., ge=1, le=7 * 24 * 60 * 60,
+        10800, ge=1, le=7 * 24 * 60 * 60,
         validation_alias="JOBS_METADATA_MIGRATION_CIRCUIT_BREAKER_SECONDS",
     )
     # ------------------------------------------------ interest distribution cache

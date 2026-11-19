@@ -27,11 +27,11 @@ from src.application.ports.lock import (
 from src.application.ports.prompts import PromptCatalog
 from src.application.ports.publishing import UnitPublisher
 from src.application.ports.uow import UnitOfWork
-from src.application.profile_cache.workspace_guard import ensure_workspace_can_generate
 from src.domain.model_config.services import ModelResolutionService
 from src.domain.profile.read_models import MetadataMigrationCursor
-from src.domain.shared.errors import ModelConfigurationError
+from src.domain.shared.errors import ModelConfigurationError, WorkspaceNotEligible
 from src.domain.shared.ids import EndUserId, WorkspaceId, parse_uuid
+from src.domain.workspace.model import WorkspaceStatus
 
 logger = logging.getLogger(__name__)
 
@@ -200,9 +200,11 @@ class MetadataMigrationUseCase:
                 0,
             )
         with self._uow.read() as repositories:
-            workspace = ensure_workspace_can_generate(
-                repositories.workspaces.get(workspace_id), workspace_id
-            )
+            workspace = repositories.workspaces.get(workspace_id)
+            if workspace is None:
+                raise WorkspaceNotEligible(workspace_id, "workspace_not_found")
+            if workspace.status is not WorkspaceStatus.ACTIVE:
+                raise WorkspaceNotEligible(workspace_id, "workspace_inactive")
             config_id = workspace.memory_config
             if config_id is None:
                 raise ModelConfigurationError("workspace has no memory config")

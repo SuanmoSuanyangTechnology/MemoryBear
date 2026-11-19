@@ -78,12 +78,12 @@ class SqlAlchemyMetadataMigrationRepository:
         return candidates, next_cursor
 
     def remaining_count(self, *, cutoff: datetime) -> int:
-        """候选无 info 行也算未完成，避免空页误报全部完成。"""
+        """仅统计有 info 行的待迁移用户，与候选分页保持一致。"""
         statement = (
             select(sa.func.count(EndUser.id))
             .select_from(EndUser)
             .join(Workspace, Workspace.id == EndUser.workspace_id)
-            .outerjoin(EndUserInfo, EndUserInfo.end_user_id == EndUser.id)
+            .join(EndUserInfo, EndUserInfo.end_user_id == EndUser.id)
             .where(
                 EndUser.is_active.is_(True),
                 Workspace.is_active.is_(True),

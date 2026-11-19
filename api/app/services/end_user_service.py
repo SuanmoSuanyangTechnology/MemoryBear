@@ -99,7 +99,7 @@ class EndUserService:
         for user_id, original, merged in pending:
             lock = by_key[f"memory_write:{user_id}"]
             lock.ensure_valid()
-            if lock.redis.get(lock.key) != lock.value:
+            if await asyncio.to_thread(lock.redis.get, lock.key) != lock.value:
                 raise BusinessException(message=f"User write lock lost: {user_id}")
             baseline_matches = EndUserInfo.meta_data.is_(None) if original is None else EndUserInfo.meta_data == original
             result = await self.db.execute(
@@ -320,7 +320,7 @@ class EndUserService:
         target_user_info.aliases = final_aliases
         for lock in write_locks:
             lock.ensure_valid()
-            if lock.redis.get(lock.key) != lock.value:
+            if await asyncio.to_thread(lock.redis.get, lock.key) != lock.value:
                 raise BusinessException(message=f"User write lock lost: {lock.key}")
         target_user_info.meta_data_new = new_metadata(merged_meta)
         target_user.memory_tags = None

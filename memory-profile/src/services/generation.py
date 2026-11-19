@@ -15,7 +15,7 @@ from task_bridge import (
     TaskResultUnavailableError,
     TaskTimeoutError,
 )
-from task_bridge.mem_router import TaskName
+from task_bridge.mem_router import QueueName, TaskName, TaskPriority
 
 from src.common.errors import BizCode, LocalizedProfileError
 from src.common.redis_cache import CACHE_MISS, get_json, set_json
@@ -209,13 +209,7 @@ class GenerationService:
 
         workspace_row = await self.workspace.row(workspace_id)
         eligibility = validate_workspace_row(workspace_row)
-        if not eligibility.valid:
-            if eligibility.reason == REASON_UNSUPPORTED_STORAGE_TYPE:
-                raise LocalizedProfileError(
-                    BizCode.INVALID_PARAMETER,
-                    "analytics.generate.unsupported_storage_type",
-                    detail=f"unsupported storage_type: {eligibility.storage_type or 'unknown'}",
-                )
+        if not eligibility.valid and eligibility.reason != REASON_UNSUPPORTED_STORAGE_TYPE:
             raise LocalizedProfileError(
                 BizCode.INVALID_PARAMETER,
                 "analytics.generate.workspace_unavailable",
@@ -234,6 +228,14 @@ class GenerationService:
                     language=language,
                     workspace_row=workspace_row,
                 )
+        # metadata 迁移只依赖 PG 和 LLM；图缓存的存储类型限制在迁移投递后检查。
+        if eligibility.reason == REASON_UNSUPPORTED_STORAGE_TYPE:
+            raise LocalizedProfileError(
+                BizCode.INVALID_PARAMETER,
+                "analytics.generate.unsupported_storage_type",
+                detail=f"unsupported storage_type: {eligibility.storage_type or 'unknown'}",
+            )
+        if end_user_id:
             return await self._generate_cache_via_worker(
                 end_user_id, workspace_id, language
             )
@@ -267,6 +269,8 @@ class GenerationService:
                     "workspace_id": str(workspace_id),
                     "language": language,
                 },
+                queue=QueueName.METADATA_MIGRATION.value,
+                priority=TaskPriority.BACKGROUND,
             )
         except Exception:
             logger.warning(
