@@ -44,16 +44,6 @@ class KnowledgeRetrievalNode(BaseNode):
 
     def _get_typed_config(self) -> KnowledgeRetrievalNodeConfig:
         if self.typed_config is None:
-            # 文本 query 与 image_query 均为空时字段可能整个缺失（前端不选值就不落库），
-            # 直接构造 pydantic 会抛 ValidationError 并被包装成“服务内部错误”。
-            # 这里换成可操作的提示，与导入期的「请导入后手动配置」告警对应。
-            has_text = bool(str(self.config.get("query") or "").strip())
-            has_image = bool(str(self.config.get("image_query") or "").strip())
-            if not has_text and not has_image:
-                raise BusinessException(
-                    f"知识检索节点 {self.node_id} 未配置检索 query，请先在工作流中补全后再运行",
-                    code=BizCode.INVALID_PARAMETER,
-                )
             self.typed_config = KnowledgeRetrievalNodeConfig(**self.config)
         return self.typed_config
 

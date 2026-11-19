@@ -1,4 +1,6 @@
 # -*- coding: UTF-8 -*-
+from pydantic import ValidationError
+
 from app.core.workflow.adapters.base_converter import BaseConverter
 from app.core.workflow.adapters.errors import ExceptionDefinition, ExceptionType
 from app.core.workflow.nodes.base_config import BaseNodeConfig
@@ -67,6 +69,27 @@ class MemoryBearConverter(BaseConverter):
     def _convert_array_file(var):
         return []
 
+    @staticmethod
+    def _validation_detail(config_cls, exc):
+        if not isinstance(exc, ValidationError):
+            return str(exc)
+        details = []
+        translated = False
+        for issue in exc.errors(include_input=False, include_url=False):
+            loc = issue["loc"]
+            if config_cls is IterationNodeConfig and issue["type"] == "missing" and loc in (("input",), ("output",)):
+                details.append("请选择要遍历的输入列表" if loc == ("input",) else "请选择迭代输出变量")
+                translated = True
+            elif (config_cls is KnowledgeRetrievalNodeConfig and not loc
+                  and issue["type"] == "value_error"
+                  and str(issue.get("ctx", {}).get("error")) == "query 与 image_query 必须填写其中一个"):
+                details.append("未配置查询内容，文本查询或图片查询至少填写一项")
+                translated = True
+            else:
+                field = ".".join(map(str, loc))
+                details.append(f"{field}: {issue['msg']}" if field else issue["msg"])
+        return "；".join(details) if translated else str(exc)
+
     def config_validate(self, node_id: str, node_name: str, config_cls: type[BaseNodeConfig], value: dict):
         try:
             return config_cls.model_validate(value)
@@ -75,28 +98,9 @@ class MemoryBearConverter(BaseConverter):
                 type=ExceptionType.CONFIG,
                 node_id=node_id,
                 node_name=node_name,
-                detail=str(e)
+                detail=self._validation_detail(config_cls, e)
             ))
             return None
-
-    @staticmethod
-    def _pending_config_fields(node_type: NodeType, config: dict) -> tuple[str, ...]:
-        """必填字段留空 = 原应用里就没配好，属于「导入后手动配置」，不是 DSL 结构错误。
-
-        迭代节点的 input/output、知识检索节点的 query/image_query 都是变量选择器，
-        前端不选值保存时整个键不会落库。这类节点跑 pydantic 必填校验只会得到
-        `Field required` / `必须填写其中一个`，用户无法据此操作，故单独识别。
-        """
-        if node_type == NodeType.ITERATION:
-            return tuple(
-                field for field in ("input", "output")
-                if not str(config.get(field) or "").strip()
-            )
-        if node_type == NodeType.KNOWLEDGE_RETRIEVAL:
-            has_query = bool(str(config.get("query") or "").strip())
-            has_image = bool(str(config.get("image_query") or "").strip())
-            return () if (has_query or has_image) else ("query/image_query",)
-        return ()
 
     def get_node_convert(self, node_type: NodeType):
         config_cls = self.CONFIG_CLASS_MAP.get(node_type)
@@ -104,15 +108,6 @@ class MemoryBearConverter(BaseConverter):
             return lambda node_id, node_name, config: config
 
         def validate(node_id: str, node_name: str, config: dict):
-            pending = self._pending_config_fields(node_type, config)
-            if pending:
-                self.warnings.append(ExceptionDefinition(
-                    type=ExceptionType.CONFIG,
-                    node_id=node_id,
-                    node_name=node_name,
-                    detail=f"{'、'.join(pending)} 未配置，请导入后手动配置"
-                ))
-                return config
             self.config_validate(node_id, node_name, config_cls, config)
             return config
 
