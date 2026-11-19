@@ -7769,13 +7769,17 @@ def generate_scene_summary(
     time_limit=1800,
     soft_time_limit=1700,
 )
-def run_scene_community_incremental(self, end_user_id: str):
-    """Process exactly one complete SceneCommunity batch for an end user."""
+def run_scene_community_incremental(self, end_user_id: str, trigger: str = "threshold"):
+    """Process one SceneCommunity batch for the current end-user owner."""
+    if trigger not in ("threshold", "scheduled"):
+        raise ValueError("invalid SceneCommunity trigger")
+
     from app.core.memory.scene.scene_community_service import (
         SceneCommunityIncrementalService,
     )
     from app.core.memory.storage.custom import SceneStorage
     from app.core.memory.storage.provider.neo4j.client import Neo4jClient
+    from app.services.memory_engine_display_service import MemoryEngineDisplayService
 
     started_at = time.monotonic()
     stage = "acquire_lock"
@@ -7798,15 +7802,11 @@ def run_scene_community_incremental(self, end_user_id: str):
             result = await SceneCommunityIncrementalService(
                 writer=writer,
                 memory_config=memory_config,
-            ).run(end_user_id)
+            ).run(end_user_id, trigger=trigger)
             result["config_id"] = str(current_config_id)
-            result["batch_trigger_count_snapshot"] = int(
-                memory_config.batch_trigger_count
-            )
-            result["candidate_community_limit_snapshot"] = int(
-                memory_config.candidate_community_limit
-            )
-            result["compare_all_same_category_communities_snapshot"] = bool(
+            result["batch_trigger_count_snapshot"] = memory_config.batch_trigger_count
+            result["candidate_community_limit_snapshot"] = memory_config.candidate_community_limit
+            result["compare_all_same_category_communities_snapshot"] = (
                 memory_config.compare_all_same_category_communities
             )
             return result
@@ -7820,37 +7820,47 @@ def run_scene_community_incremental(self, end_user_id: str):
             expire=1800,
         )
         result = loop.run_until_complete(_run())
-        if result.get("status") == "success":
-            # 展示写入：best effort，在取得成功结果后、派发下一批之前执行；
-            # _persist_events 内部已兜底 PG 异常，此处 try/except 为第二层隔离，
-            # 失败不触发 Celery 自动重试、不改变任务成功结果。
+        if result["status"] == "success":
+            stage = "display_event"
             try:
-                from app.services.memory_engine_display_service import (
-                    MemoryEngineDisplayService,
-                )
-
                 loop.run_until_complete(
                     MemoryEngineDisplayService.save_scene_reconstruction_event(
                         end_user_id=end_user_id,
                         result=result,
                     )
                 )
+            except SoftTimeLimitExceeded:
+                raise
             except Exception:
                 logger.exception(
-                    "[EngineDisplay] Scene reconstruction event write failed"
+                    "[SceneCommunity] display event failed: user=%s trigger=%s",
+                    end_user_id, trigger,
                 )
-        if result.get("dispatch_next"):
+        if result["dispatch_next"]:
             stage = "dispatch_next"
-            next_task = run_scene_community_incremental.apply_async(
-                kwargs={"end_user_id": end_user_id}
-            )
-            result["next_task_id"] = next_task.id
+            try:
+                next_task = run_scene_community_incremental.apply_async(
+                    kwargs={"end_user_id": end_user_id},
+                    retry=True,
+                )
+            except SoftTimeLimitExceeded:
+                raise
+            except Exception:
+                result["next_dispatch_failed"] = True
+                logger.exception(
+                    "[SceneCommunity] continuation dispatch failed: user=%s trigger=%s",
+                    end_user_id, trigger,
+                )
+            else:
+                result["next_task_id"] = next_task.id
         logger.info(
-            "[SceneCommunity] incremental task completed: user=%s status=%s "
+            "[SceneCommunity] incremental task completed: user=%s trigger=%s status=%s reason=%s "
             "processed=%s communities=%s remaining=%s config=%s "
             "dispatch_next=%s elapsed_ms=%s",
             end_user_id,
-            result.get("status"),
+            trigger,
+            result["status"],
+            result.get("reason"),
             result.get("processed"),
             result.get("community_count"),
             result.get("remaining_inactive_count", result.get("inactive_count")),
@@ -7861,9 +7871,10 @@ def run_scene_community_incremental(self, end_user_id: str):
         return result
     except Exception as exc:
         logger.error(
-            "[SceneCommunity] incremental task failed: user=%s stage=%s "
+            "[SceneCommunity] incremental task failed: user=%s trigger=%s stage=%s "
             "error_type=%s retry=%s elapsed_ms=%s",
             end_user_id,
+            trigger,
             stage,
             type(exc).__name__,
             getattr(self.request, "retries", 0),
@@ -7874,6 +7885,67 @@ def run_scene_community_incremental(self, end_user_id: str):
         if write_lock is not None:
             write_lock.release()
         _shutdown_loop_gracefully(loop)
+
+
+@celery_app.task(name="app.tasks.scan_scene_community_pending")
+def scan_scene_community_pending():
+    """Dispatch one scheduled batch per pending user, in user-ID pages."""
+    from app.core.memory.storage.custom import SceneStorage
+    from app.core.memory.storage.provider.neo4j.client import Neo4jClient
+
+    lock = RedisFairLock(
+        key="scene_community:pending_scan_lock",
+        redis_client=get_thread_safe_sync_redis(),
+        expire=300,
+        timeout=0,
+    )
+    stats = dict(pages=0, candidates=0, dispatched=0, dispatch_failed=0)
+    if not lock.acquire():
+        logger.info("[SceneCommunity] scheduled scan skipped: reason=lock_held")
+        return {**stats, "skipped_due_to_lock": True}
+
+    async def _scan():
+        client = await Neo4jClient.create()
+        try:
+            storage = SceneStorage(client)
+            cursor = ""
+            while True:
+                lock.ensure_valid()
+                user_ids = await storage.list_pending_user_ids(cursor)
+                if not user_ids:
+                    break
+                stats["pages"] += 1
+                stats["candidates"] += len(user_ids)
+                for end_user_id in user_ids:
+                    lock.ensure_valid()
+                    try:
+                        run_scene_community_incremental.apply_async(
+                            kwargs={"end_user_id": end_user_id, "trigger": "scheduled"},
+                        )
+                    except SoftTimeLimitExceeded:
+                        raise
+                    except Exception:
+                        stats["dispatch_failed"] += 1
+                        logger.exception(
+                            "[SceneCommunity] scheduled dispatch failed: user=%s",
+                            end_user_id,
+                        )
+                    else:
+                        stats["dispatched"] += 1
+                cursor = user_ids[-1]
+        finally:
+            await client.close()
+
+    try:
+        loop = set_asyncio_event_loop()
+        try:
+            loop.run_until_complete(_scan())
+        finally:
+            _shutdown_loop_gracefully(loop)
+    finally:
+        lock.release()
+    logger.info("[SceneCommunity] scheduled scan completed: %s", stats)
+    return {**stats, "skipped_due_to_lock": False}
 
 
 @celery_app.task(name="app.tasks.scan_scene_summary_idle")
