@@ -1,10 +1,11 @@
-"""Internal JWT routes for permanent-memory management."""
+"""Internal value-ranking routes for JWT management and API Key list queries."""
 
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query, Request
 
 from src.common.errors import BizCode, ProfileError
+from src.common.external_api import external_api
 from src.common.responses import ApiResponse
 from src.middleware.auth import SOURCE_INTERNAL, MemoryPrincipal
 from src.middleware.identity import require_memory_context
@@ -28,6 +29,7 @@ async def _require_user_context(
 
 
 Context = Annotated[MemoryPrincipal, Depends(_require_user_context)]
+ListContext = Annotated[MemoryPrincipal, Depends(require_memory_context)]
 
 
 @router.get("/permanent-memories/quota", response_model=ApiResponse[PermanentMemoryQuota])
@@ -39,9 +41,10 @@ async def get_permanent_memory_quota(
 
 
 @router.get("/permanent-memories", response_model=ApiResponse[PermanentMemoryList])
+@external_api
 async def list_permanent_memories(
     request: Request,
-    context: Context,
+    context: ListContext,
     end_user_id: Annotated[str, Query()],
     page: Annotated[int, Query(ge=1)] = 1,
     pagesize: Annotated[int, Query(ge=1, le=100)] = 20,
