@@ -17,6 +17,7 @@ class EndUser(Base):
     is_active = Column(Boolean, nullable=False)
     memory_count = Column(Integer, nullable=False)
     write_time = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, nullable=True)
     memory_insight = Column(Text, nullable=True)
     behavior_pattern = Column(Text, nullable=True)
     key_findings = Column(Text, nullable=True)

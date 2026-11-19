@@ -14,6 +14,7 @@ from uuid import UUID
 
 import sqlalchemy as sa
 from sqlalchemy import select
+from task_bridge.metadata_migration import metadata_read_expression
 
 from src.infrastructure.neo4j import Neo4jManager
 from src.infrastructure.postgres import PostgresManager
@@ -115,7 +116,7 @@ class MemoryGenerationRepository:
         statement = (
             select(
                 EndUserInfo.id.label("metadata_id"),
-                EndUserInfo.meta_data.label("meta_data"),
+                metadata_read_expression(EndUserInfo.meta_data, EndUserInfo.meta_data_new),
                 EndUserInfo.updated_at.label("metadata_updated_at"),
                 EndUser.write_time.label("write_time"),
             )

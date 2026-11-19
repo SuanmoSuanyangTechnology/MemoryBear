@@ -14,6 +14,7 @@ import sqlalchemy as sa
 from sqlalchemy import ColumnElement, Select, any_, bindparam, func, select
 from sqlalchemy.dialects.postgresql import ARRAY
 from sqlalchemy.dialects.postgresql import UUID as PGUUID
+from task_bridge.metadata_migration import metadata_read_expression
 
 from src.common.vocabulary import COUNT_KEYS
 from src.infrastructure.neo4j import Neo4jManager
@@ -85,7 +86,11 @@ _EXCLUDED_APP_ID = UUID("00000000-0000-0000-0000-000000000001")
 
 def _profile_statement(end_user_ids: list[str]):
     return (
-        select(EndUserInfo.end_user_id, EndUserInfo.meta_data, Workspace.tenant_id)
+        select(
+            EndUserInfo.end_user_id,
+            metadata_read_expression(EndUserInfo.meta_data, EndUserInfo.meta_data_new),
+            Workspace.tenant_id,
+        )
         .join(EndUser, EndUser.id == EndUserInfo.end_user_id)
         .join(Workspace, Workspace.id == EndUser.workspace_id)
         .where(EndUserInfo.end_user_id.in_([UUID(str(value)) for value in end_user_ids]))

@@ -20,6 +20,9 @@ from src.infrastructure.persistence.postgres.end_user_repository import (
 from src.infrastructure.persistence.postgres.insight_repository import (
     SqlAlchemyMemoryInsightRepository,
 )
+from src.infrastructure.persistence.postgres.metadata_migration_repository import (
+    SqlAlchemyMetadataMigrationRepository,
+)
 from src.infrastructure.persistence.postgres.model_config_repository import (
     SqlAlchemyModelConfigRepository,
 )
@@ -74,4 +77,5 @@ class SqlAlchemyUnitOfWork:
             profile_refresh=SqlAlchemyProfileRefreshReader(session),
             insights=SqlAlchemyMemoryInsightRepository(session),
             summaries=SqlAlchemyUserSummaryRepository(session),
+            metadata_migration=SqlAlchemyMetadataMigrationRepository(session),
         )

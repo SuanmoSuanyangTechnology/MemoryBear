@@ -33,6 +33,10 @@ class JobsRuntime:
         self.settings = settings or get_settings()
         self.postgres = PostgresManager(self.settings)
         self.redis = RedisManager(self.settings)
+        # API memory_write 锁固定使用 Celery backend DB，不是业务缓存 DB。
+        self.memory_write_redis = RedisManager(
+            self.settings, db=self.settings.redis_db_celery_backend,
+        )
         self.elasticsearch = ElasticsearchManager(self.settings)
         self.neo4j = Neo4jManager(self.settings)
         #: 仅生成类任务使用；纯读/写任务不会触碰它，所以不参与依赖探测。
@@ -98,6 +102,7 @@ class JobsRuntime:
 
         self.postgres.reset_after_fork()
         self.redis.reset_after_fork()
+        self.memory_write_redis.reset_after_fork()
         self.elasticsearch.reset_after_fork()
         self.neo4j.reset_after_fork()
         self.model_service.reset_after_fork()
@@ -107,6 +112,7 @@ class JobsRuntime:
         for name, manager in (
             ("postgres", self.postgres),
             ("redis", self.redis),
+            ("memory_write_redis", self.memory_write_redis),
             ("elasticsearch", self.elasticsearch),
             ("neo4j", self.neo4j),
             ("model_service", self.model_service),
