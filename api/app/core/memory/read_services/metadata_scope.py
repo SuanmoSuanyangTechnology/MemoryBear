@@ -48,10 +48,10 @@ async def scoped_metadata(ctx, record: dict) -> dict:
 
     scope = None
     resolver = get_plugin("memory.metadata_scope")
-    if resolver is not None:
+    if ctx.app_id is None:
+        logger.warning("Metadata application context missing; using default_only")
+    elif resolver is not None:
         try:
-            # The caller's app wins; the resolver falls back to the end user's
-            # bound app when the caller has no app context (API-key reads).
             scope = await resolver.resolve(ctx.app_id, ctx.end_user_id)
         except Exception:
             # ``default_only`` is the most restrictive projection (it drops all
