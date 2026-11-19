@@ -1,11 +1,21 @@
 import uuid
+from typing import NoReturn
+
+from error_core.codes import BizCode
+from error_core.knowledge import knowledge_message
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
-from app.models.user_model import User
-from app.models.knowledgeshare_model import KnowledgeShare
-from app.schemas.knowledgeshare_schema import KnowledgeShareCreate
-from app.repositories import knowledgeshare_repository
+
+from app.core.exceptions import BusinessException
 from app.core.logging_config import get_business_logger
+from app.i18n.exceptions import get_current_locale
+from app.models.knowledge_model import Knowledge, KnowledgeType, PermissionType
+from app.models.knowledgeshare_model import KnowledgeShare
+from app.models.user_model import User
+from app.models.workspace_model import Workspace
+from app.repositories import knowledge_repository, knowledgeshare_repository
+from app.schemas.knowledge_schema import KnowledgeCreate
+from app.schemas.knowledgeshare_schema import KnowledgeShareCreate, KnowledgeShareRequest
 
 # Obtain a dedicated logger for business logic
 business_logger = get_business_logger()
@@ -209,3 +219,116 @@ async def delete_knowledgeshare_by_id_async(db: AsyncSession, knowledgeshare_id:
     except Exception as e:
         business_logger.error(f"Failed to delete knowledge base sharing (async): knowledgeshare_id={knowledgeshare_id} - {str(e)}")
         raise
+
+
+async def create_or_reuse_knowledgeshare_async(
+    db: AsyncSession, knowledgeshare: KnowledgeShareRequest, current_user: User
+) -> tuple[KnowledgeShare, bool]:
+    """Create or reuse a reference while holding the source lock through commit."""
+    try:
+        source = await knowledge_repository.lock_share_source_async(
+            db,
+            knowledgeshare.source_kb_id,
+        )
+        if source is None:
+            _reject_share("KB_SHARE_SOURCE_NOT_FOUND")
+        if source.workspace_id != current_user.current_workspace_id:
+            _reject_share("KB_SHARE_SOURCE_OUTSIDE_WORKSPACE")
+        source_workspace = await db.get(Workspace, source.workspace_id)
+        target_workspace = await db.get(Workspace, knowledgeshare.target_workspace_id)
+        if source_workspace is None:
+            _reject_share("KB_SHARE_SOURCE_UNAVAILABLE")
+        if target_workspace is None:
+            _reject_share("KB_SHARE_TARGET_NOT_FOUND")
+        if (
+            source_workspace.tenant_id != current_user.tenant_id
+            or target_workspace.tenant_id != current_user.tenant_id
+        ):
+            _reject_share("KB_SHARE_CROSS_TENANT")
+        if not source_workspace.is_active or source.status != 1:
+            _reject_share("KB_SHARE_SOURCE_UNAVAILABLE")
+        if not target_workspace.is_active:
+            _reject_share("KB_SHARE_TARGET_UNAVAILABLE")
+        if source.workspace_id == target_workspace.id:
+            _reject_share("KB_SHARE_SAME_WORKSPACE")
+        if source.permission_id != PermissionType.Private or source.type not in (
+            KnowledgeType.General,
+            KnowledgeType.Web,
+            KnowledgeType.ThirdParty,
+        ):
+            _reject_share("KB_SHARE_SOURCE_NOT_ALLOWED")
+
+        shares = await knowledgeshare_repository.get_shares_for_target_async(
+            db,
+            source.id,
+            target_workspace.id,
+        )
+        active = []
+        for share in shares:
+            target = await db.get(Knowledge, share.target_kb_id)
+            if (
+                share.source_workspace_id == source.workspace_id
+                and target is not None
+                and target.workspace_id == target_workspace.id
+                and target.permission_id == PermissionType.Share
+                and target.status == 1
+            ):
+                active.append(share)
+        if len(active) > 1:
+            _reject_share("KB_SHARE_DUPLICATE")
+        if shares and not active:
+            _reject_share("KB_SHARE_REFERENCE_UNAVAILABLE")
+        created = not active
+        if active:
+            share = active[0]
+        else:
+            target = await knowledge_repository.create_knowledge_async(
+                db,
+                KnowledgeCreate(
+                    workspace_id=target_workspace.id,
+                    parent_id=target_workspace.id,
+                    created_by=current_user.id,
+                    name=source.name,
+                    description=source.description,
+                    avatar=source.avatar,
+                    type=source.type,
+                    permission_id=PermissionType.Share,
+                    embedding_id=source.embedding_id,
+                    reranker_id=source.reranker_id,
+                    llm_id=source.llm_id,
+                    image2text_id=source.image2text_id,
+                    audio2text_id=source.audio2text_id,
+                    video2text_id=source.video2text_id,
+                    doc_num=source.doc_num,
+                    chunk_num=source.chunk_num,
+                    parser_id=source.parser_id,
+                    parser_config=source.parser_config,
+                ),
+                preserve_source_parser_config=True,
+                commit=False,
+            )
+            target.builtin_metadata_enabled = source.builtin_metadata_enabled
+            share = await knowledgeshare_repository.create_knowledgeshare_async(
+                db,
+                KnowledgeShareCreate(
+                    source_kb_id=source.id,
+                    source_workspace_id=source.workspace_id,
+                    target_kb_id=target.id,
+                    target_workspace_id=target_workspace.id,
+                    shared_by=current_user.id,
+                ),
+                commit=False,
+            )
+        await db.commit()
+        return share, created
+    except Exception:
+        await db.rollback()
+        raise
+
+
+def _reject_share(code: str) -> NoReturn:
+    numeric = BizCode[code]
+    raise BusinessException(
+        knowledge_message(numeric, get_current_locale() or "zh"),
+        code=numeric,
+    )
