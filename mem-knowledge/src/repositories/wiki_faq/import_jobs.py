@@ -70,7 +70,10 @@ def active_task_id(session, scope) -> uuid.UUID | None:
 
 
 def create(session, scope, actor_id, task_id, mode, payload_key, total):
-    lock_knowledge(session, scope["kb_id"], scope)
+    try:
+        lock_knowledge(session, scope["kb_id"], scope)
+    except WikiError as exc:
+        raise KnowledgeError.from_code("KB_RESOURCE_NOT_FOUND", status_code=404) from exc
     if _find_active_task_id(session, scope) is not None:
         raise KnowledgeError.from_code("KB_FAQ_IMPORT_BUSY", status_code=409)
     row = Job(

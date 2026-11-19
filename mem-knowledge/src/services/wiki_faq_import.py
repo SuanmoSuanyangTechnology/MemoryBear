@@ -6,7 +6,7 @@ import logging
 import uuid
 
 from sqlalchemy import select
-from sqlalchemy.exc import InterfaceError, OperationalError
+from sqlalchemy.exc import DataError, IntegrityError, InterfaceError, OperationalError
 from sqlalchemy.exc import TimeoutError as DatabaseTimeoutError
 
 from ..errors import KnowledgeError
@@ -29,17 +29,28 @@ async def db_call(runtime, operation, *args):
     return await asyncio.to_thread(transaction, runtime, operation, *args)
 
 
+async def _discard_unregistered_payload(
+    storage: KnowledgeFileStorage, task_id: uuid.UUID, key: str
+) -> None:
+    try:
+        await storage.delete(key)
+    except Exception as exc:
+        logger.exception(
+            "FAQ 导入载荷清理失败 task_id=%s stage=discard key=%s details=%s",
+            task_id,
+            key,
+            diagnostic_json(exception_details(exc)),
+        )
+
+
 async def submit(runtime, scope, actor_id, payload):
-    await db_call(runtime, jobs.validate_scope, scope)
+    if await db_call(runtime, jobs.active_task_id, scope) is not None:
+        raise KnowledgeError.from_code("KB_FAQ_IMPORT_BUSY", status_code=409)
     task_id = uuid.uuid4()
     key = f"kb/{scope['kb_id']}/faq-import/{task_id}.json"
     storage = KnowledgeFileStorage(runtime.storage)
     content = await asyncio.to_thread(
         lambda: json.dumps(payload.model_dump(), ensure_ascii=True).encode("utf-8")
-    )
-    # 在知识库锁内占用导入位置，追加和覆盖共用；冲突时尚未上传载荷。
-    await db_call(
-        runtime, jobs.create, scope, actor_id, task_id, payload.mode, key, len(payload.items)
     )
     try:
         await storage.upload(key, content, "application/json")
@@ -49,8 +60,26 @@ async def submit(runtime, scope, actor_id, payload):
             task_id,
             diagnostic_json(exception_details(exc)),
         )
-        await db_call(runtime, jobs.fail, task_id, None, "导入数据保存失败，本批未导入。")
+        await _discard_unregistered_payload(storage, task_id, key)
         raise KnowledgeError.from_code("KB_HTTP_UNAVAILABLE") from exc
+    try:
+        # 上传期间可能已有其他请求占位，以写入时的知识库行锁检查为准。
+        await db_call(
+            runtime, jobs.create, scope, actor_id, task_id, payload.mode, key, len(payload.items)
+        )
+    except (KnowledgeError, DataError, IntegrityError):
+        await _discard_unregistered_payload(storage, task_id, key)
+        raise
+    except Exception:
+        logger.exception("FAQ 导入任务登记失败 task_id=%s stage=register key=%s", task_id, key)
+        # 提交回执丢失时可能已经入库，核实后才能继续派发。
+        registered = False
+        try:
+            registered = await db_call(runtime, jobs.load, task_id) is not None
+        except Exception:
+            logger.exception("FAQ 导入任务登记状态查询失败 task_id=%s", task_id)
+        if not registered:
+            raise
     try:
         await TaskDispatcher(runtime=runtime).send(
             FAQ_IMPORT_TASK,
