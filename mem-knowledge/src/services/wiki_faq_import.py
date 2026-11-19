@@ -4,8 +4,9 @@ import asyncio
 import json
 import logging
 import uuid
+from contextlib import suppress
 
-from redis.exceptions import RedisError
+from redis.exceptions import LockNotOwnedError, RedisError
 from sqlalchemy import select
 from sqlalchemy.exc import DataError, IntegrityError, InterfaceError, OperationalError
 from sqlalchemy.exc import TimeoutError as DatabaseTimeoutError
@@ -22,7 +23,8 @@ from .wiki_faq_retrieval import _target_for_sync
 
 logger = logging.getLogger(__name__)
 FAQ_IMPORT_TASK = "mem_knowledge.tasks.import_faqs"
-SUBMISSION_LOCK_TTL_SECONDS = 120
+SUBMISSION_LOCK_TTL_SECONDS = 30
+SUBMISSION_LOCK_RENEW_SECONDS = 10
 INDEX_BATCH_SIZE = 3
 INDEX_CONCURRENCY = 3
 
@@ -45,6 +47,18 @@ async def _discard_unregistered_payload(
         )
 
 
+async def _renew_submission_lock(lock, task_id):
+    while True:
+        await asyncio.sleep(SUBMISSION_LOCK_RENEW_SECONDS)
+        try:
+            await lock.extend(SUBMISSION_LOCK_TTL_SECONDS, replace_ttl=True)
+        except LockNotOwnedError:
+            logger.warning("FAQ 导入提交锁已失效 task_id=%s", task_id, exc_info=True)
+            return
+        except RedisError:
+            logger.warning("FAQ 导入提交锁续期失败 task_id=%s", task_id, exc_info=True)
+
+
 async def submit(runtime, scope, actor_id, payload):
     task_id = uuid.uuid4()
     lock_key = (
@@ -61,9 +75,13 @@ async def submit(runtime, scope, actor_id, payload):
     if not acquired:
         raise KnowledgeError.from_code("KB_FAQ_IMPORT_BUSY", status_code=409)
 
+    renewal = asyncio.create_task(_renew_submission_lock(lock, task_id))
     try:
         return await _submit_with_lock(runtime, scope, actor_id, payload, task_id, lock)
     finally:
+        renewal.cancel()
+        with suppress(asyncio.CancelledError):
+            await renewal
         try:
             await lock.release()
         except RedisError:
