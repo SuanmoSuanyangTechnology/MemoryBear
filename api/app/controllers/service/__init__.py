@@ -19,6 +19,7 @@ from . import (
     memory_display_api_controller,
     memory_explicit_api_controller,
     memory_value_ranking_api_controller,
+    memory_working_api_controller,
     preference_recall_controller,
     rag_api_chunk_controller,
     rag_api_document_controller,
@@ -49,6 +50,7 @@ service_router.include_router(memory_display_api_controller.router)
 service_router.include_router(memory_explicit_api_controller.router)
 service_router.include_router(memory_value_ranking_api_controller.router)
 service_router.include_router(implicit_memory_api_controller.router)
+service_router.include_router(memory_working_api_controller.router)
 service_router.include_router(preference_recall_controller.router)
 
 __all__ = ["service_router"]
