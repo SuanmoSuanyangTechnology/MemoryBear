@@ -428,11 +428,16 @@ class StreamReadCommand:
 
 @dataclass(frozen=True, slots=True)
 class ReadOutcome:
-    """One answer plus the legacy ``intermediate_outputs`` projection."""
+    """One answer plus the legacy ``intermediate_outputs`` projection.
+
+    ``end_user_id`` is the merge-routed host the read actually ran for; the
+    transport needs it to identify the terminal-user profile item.
+    """
 
     answer: str
     intermediate_outputs: list[dict[str, Any]]
     result: ReadResult
+    end_user_id: str = ""
 
 
 @dataclass(frozen=True, slots=True)

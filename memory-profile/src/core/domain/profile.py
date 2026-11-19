@@ -13,6 +13,9 @@ from __future__ import annotations
 from collections.abc import Iterator
 from typing import Any
 
+from src.core.domain.enums import MemorySource
+from src.core.domain.models import MemoryItem
+
 IDENTITY_BACKGROUND_SUBCATEGORIES: tuple[str, ...] = (
     "name",
     "age",
@@ -28,6 +31,39 @@ RELATION_TYPES: tuple[str, ...] = ("person", "group", "object", "pet")
 PROFILE_DISPLAY_KEYS: tuple[str, ...] = (
     IDENTITY_BACKGROUND_SUBCATEGORIES + RELATION_TYPES
 )
+
+#: ``entity_type`` of the graph node that carries a terminal user's profile.
+USER_PROFILE_ENTITY_TYPE = "用户"
+
+#: Historical profile fields. They are still read from storage and merged into
+#: the L0 record, but the public ``/v1`` read response drops them from the
+#: terminal-user profile item's ``data`` (host ``_serialize_public_memory``).
+LEGACY_METADATA_FIELDS: tuple[str, ...] = (
+    "core_facts",
+    "traits",
+    "relations",
+    "goals",
+    "interests",
+    "beliefs_or_stances",
+    "anchors",
+    "events",
+)
+
+
+def is_user_profile(memory: MemoryItem, end_user_id: str) -> bool:
+    """Identify the user-profile node independently of its list position.
+
+    Covers both the synthesized L0 item (``id == end_user_id``) and a real
+    graph node whose ``entity_type`` marks the terminal user.
+    """
+
+    source = memory.source
+    source_value = source.value if isinstance(source, MemorySource) else str(source)
+    if source_value != MemorySource.EXTRACTED_ENTITY.value:
+        return False
+    if end_user_id and memory.id == end_user_id:
+        return True
+    return memory.data.get("entity_type") == USER_PROFILE_ENTITY_TYPE
 
 
 def split_metadata_entry(item: Any) -> tuple[str, str, str] | None:
@@ -99,8 +135,11 @@ def project_display_profile(
 
 __all__ = [
     "IDENTITY_BACKGROUND_SUBCATEGORIES",
+    "LEGACY_METADATA_FIELDS",
     "PROFILE_DISPLAY_KEYS",
     "RELATION_TYPES",
+    "USER_PROFILE_ENTITY_TYPE",
+    "is_user_profile",
     "iter_profile_entries",
     "normalize_new_metadata",
     "project_display_profile",

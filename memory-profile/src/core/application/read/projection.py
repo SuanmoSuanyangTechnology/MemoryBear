@@ -29,7 +29,9 @@ from src.core.domain.models import (
     finite_or_none,
 )
 from src.core.domain.profile import (
+    LEGACY_METADATA_FIELDS,
     PROFILE_DISPLAY_KEYS,
+    is_user_profile,
     project_display_profile,
 )
 
@@ -422,6 +424,33 @@ def memory_dumps(result: ReadResult) -> list[dict[str, Any]]:
     return [memory.model_dump() for memory in result.memories]
 
 
+def serialize_public_memory(memory: MemoryItem, end_user_id: str) -> dict[str, Any]:
+    """Dump one memory for the public API-key face.
+
+    The terminal-user profile item loses the eight historical profile fields
+    from ``data`` (host ``_serialize_public_memory``); ordinary memory nodes are
+    returned unchanged.
+    """
+
+    item = memory.model_dump()
+    if not is_user_profile(memory, end_user_id):
+        return item
+    data = item.get("data")
+    if isinstance(data, dict):
+        item["data"] = {
+            key: value
+            for key, value in data.items()
+            if key not in LEGACY_METADATA_FIELDS
+        }
+    return item
+
+
+def public_memory_dumps(result: ReadResult, end_user_id: str) -> list[dict[str, Any]]:
+    """``intermediate_outputs`` of the public ``/read/sync`` face."""
+
+    return [serialize_public_memory(memory, end_user_id) for memory in result.memories]
+
+
 # ────────────────────────────────────────────────────────────────
 # Legacy intermediate outputs (streaming end event / non-streaming payload)
 # ────────────────────────────────────────────────────────────────
@@ -660,6 +689,8 @@ __all__ = [
     "project_relation_items",
     "project_result_items",
     "project_retrieval_candidate",
+    "public_memory_dumps",
     "sanitize_relevance",
+    "serialize_public_memory",
     "memory_dumps",
 ]

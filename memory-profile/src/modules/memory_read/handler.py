@@ -29,6 +29,7 @@ from fastapi.encoders import jsonable_encoder
 from fastapi.responses import StreamingResponse
 
 from src.common.responses import ApiResponse, failure, success
+from src.core.application.read.projection import public_memory_dumps
 from src.core.composition import MemoryReadModule, build_memory_read_module
 from src.core.domain.errors import ReadError, ReadErrorCode
 from src.core.domain.models import (
@@ -86,21 +87,30 @@ def _sse(event_name: str, data: dict[str, Any]) -> str:
     return f"event: {event_name}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
 
 
-def _sync_payload(outcome: ReadOutcome | dict[str, ReadOutcome]) -> dict[str, Any]:
-    """Encode the legacy V1 payload: one host or a map keyed by requested id."""
+def _sync_payload(
+    outcome: ReadOutcome | dict[str, ReadOutcome], *, public: bool = False
+) -> dict[str, Any]:
+    """Encode the legacy V1 payload: one host or a map keyed by requested id.
+
+    ``public`` selects the API-key ``/read/sync`` face, whose terminal-user
+    profile item drops the historical profile fields; ``/read/internal`` keeps
+    the raw dumps, exactly like the host.
+    """
+
+    def encode(result: ReadOutcome) -> dict[str, Any]:
+        outputs = (
+            public_memory_dumps(result.result, result.end_user_id)
+            if public
+            else result.intermediate_outputs
+        )
+        return {"answer": result.answer, "intermediate_outputs": outputs}
 
     if isinstance(outcome, dict):
         return {
-            end_user_id: {
-                "answer": result.answer,
-                "intermediate_outputs": result.intermediate_outputs,
-            }
+            end_user_id: encode(result)
             for end_user_id, result in outcome.items()
         }
-    return {
-        "answer": outcome.answer,
-        "intermediate_outputs": outcome.intermediate_outputs,
-    }
+    return encode(outcome)
 
 
 def _read_failure(error: ReadError, language: str) -> ApiResponse[dict[str, Any]]:
@@ -186,7 +196,7 @@ class MemoryReadHandler:
             )
             return _read_failure(error, language)
 
-        return success(data=_sync_payload(outcome))
+        return success(data=_sync_payload(outcome, public=True))
 
     async def execute_internal(
         self,
@@ -249,7 +259,7 @@ class MemoryReadHandler:
             )
             return _read_failure(error, language)
 
-        return success(data=_sync_payload(outcome))
+        return success(data=_sync_payload(outcome, public=False))
 
     async def stream_frames(
         self,
