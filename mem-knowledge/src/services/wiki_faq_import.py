@@ -70,6 +70,10 @@ async def submit(runtime, scope, actor_id, payload):
     return {"task_id": str(task_id), "status": "pending"}
 
 
+async def active_task_id(runtime, scope) -> uuid.UUID | None:
+    return await db_call(runtime, jobs.active_task_id, scope)
+
+
 async def progress(runtime, scope, task_id):
     return await db_call(runtime, jobs.progress, scope, task_id)
 

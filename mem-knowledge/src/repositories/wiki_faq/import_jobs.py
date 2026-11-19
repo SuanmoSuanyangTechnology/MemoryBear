@@ -53,9 +53,8 @@ def validate_scope(session, scope):
     return {"embedding_id": kb.embedding_id}
 
 
-def create(session, scope, actor_id, task_id, mode, payload_key, total):
-    lock_knowledge(session, scope["kb_id"], scope)
-    active = session.scalar(
+def _find_active_task_id(session, scope) -> uuid.UUID | None:
+    return session.scalar(
         select(Job.id)
         .where(
             *scoped(Job, scope),
@@ -63,7 +62,16 @@ def create(session, scope, actor_id, task_id, mode, payload_key, total):
         )
         .limit(1)
     )
-    if active:
+
+
+def active_task_id(session, scope) -> uuid.UUID | None:
+    validate_scope(session, scope)
+    return _find_active_task_id(session, scope)
+
+
+def create(session, scope, actor_id, task_id, mode, payload_key, total):
+    lock_knowledge(session, scope["kb_id"], scope)
+    if _find_active_task_id(session, scope) is not None:
         raise KnowledgeError.from_code("KB_FAQ_IMPORT_BUSY", status_code=409)
     row = Job(
         id=task_id,

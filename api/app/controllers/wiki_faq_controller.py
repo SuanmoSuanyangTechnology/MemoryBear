@@ -44,6 +44,17 @@ async def import_faqs(
     raise HTTPException(status_code=503, detail="FAQ import requires mem-knowledge")
 
 
+@router.get("/import", summary="查询当前 FAQ 导入任务")
+@cur_workspace_access_guard_async()
+@route_through_knowledge_service(source=KnowledgeRetrievalSource.MANAGER_API, require_remote=True)
+async def faq_import_active_task(
+    request: Request,
+    kb_id: UUID,
+    current_user: Annotated[User, Depends(get_current_user_async)],
+):
+    raise HTTPException(status_code=503, detail="FAQ import requires mem-knowledge")
+
+
 @router.get("/import/{task_id}")
 @cur_workspace_access_guard_async()
 @route_through_knowledge_service(source=KnowledgeRetrievalSource.MANAGER_API, require_remote=True)
