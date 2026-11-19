@@ -5,8 +5,9 @@ import json
 import logging
 import uuid
 
+from redis.exceptions import LockNotOwnedError, RedisError
 from sqlalchemy import select
-from sqlalchemy.exc import InterfaceError, OperationalError
+from sqlalchemy.exc import DataError, IntegrityError, InterfaceError, OperationalError
 from sqlalchemy.exc import TimeoutError as DatabaseTimeoutError
 
 from ..errors import KnowledgeError
@@ -21,6 +22,8 @@ from .wiki_faq_retrieval import _target_for_sync
 
 logger = logging.getLogger(__name__)
 FAQ_IMPORT_TASK = "mem_knowledge.tasks.import_faqs"
+SUBMISSION_LOCK_TTL_SECONDS = 30
+SUBMISSION_LOCK_RENEW_SECONDS = 10
 INDEX_BATCH_SIZE = 3
 INDEX_CONCURRENCY = 3
 
@@ -29,17 +32,78 @@ async def db_call(runtime, operation, *args):
     return await asyncio.to_thread(transaction, runtime, operation, *args)
 
 
+async def _discard_unregistered_payload(
+    storage: KnowledgeFileStorage, task_id: uuid.UUID, key: str
+) -> None:
+    try:
+        await storage.delete(key)
+    except Exception as exc:
+        logger.exception(
+            "FAQ 导入载荷清理失败 task_id=%s stage=discard key=%s details=%s",
+            task_id,
+            key,
+            diagnostic_json(exception_details(exc)),
+        )
+
+
+async def _renew_submission_lock(lock, task_id):
+    while True:
+        await asyncio.sleep(SUBMISSION_LOCK_RENEW_SECONDS)
+        try:
+            await lock.extend(SUBMISSION_LOCK_TTL_SECONDS, replace_ttl=True)
+        except LockNotOwnedError:
+            logger.warning("FAQ 导入提交锁已失效 task_id=%s", task_id, exc_info=True)
+            return
+        except RedisError:
+            logger.warning("FAQ 导入提交锁续期失败 task_id=%s", task_id, exc_info=True)
+
+
 async def submit(runtime, scope, actor_id, payload):
-    await db_call(runtime, jobs.validate_scope, scope)
     task_id = uuid.uuid4()
+    lock_key = (
+        f"kb:faq-import:submit:{runtime.settings.db_name}:"
+        f"{scope['tenant_id']}:{scope['workspace_id']}:{scope['kb_id']}"
+    )
+    try:
+        redis = await runtime.redis.client()
+        lock = redis.lock(lock_key, timeout=SUBMISSION_LOCK_TTL_SECONDS)
+        acquired = await lock.acquire(blocking=False, token=str(task_id))
+    except RedisError as exc:
+        logger.exception("FAQ 导入申请提交锁失败 task_id=%s kb_id=%s", task_id, scope["kb_id"])
+        raise KnowledgeError.from_code("KB_HTTP_UNAVAILABLE") from exc
+    if not acquired:
+        raise KnowledgeError.from_code("KB_FAQ_IMPORT_BUSY", status_code=409)
+
+    renewal = asyncio.create_task(_renew_submission_lock(lock, task_id))
+    try:
+        return await _submit_with_lock(runtime, scope, actor_id, payload, task_id, lock)
+    finally:
+        renewal.cancel()
+        try:
+            await renewal
+        except asyncio.CancelledError:
+            pass
+        except Exception:
+            logger.exception("FAQ 导入提交锁续期任务异常退出 task_id=%s", task_id)
+        try:
+            await lock.release()
+        except RedisError:
+            logger.warning(
+                "FAQ 导入释放提交锁失败 task_id=%s kb_id=%s", task_id, scope["kb_id"], exc_info=True
+            )
+
+
+async def _submit_with_lock(runtime, scope, actor_id, payload, task_id, lock):
+    timeout_seconds = runtime.settings.kb_faq_import_pending_timeout_seconds
+    active, expired = await db_call(runtime, jobs.prepare_submission, scope, timeout_seconds)
+    for expired_job in expired:
+        await cleanup(runtime, expired_job)
+    if active is not None:
+        raise KnowledgeError.from_code("KB_FAQ_IMPORT_BUSY", status_code=409)
     key = f"kb/{scope['kb_id']}/faq-import/{task_id}.json"
     storage = KnowledgeFileStorage(runtime.storage)
     content = await asyncio.to_thread(
         lambda: json.dumps(payload.model_dump(), ensure_ascii=True).encode("utf-8")
-    )
-    # 在知识库锁内占用导入位置，追加和覆盖共用；冲突时尚未上传载荷。
-    await db_call(
-        runtime, jobs.create, scope, actor_id, task_id, payload.mode, key, len(payload.items)
     )
     try:
         await storage.upload(key, content, "application/json")
@@ -49,8 +113,48 @@ async def submit(runtime, scope, actor_id, payload):
             task_id,
             diagnostic_json(exception_details(exc)),
         )
-        await db_call(runtime, jobs.fail, task_id, None, "导入数据保存失败，本批未导入。")
+        await _discard_unregistered_payload(storage, task_id, key)
         raise KnowledgeError.from_code("KB_HTTP_UNAVAILABLE") from exc
+    try:
+        owns_lock = await lock.owned()
+    except RedisError as exc:
+        logger.exception("FAQ 导入检查提交锁失败 task_id=%s", task_id)
+        await _discard_unregistered_payload(storage, task_id, key)
+        raise KnowledgeError.from_code("KB_HTTP_UNAVAILABLE") from exc
+    if not owns_lock:
+        logger.warning("FAQ 导入提交锁已失效 task_id=%s", task_id)
+        await _discard_unregistered_payload(storage, task_id, key)
+        raise KnowledgeError.from_code("KB_HTTP_UNAVAILABLE")
+    expired = []
+    try:
+        # 上传期间可能已有其他请求占位，以写入时的知识库行锁检查为准。
+        expired = await db_call(
+            runtime,
+            jobs.create,
+            scope,
+            actor_id,
+            task_id,
+            payload.mode,
+            key,
+            len(payload.items),
+            timeout_seconds,
+        )
+    except (KnowledgeError, DataError, IntegrityError):
+        await _discard_unregistered_payload(storage, task_id, key)
+        raise
+    except Exception:
+        logger.exception("FAQ 导入任务登记失败 task_id=%s stage=register key=%s", task_id, key)
+        # 提交回执丢失时可能已经入库，核实后才能继续派发。
+        registered = False
+        try:
+            registered = await db_call(runtime, jobs.load, task_id) is not None
+        except Exception:
+            logger.exception("FAQ 导入任务登记状态查询失败 task_id=%s", task_id)
+        else:
+            if not registered:
+                await _discard_unregistered_payload(storage, task_id, key)
+        if not registered:
+            raise
     try:
         await TaskDispatcher(runtime=runtime).send(
             FAQ_IMPORT_TASK,
@@ -67,11 +171,26 @@ async def submit(runtime, scope, actor_id, payload):
             return {"task_id": str(task_id), "status": "pending"}
         await cleanup(runtime, job)
         raise
+    finally:
+        for expired_job in expired:
+            await cleanup(runtime, expired_job)
     return {"task_id": str(task_id), "status": "pending"}
 
 
+async def active_task_id(runtime, scope) -> uuid.UUID | None:
+    return await db_call(
+        runtime, jobs.active_task_id, scope, runtime.settings.kb_faq_import_pending_timeout_seconds
+    )
+
+
 async def progress(runtime, scope, task_id):
-    return await db_call(runtime, jobs.progress, scope, task_id)
+    return await db_call(
+        runtime,
+        jobs.progress,
+        scope,
+        task_id,
+        runtime.settings.kb_faq_import_pending_timeout_seconds,
+    )
 
 
 def content_error(item):
@@ -176,7 +295,12 @@ class ImportCleanupRetry(Exception):
 async def execute(runtime, task_id):
     task_id, token = uuid.UUID(str(task_id)), uuid.uuid4()
     job = await db_call(
-        runtime, jobs.claim, task_id, token, runtime.settings.kb_task_time_limit_seconds
+        runtime,
+        jobs.claim,
+        task_id,
+        token,
+        runtime.settings.kb_task_time_limit_seconds,
+        runtime.settings.kb_faq_import_pending_timeout_seconds,
     )
     if job is None:
         await cleanup(runtime, await db_call(runtime, jobs.load, task_id), retry_on_error=True)

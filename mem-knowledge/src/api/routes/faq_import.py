@@ -32,6 +32,10 @@ class FAQImportRequest(BaseModel):
     items: list[FAQImportItem] = Field(min_length=1)
 
 
+class FAQImportActiveTask(BaseModel):
+    task_id: UUID | None = Field(description="排队中或执行中的导入任务 ID，无任务时为 null")
+
+
 async def read_payload(request: Request, max_bytes: int) -> FAQImportRequest:
     media = request.headers.get("content-type", "").split(";", 1)[0].strip().lower()
     if media != "application/json":
@@ -92,6 +96,18 @@ async def submit_import(
     return success(
         await service.submit(runtime, scope_for(kb_id, principal), principal.actor_id, payload)
     )
+
+
+@router.get(
+    "", response_model=SuccessEnvelope[FAQImportActiveTask], summary="查询当前 FAQ 导入任务"
+)
+async def import_active_task(
+    kb_id: UUID,
+    principal: Annotated[Principal, Depends(manager_principal)],
+    runtime: Annotated[ProcessRuntime, Depends(get_runtime)],
+):
+    task_id = await service.active_task_id(runtime, scope_for(kb_id, principal))
+    return success({"task_id": task_id})
 
 
 @router.get("/{task_id}", response_model=SuccessEnvelope[dict])
