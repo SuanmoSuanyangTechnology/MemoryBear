@@ -7887,7 +7887,11 @@ def run_scene_community_incremental(self, end_user_id: str, trigger: str = "thre
         _shutdown_loop_gracefully(loop)
 
 
-@celery_app.task(name="app.tasks.scan_scene_community_pending")
+@celery_app.task(
+    name="app.tasks.scan_scene_community_pending",
+    soft_time_limit=270,
+    time_limit=300,
+)
 def scan_scene_community_pending():
     """Dispatch one scheduled batch per pending user, in user-ID pages."""
     from app.core.memory.storage.custom import SceneStorage
@@ -7936,15 +7940,27 @@ def scan_scene_community_pending():
         finally:
             await client.close()
 
+    scan_error: BaseException | None = None
     try:
         loop = set_asyncio_event_loop()
         try:
             loop.run_until_complete(_scan())
         finally:
             _shutdown_loop_gracefully(loop)
+    except BaseException as exc:
+        scan_error = exc
+        raise
     finally:
         lock.release()
-    logger.info("[SceneCommunity] scheduled scan completed: %s", stats)
+        if scan_error is None:
+            logger.info("[SceneCommunity] scheduled scan completed: %s", stats)
+        else:
+            logger.warning(
+                "[SceneCommunity] scheduled scan aborted: "
+                "error_type=%s stats=%s",
+                type(scan_error).__name__,
+                stats,
+            )
     return {**stats, "skipped_due_to_lock": False}
 
 
