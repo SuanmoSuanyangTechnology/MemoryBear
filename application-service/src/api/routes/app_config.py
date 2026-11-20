@@ -167,9 +167,12 @@ def update_app_config(
 
     if type == AppType.MULTI_AGENT:
         data = MultiAgentConfigUpdate.model_validate(payload)
-        config = MultiAgentService(db).update_config(app_id, data)
+        multi_agent_service = MultiAgentService(db)
+        updated = multi_agent_service.update_config(app_id, data)
+        config = MultiAgentConfigSchema.model_validate(updated)
+        config.sub_agents = multi_agent_service.describe_sub_agents(config.sub_agents)
         return success(
-            data=MultiAgentConfigSchema.model_validate(config),
+            data=config,
             msg="多 Agent 配置更新成功",
         )
 

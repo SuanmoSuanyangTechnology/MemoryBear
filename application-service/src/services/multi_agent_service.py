@@ -256,11 +256,36 @@ class MultiAgentService:
                 master_release.default_model_config_id if master_release else None
             )
 
-        # Convert sub_agents agent_id (release_id) to app_id and expose
-        # release-policy info: release_policy / release_id (pinned only) /
-        # current_release_id / has_newer_release
+        # Build the returned config dict
+        return {
+            "id": config.id,
+            "app_id": config.app_id,
+            # The master agent is stored as a release id and validated on write;
+            # echoing it back keeps create → read verifiable (the PUT response
+            # already carries it through MultiAgentConfigSchema).
+            "master_agent_id": config.master_agent_id,
+            "master_agent_name": config.master_agent_name,
+            "default_model_config_id": config.default_model_config_id,
+            "model_parameters": config.model_parameters,
+            "orchestration_mode": config.orchestration_mode,
+            "sub_agents": self.describe_sub_agents(config.sub_agents),
+            "routing_rules": config.routing_rules,
+            "execution_config": config.execution_config,
+            # Supervisor-as-agent: the read-back must include this key, otherwise
+            # the frontend getData cannot see it, and default backfill resets the
+            # supervisor capability surface to all defaults (the toggle
+            # "turns off after save")
+            "supervisor_config": config.supervisor_config,
+            "aggregation_strategy": config.aggregation_strategy,
+            "is_active": config.is_active,
+            "created_at": config.created_at,
+            "updated_at": config.updated_at
+        }
+
+    def describe_sub_agents(self, sub_agents: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Serialize sub-agents with app IDs and release metadata."""
         converted_sub_agents = []
-        for sub_agent in config.sub_agents:
+        for sub_agent in sub_agents:
             sub_agent_copy = sub_agent.copy()
             try:
                 state = describe_release_state(self.db, sub_agent)
@@ -275,32 +300,7 @@ class MultiAgentService:
                     f"转换 sub_agent agent_id 失败: {sub_agent.get('agent_id')}, 错误: {str(e)}"
                 )
             converted_sub_agents.append(sub_agent_copy)
-
-        # Build the returned config dict
-        return {
-            "id": config.id,
-            "app_id": config.app_id,
-            # The master agent is stored as a release id and validated on write;
-            # echoing it back keeps create → read verifiable (the PUT response
-            # already carries it through MultiAgentConfigSchema).
-            "master_agent_id": config.master_agent_id,
-            "master_agent_name": config.master_agent_name,
-            "default_model_config_id": config.default_model_config_id,
-            "model_parameters": config.model_parameters,
-            "orchestration_mode": config.orchestration_mode,
-            "sub_agents": converted_sub_agents,
-            "routing_rules": config.routing_rules,
-            "execution_config": config.execution_config,
-            # Supervisor-as-agent: the read-back must include this key, otherwise
-            # the frontend getData cannot see it, and default backfill resets the
-            # supervisor capability surface to all defaults (the toggle
-            # "turns off after save")
-            "supervisor_config": config.supervisor_config,
-            "aggregation_strategy": config.aggregation_strategy,
-            "is_active": config.is_active,
-            "created_at": config.created_at,
-            "updated_at": config.updated_at
-        }
+        return converted_sub_agents
 
     def check_config_data(
         self,
