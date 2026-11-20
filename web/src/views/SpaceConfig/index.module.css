@@ -5,7 +5,7 @@
   font-weight: 500;
   color: #A8A9AA;
 }
-.tabs:gloabl(.ant-tabs .ant-tabs-tab.ant-tabs-tab-active .ant-tabs-tab-btn) {
+.tabs::global(.ant-tabs .ant-tabs-tab.ant-tabs-tab-active .ant-tabs-tab-btn) {
   font-weight: 500;
   color: #171719;
 }

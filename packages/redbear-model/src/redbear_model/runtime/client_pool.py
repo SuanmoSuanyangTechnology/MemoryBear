@@ -29,9 +29,14 @@ class ModelClientPool:
         if self._closed:
             raise RuntimeError("ModelClientPool is closed")
         if self._clients is None:
+            connect_timeout = (
+                self._options.connect_timeout_s
+                if self._options.connect_timeout_s is not None
+                else min(self._options.timeout_s, 60.0)
+            )
             timeout = httpx.Timeout(
                 timeout=self._options.timeout_s,
-                connect=min(self._options.timeout_s, 60.0),
+                connect=connect_timeout,
                 read=self._options.timeout_s,
                 write=60.0,
                 pool=10.0,

@@ -22,6 +22,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from src.composition.interest import build_interest_wiring
+from src.composition.metadata_migration import build_metadata_migration_wiring
 from src.composition.profile_cache import build_profile_cache_wiring
 from src.composition.shared import SharedDependencies
 from src.runtime import JobsRuntime
@@ -38,5 +39,6 @@ class DomainModule:
 
 MODULES: tuple[DomainModule, ...] = (
     DomainModule(name="profile_cache", build=build_profile_cache_wiring),
+    DomainModule(name="metadata_migration", build=build_metadata_migration_wiring),
     DomainModule(name="interest", build=build_interest_wiring),
 )

@@ -85,6 +85,14 @@ def periodic_tasks(settings: JobsSettings | None = None) -> tuple[PeriodicTask, 
             # The sweep must never delay a user-triggered refresh.
             priority=TaskPriority.BACKGROUND,
         ),
+        PeriodicTask(
+            key="metadata-migration-scan",
+            task=TaskName.METADATA_MIGRATION_SCAN.value,
+            schedule=timedelta(minutes=settings.metadata_migration_interval_minutes),
+            enabled=settings.metadata_migration_enabled,
+            expires=3600,
+            priority=TaskPriority.BACKGROUND,
+        ),
     )
 
 

@@ -1,7 +1,13 @@
 """FAQ 管理与消息交接；同步 Session 只在隔离线程内短暂持有。"""
 
 import asyncio
+import csv
+import io
 import logging
+from collections.abc import AsyncIterator
+
+from sqlalchemy.exc import OperationalError
+from sqlalchemy.exc import TimeoutError as PoolTimeoutError
 
 from ..error_mapping import map_wiki_error
 from ..errors import KnowledgeError
@@ -36,6 +42,41 @@ async def run(runtime, operation, scope, *args, **kwargs):
 
         await cleanup_deleted_projection(runtime, scope, result["id"])
     return result
+
+
+async def start_csv_export(runtime, scope) -> tuple[str, AsyncIterator[bytes]]:
+    try:
+        name, first_batch = await asyncio.to_thread(transaction, runtime, read.start_export, scope)
+    except WikiError as exc:
+        if exc.code != "WIKI_NOT_FOUND":
+            raise
+        raise KnowledgeError.from_code("KB_KNOWLEDGE_NOT_FOUND", status_code=404) from exc
+    except (OperationalError, PoolTimeoutError) as exc:
+        raise KnowledgeError.from_code("KB_HTTP_UNAVAILABLE") from exc
+
+    async def stream() -> AsyncIterator[bytes]:
+        batch = first_batch
+        try:
+            buffer = io.StringIO(newline="")
+            writer = csv.writer(buffer)
+            writer.writerow(("问题", "答案"))
+            yield buffer.getvalue().encode("utf-8-sig")
+            while batch:
+                buffer.seek(0)
+                buffer.truncate()
+                writer.writerows((question, answer) for _, question, answer in batch)
+                yield buffer.getvalue().encode("utf-8")
+                if len(batch) < read.FAQ_EXPORT_BATCH_SIZE:
+                    break
+                batch = await asyncio.to_thread(
+                    transaction, runtime, read.export_batch, scope, after=batch[-1][0]
+                )
+        except Exception:
+            logger.exception("FAQ 导出失败 kb_id=%s stage=stream_csv", scope["kb_id"])
+            raise
+
+    filename = name.replace("/", "_").replace("\\", "_").replace("\r", " ").replace("\n", " ")
+    return f"{filename}-FAQ.csv", stream()
 
 
 def _publish(runtime, delivery):

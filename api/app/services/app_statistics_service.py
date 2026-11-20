@@ -9,6 +9,7 @@ from app.models.conversation_model import Conversation
 from app.models.end_user_model import EndUser
 from app.models.api_key_model import ApiKey, ApiKeyLog, ApiKeyType
 from app.models.model_usage_record import ModelUsageRecord
+from app.core.utils.statistics_window import utc_window, day_bucket, fill_days
 
 
 class AppStatisticsService:
@@ -23,7 +24,8 @@ class AppStatisticsService:
         workspace_id: uuid.UUID,
         tenant_id: uuid.UUID,
         start_date: int,
-        end_date: int
+        end_date: int,
+        timezone_name: str = "UTC",
     ) -> Dict[str, Any]:
         """获取应用统计数据
 
@@ -38,20 +40,19 @@ class AppStatisticsService:
             统计数据字典
         """
         # 将毫秒时间戳转换为 datetime
-        start_dt = datetime.fromtimestamp(start_date / 1000)
-        end_dt = datetime.fromtimestamp(end_date / 1000) + timedelta(days=1)
+        start_dt, end_dt = utc_window(start_date, end_date)
 
         # 1. 会话统计
-        conversations_stats = self._get_conversations_statistics(app_id, workspace_id, start_dt, end_dt)
+        conversations_stats = self._get_conversations_statistics(app_id, workspace_id, start_dt, end_dt, timezone_name)
 
         # 2. 新增用户统计
-        users_stats = self._get_new_users_statistics(app_id, start_dt, end_dt)
+        users_stats = self._get_new_users_statistics(app_id, start_dt, end_dt, timezone_name)
 
         # 3. API调用统计
-        api_stats = self._get_api_calls_statistics(app_id, start_dt, end_dt)
+        api_stats = self._get_api_calls_statistics(app_id, start_dt, end_dt, timezone_name)
 
         # 4. Token消耗统计
-        token_stats = self._get_token_statistics(tenant_id, app_id, start_dt, end_dt)
+        token_stats = self._get_token_statistics(tenant_id, app_id, start_dt, end_dt, timezone_name)
         
         return {
             "daily_conversations": conversations_stats["daily"],
@@ -69,12 +70,14 @@ class AppStatisticsService:
         app_id: uuid.UUID,
         workspace_id: uuid.UUID,
         start_dt: datetime,
-        end_dt: datetime
+        end_dt: datetime,
+        timezone_name: str = "UTC",
     ) -> Dict[str, Any]:
         """获取会话统计"""
         # 每日会话数
+        bucket = day_bucket(Conversation.created_at, timezone_name)
         daily_query = self.db.query(
-            cast(Conversation.created_at, Date).label('date'),
+            bucket.label('date'),
             func.count(Conversation.id).label('count')
         ).filter(
             and_(
@@ -83,9 +86,10 @@ class AppStatisticsService:
                 Conversation.created_at >= start_dt,
                 Conversation.created_at < end_dt
             )
-        ).group_by(cast(Conversation.created_at, Date)).all()
+        ).group_by(bucket).all()
         
         daily_data = [{"date": str(row.date), "count": row.count} for row in daily_query]
+        daily_data = fill_days(daily_data, start_dt, end_dt, timezone_name)
         total = sum(row["count"] for row in daily_data)
         
         return {"daily": daily_data, "total": total}
@@ -94,12 +98,14 @@ class AppStatisticsService:
         self,
         app_id: uuid.UUID,
         start_dt: datetime,
-        end_dt: datetime
+        end_dt: datetime,
+        timezone_name: str = "UTC",
     ) -> Dict[str, Any]:
         """获取新增用户统计"""
         # 每日新增用户数
+        bucket = day_bucket(EndUser.created_at, timezone_name)
         daily_query = self.db.query(
-            cast(EndUser.created_at, Date).label('date'),
+            bucket.label('date'),
             func.count(EndUser.id).label('count')
         ).filter(
             and_(
@@ -108,9 +114,10 @@ class AppStatisticsService:
                 EndUser.created_at < end_dt,
                 EndUser.is_active == True,
             )
-        ).group_by(cast(EndUser.created_at, Date)).all()
+        ).group_by(bucket).all()
         
         daily_data = [{"date": str(row.date), "count": row.count} for row in daily_query]
+        daily_data = fill_days(daily_data, start_dt, end_dt, timezone_name)
         total = sum(row["count"] for row in daily_data)
         
         return {"daily": daily_data, "total": total}
@@ -119,12 +126,14 @@ class AppStatisticsService:
         self,
         app_id: uuid.UUID,
         start_dt: datetime,
-        end_dt: datetime
+        end_dt: datetime,
+        timezone_name: str = "UTC",
     ) -> Dict[str, Any]:
         """获取API调用统计"""
         # 每日API调用次数
+        bucket = day_bucket(ApiKeyLog.created_at, timezone_name)
         daily_query = self.db.query(
-            cast(ApiKeyLog.created_at, Date).label('date'),
+            bucket.label('date'),
             func.count(ApiKeyLog.id).label('count')
         ).join(
             ApiKey, ApiKeyLog.api_key_id == ApiKey.id
@@ -134,9 +143,10 @@ class AppStatisticsService:
                 ApiKeyLog.created_at >= start_dt,
                 ApiKeyLog.created_at < end_dt
             )
-        ).group_by(cast(ApiKeyLog.created_at, Date)).all()
+        ).group_by(bucket).all()
         
         daily_data = [{"date": str(row.date), "count": row.count} for row in daily_query]
+        daily_data = fill_days(daily_data, start_dt, end_dt, timezone_name)
         total = sum(row["count"] for row in daily_data)
         
         return {"daily": daily_data, "total": total}
@@ -146,7 +156,8 @@ class AppStatisticsService:
         tenant_id: uuid.UUID,
         app_id: uuid.UUID,
         start_dt: datetime,
-        end_dt: datetime
+        end_dt: datetime,
+        timezone_name: str = "UTC",
     ) -> Dict[str, Any]:
         """获取Token消耗统计（真源：model_usage_records 计量落表；口径=该 app 的 llm 调用）。
 
@@ -156,8 +167,9 @@ class AppStatisticsService:
         token_sum = func.sum(
             ModelUsageRecord.input_tokens + ModelUsageRecord.output_tokens
         )
+        bucket = day_bucket(ModelUsageRecord.created_at, timezone_name)
         daily_query = self.db.query(
-            cast(ModelUsageRecord.created_at, Date).label('date'),
+            bucket.label('date'),
             token_sum.label('tokens')
         ).filter(
             and_(
@@ -169,10 +181,11 @@ class AppStatisticsService:
                 ModelUsageRecord.created_at < end_dt
             )
         ).group_by(
-            cast(ModelUsageRecord.created_at, Date)
-        ).having(token_sum > 0).order_by(cast(ModelUsageRecord.created_at, Date)).all()
+            bucket
+        ).having(token_sum > 0).order_by(bucket).all()
 
         daily_data = [{"date": str(row.date), "count": int(row.tokens)} for row in daily_query]
+        daily_data = fill_days(daily_data, start_dt, end_dt, timezone_name)
         total = sum(row["count"] for row in daily_data)
 
         return {"daily": daily_data, "total": total}

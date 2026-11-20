@@ -5,7 +5,8 @@ import { CloseOutlined } from '@ant-design/icons'
 import clsx from 'clsx'
 import type { UploadFile, FlexProps } from 'antd'
 
-import { getFileIconClassName, formatFileSize } from './utils/index';
+import { getFileIconClassName } from './utils/index';
+import { formatFileSize } from '@/utils/format'
 
 interface FileListProps {
   fileList: UploadFile[];

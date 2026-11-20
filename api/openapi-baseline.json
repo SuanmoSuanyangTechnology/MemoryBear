@@ -373,7 +373,7 @@
           "V1 - App API"
         ],
         "summary": "Chat",
-        "description": "Agent/Workflow 聊天接口\n\n- 不传 version：使用当前生效版本（current_release，回滚后为回滚目标版本）\n- 传 version=release_id：使用指定版本uuid的历史快照，例如 {\"version\": \"{{release_id}}\"}",
+        "description": "Agent/Workflow 聊天接口。对外画像仅包含 aliases_name、description 和 13 个通用画像键；旧画像字段不在非流式结果或 profile_loaded 事件中返回。\n\n- 不传 version：使用当前生效版本（current_release，回滚后为回滚目标版本）\n- 传 version=release_id：使用指定版本uuid的历史快照，例如 {\"version\": \"{{release_id}}\"}",
         "operationId": "chat_v1_app_chat_post",
         "requestBody": {
           "content": {
@@ -3739,7 +3739,7 @@
           "V1 - Memory API"
         ],
         "summary": "Read Memory Sync",
-        "description": "Read memory synchronously.\n\nRequires API Key with 'memory' scope.\n\nSupports two modes:\n- Single user (backward-compatible): pass ``end_user_id`` (string).\n  Returns ``{\"answer\": \"...\", \"intermediate_outputs\": [...]}``.\n- Multi user: pass ``end_user_ids`` (list of strings). Reads are executed\n  concurrently via ``asyncio.gather``.\n  Returns ``{\"<end_user_id>\": {\"answer\": \"...\", \"intermediate_outputs\": [...]}, ...}``.",
+        "description": "Read memory synchronously.\n\nRequires API Key with 'memory' scope. The public response removes the eight legacy profile fields only from the terminal-user profile node (id == end_user_id); ordinary memory nodes are returned unchanged.\n\nSupports two modes:\n- Single user (backward-compatible): pass ``end_user_id`` (string).\n  Returns ``{\"answer\": \"...\", \"intermediate_outputs\": [...]}``.\n- Multi user: pass ``end_user_ids`` (list of strings). Reads are executed\n  concurrently via ``asyncio.gather``.\n  Returns ``{\"<end_user_id>\": {\"answer\": \"...\", \"intermediate_outputs\": [...]}, ...}``.",
         "operationId": "read_memory_sync_v1_memory_read_sync_post",
         "requestBody": {
           "content": {
@@ -4139,7 +4139,7 @@
           "V1 - End User API"
         ],
         "summary": "Get End User Info",
-        "description": "Get end user info.\n\nRetrieves the info record (aliases, meta_data, etc.) for the specified end user.\nDelegates to the manager-side controller for shared logic.",
+        "description": "Get end user info.\n\nRetrieves the info record for the specified end user. meta_data contains only the migrated 13-key profile display projection and domain_specific_info; the eight legacy profile fields are not returned.\nDelegates to the manager-side controller for shared logic.",
         "operationId": "get_end_user_info_v1_end_user_info_get",
         "parameters": [
           {

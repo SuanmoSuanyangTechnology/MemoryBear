@@ -1399,21 +1399,46 @@ class ToolService:
                 "disabled_count": 0
             }
 
+    @staticmethod
+    def _as_tool_uuid(tool_id: Any) -> uuid.UUID | None:
+        """Parse a tool id; ``None`` when it is not a UUID.
+
+        应用配置里的 ``tool_id`` 不一定是 UUID：跨租户安装时某类工具不落地，
+        引用会保留成包内的 ``tool:<工具名>`` 本地 ref，交由批量接口报 missing。
+        这里把非 UUID 当作「该租户查不到」，而不是让 ``ValueError`` 冒成 500——
+        否则打开这种应用的配置或跑一次对话都会整条链路报错。
+        """
+        if isinstance(tool_id, uuid.UUID):
+            return tool_id
+        try:
+            return uuid.UUID(str(tool_id))
+        except (ValueError, TypeError, AttributeError):
+            return None
+
     def _get_tool_config(self, tool_id: str, tenant_id: uuid.UUID) -> ToolConfig | None:
         """Get tool config (only is_active=True records)."""
-        return self.tool_repo.find_by_id_and_tenant(uuid.UUID(tool_id), tenant_id)
+        tool_uuid = self._as_tool_uuid(tool_id)
+        if tool_uuid is None:
+            return None
+        return self.tool_repo.find_by_id_and_tenant(tool_uuid, tenant_id)
 
     def _get_tool_config_all(self, tool_id: str, tenant_id: uuid.UUID) -> ToolConfig | None:
         """Get tool config (all records)."""
-        return self.tool_repo.find_by_id_and_tenant_all(uuid.UUID(tool_id), tenant_id)
+        tool_uuid = self._as_tool_uuid(tool_id)
+        if tool_uuid is None:
+            return None
+        return self.tool_repo.find_by_id_and_tenant_all(tool_uuid, tenant_id)
 
     async def get_tool_config_async(self, tool_id: str, tenant_id: uuid.UUID) -> ToolConfig | None:
         """Fetch a tool config (only is_active=True records)."""
+        tool_uuid = self._as_tool_uuid(tool_id)
+        if tool_uuid is None:
+            return None
         if not self._uses_async_session():
             return self._get_tool_config(tool_id, tenant_id)
 
         stmt = select(ToolConfig).where(
-            ToolConfig.id == uuid.UUID(tool_id),
+            ToolConfig.id == tool_uuid,
             ToolConfig.tenant_id == tenant_id,
             ToolConfig.is_active.is_(True),
         )
@@ -2486,6 +2511,7 @@ class ToolService:
             # Prefer the tool's own connection check when it exposes one
             if hasattr(tool_instance, 'test_connection'):
                 result = await tool_instance.test_connection()
+                self._persist_builtin_test_status(config, result)
                 return result
             else:
                 # Check whether configuration is required
@@ -2501,7 +2527,30 @@ class ToolService:
 
         except Exception as e:
             logger.error(f"测试内置工具失败: {config.id}, 错误: {e}")
+            self._persist_builtin_test_status(
+                config, {"success": False, "message": str(e)}
+            )
             return {"success": False, "message": f"测试失败: {str(e)}"}
+
+    def _persist_builtin_test_status(
+        self, config: ToolConfig, result: dict[str, Any]
+    ) -> None:
+        """Persist a builtin connection-test outcome for config-required tools."""
+        try:
+            builtin_config = self.builtin_repo.find_by_tool_id(config.id)
+            if not builtin_config or not builtin_config.requires_config:
+                return
+            if result.get("success"):
+                config.status = (
+                    ToolStatus.AVAILABLE.value
+                    if builtin_config.is_enabled
+                    else ToolStatus.CONFIGURED_DISABLED.value
+                )
+            else:
+                config.status = ToolStatus.ERROR.value
+            self.db.commit()
+        except SQLAlchemyError as e:
+            logger.error(f"更新内置工具状态失败: {config.id}, 错误: {e}")
 
     async def _test_mcp_connection_by_config(self, config: dict[str, Any]) -> dict[str, Any]:
         """Test an MCP connection directly from config (called before creating the tool record)."""

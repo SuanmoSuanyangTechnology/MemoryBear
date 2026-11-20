@@ -11,6 +11,10 @@ from src.models.references.memory_generation_model import (
     ModelConfig,
     WorkspaceDefaultModelPreset,
 )
+from src.models.references.memory_reembed_model import (
+    MemoryReembedJobRow,
+    MemoryReembedJobUserRow,
+)
 from src.models.references.memory_statistics_model import (
     Conversation,
     ForgetAudit,
@@ -42,3 +46,4 @@ __all__ = [
 from src.models.references.memory_display_model import MemoryDisplayRecord, MemoryEngineDisplayEvent
 
 __all__ += ["MemoryDisplayRecord", "MemoryEngineDisplayEvent"]
+__all__ += ["MemoryReembedJobRow", "MemoryReembedJobUserRow"]

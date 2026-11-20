@@ -12,11 +12,19 @@
  */
 
 import axios from 'axios';
-import type { AxiosRequestConfig, InternalAxiosRequestConfig } from 'axios';
+import type { AxiosRequestConfig, AxiosResponse, InternalAxiosRequestConfig } from 'axios';
 import { clearAuthData } from './auth';
 import { message } from 'antd';
 import { refreshTokenUrl, refreshToken, loginUrl, logoutUrl } from '@/api/user'
 import i18n from '@/i18n'
+
+/**
+ * Use when raw response headers are needed (e.g. file downloads named via Content-Disposition).
+ * When enabled, the response interceptor skips business-data unwrapping and returns the AxiosResponse directly.
+ */
+export interface RawResponseConfig extends AxiosRequestConfig {
+  rawResponse?: boolean;
+}
 
 /**
  * Handle logout: clear auth data, show warning message, redirect to login page
@@ -111,7 +119,7 @@ let requests: RequestQueueItem[] = [];
 // Check if URL is a public API (matches /public/ path segment, not substrings like /publications)
 const isPublicApi = (url: string | undefined): boolean => {
   if (!url) return false;
-  return url.includes('/public/') || url.endsWith('/public');
+  return url.includes('/public/') || url.endsWith('/public') || url.includes('/workspaces/invites/validate/');
 };
 
 // Request interceptor
@@ -214,11 +222,27 @@ const tokenRefresh = async (): Promise<string> => {
 
 // Response interceptor
 service.interceptors.response.use(
-  (response) => {
+  async (response) => {
     const traceId = response.headers?.['x-trace-id'] || response.headers?.['X-Trace-Id']
     if (traceId) lastTraceId = traceId
 
-    const { data: responseData } = response;
+    const isRawResponse = !!(response.config as RawResponseConfig)?.rawResponse;
+    let responseData = response.data;
+
+    // Blob download endpoints may return a business-error envelope with 2xx; parse it before the shared code/auth checks
+    if (isRawResponse && responseData instanceof Blob && responseData.type.includes('json')) {
+      try {
+        const parsed = JSON.parse(await responseData.text());
+        if (parsed && typeof parsed === 'object' && 'code' in parsed) {
+          responseData = parsed;
+        }
+      } catch {
+        // Non-JSON payloads are treated as normal binary downloads
+      }
+    }
+    if (isRawResponse && responseData instanceof Blob) {
+      return response;
+    }
 
     if (!responseData || typeof responseData !== 'object') {
       return responseData;
@@ -228,7 +252,7 @@ service.interceptors.response.use(
 
     switch (code) {
       case 0:
-        return data !== undefined ? data : responseData;
+        return isRawResponse ? response : (data !== undefined ? data : responseData);
       case 2001:
         if (isPublicApi(response.config?.url)) {
           if (responseData.msg) {
@@ -280,24 +304,26 @@ service.interceptors.response.use(
     if (errTraceId) lastTraceId = errTraceId
 
     let msg = error.response?.data?.msg || error.response?.msg || error.msg;
+    let errorData = error.response?.data;
 
-    if (error.response?.data instanceof Blob) {
+    // blob 下载的错误响应体也是 Blob，需解析后才能沿用按业务码分支的刷新/登出逻辑
+    if (errorData instanceof Blob) {
       try {
-        const text = await error.response.data.text();
-        const errorData = JSON.parse(text);
-        msg = errorData.msg || msg;
+        const text = await errorData.text();
+        errorData = JSON.parse(text);
+        msg = errorData?.msg || msg;
       } catch {
         msg = msg || i18n.t('common.unknownError');
       }
     }
     const status = error?.response ? error.response.status : error;
-    const errorCode = error.response?.data?.code;
+    const errorCode = errorData?.code;
     const isPublic = isPublicApi(error.config?.url);
     switch (status) {
       case 401:
         if (error.config?.url === refreshTokenUrl) {
           if (errorCode === 2001) {
-            message.warning(error.response?.data?.msg || i18n.t('common.serviceUpgrading'));
+            message.warning(errorData?.msg || i18n.t('common.serviceUpgrading'));
             return Promise.reject(error);
           }
           handleLogout(error.response?.data?.msg || i18n.t('common.loginExpired'));
@@ -355,8 +381,8 @@ service.interceptors.response.use(
         msg = msg || i18n.t('common.serviceUpgrading');
         break;
       default:
-        if (!msg && Array.isArray(error.response?.data?.detail)) {
-          msg = error.response?.data?.detail?.map((item: { msg: string }) => item.msg).join(';')
+        if (!msg && Array.isArray(errorData?.detail)) {
+          msg = errorData?.detail?.map((item: { msg: string }) => item.msg).join(';')
         } else {
           msg = msg || i18n.t('common.unknownError');
         }
@@ -508,6 +534,14 @@ export const request = {
       withCredentials: false,
       ...config
     }));
+  },
+  /** Blob request that returns the full response (including headers), for downloads named via Content-Disposition */
+  getBlobResponse<T = Blob>(url: string, config?: RawResponseConfig): Promise<AxiosResponse<T>> {
+    return service.get(url, {
+      ...config,
+      responseType: 'blob',
+      rawResponse: true,
+    } as AxiosRequestConfig) as unknown as Promise<AxiosResponse<T>>;
   },
   downloadFile(url: string, fileName: string, data?: unknown, callback?: () => void) {
     service.post(url, data, {

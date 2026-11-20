@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { App, Button, Drawer, Input, Modal, Space, Tag, Typography, Upload } from 'antd';
 import { useTranslation } from 'react-i18next';
-import type { FaqItem } from '@/api/knowledgeBase';
+import type { FaqItem } from './types';
 
 interface FaqDialogsProps {
   detail?: FaqItem;

@@ -20,6 +20,10 @@ def _as_asyncpg_url(value: str) -> str:
 class ProfileSettings(BaseSettings):
     model_config = ConfigDict(frozen=True, extra="ignore", case_sensitive=False)
 
+    metadata_migration_enabled: bool = Field(
+        False, validation_alias="JOBS_METADATA_MIGRATION_ENABLED"
+    )
+
     service_name: str = Field("memory-profile", validation_alias="PROFILE_SERVICE_NAME")
     host: str = Field("0.0.0.0", validation_alias="PROFILE_HOST")
     port: int = Field(8082, validation_alias="PROFILE_PORT")
@@ -141,6 +145,32 @@ class ProfileSettings(BaseSettings):
     interest_cache_expire_seconds: int = Field(
         24 * 60 * 60, validation_alias="PROFILE_INTEREST_CACHE_EXPIRE_SECONDS"
     )
+    # Option A（写入下沉过渡期）：写网关任务由 api worker 执行，profile 只投递并等待。
+    # : 留空时沿用 CELERY_* 派生值；生产需指向 api 的 broker / result backend。
+    write_gateway_broker_url: str | None = Field(
+        None,
+        validation_alias=AliasChoices("WRITE_GATEWAY_BROKER_URL", "CELERY_BROKER_URL"),
+    )
+    write_gateway_result_backend: str | None = Field(
+        None,
+        validation_alias=AliasChoices(
+            "WRITE_GATEWAY_RESULT_BACKEND", "CELERY_RESULT_BACKEND"
+        ),
+    )
+    write_gateway_queue: str = Field(
+        "memory_tasks", validation_alias="WRITE_GATEWAY_QUEUE"
+    )
+    write_gateway_wait_seconds: float = Field(
+        120.0, validation_alias="WRITE_GATEWAY_WAIT_SECONDS"
+    )
+    # Option A（A2 分片）：写批次的“消息落库/seq”步骤执行位置。
+    # - api（默认）：保持 A1 行为，全部写流程在 api worker；
+    # - memory_jobs：仅落库步骤投递到 memory-jobs admission，其余仍在 api。
+    # 默认 api 即为回滚开关：改成 api 立即恢复 A1 路径。
+    # A2 S4b：图写入（WritePipeline）等待执行的派发位置；默认 api，可回滚。
+    # A2 S5d：RAG（ES 直写）执行位置；默认 api，可回滚。
+    # 留空时沿用 resolved_redis_url（业务 Redis，与 memory-jobs 的 admission
+    # keyspace 同库）；跨集群部署时显式指向 memory-jobs 使用的业务 Redis。
     migration_database_url: str | None = Field(
         None,
         validation_alias="PROFILE_MIGRATION_DATABASE_URL",
@@ -212,6 +242,18 @@ class ProfileSettings(BaseSettings):
     elasticsearch_max_retries: int = Field(10, validation_alias="ELASTICSEARCH_MAX_RETRIES")
     elasticsearch_connections_per_node: int = Field(
         20, validation_alias="PROFILE_ELASTICSEARCH_CONNECTIONS_PER_NODE"
+    )
+    #: Which backend serves graph reads (``ELASTIC`` / ``NEO4J``); the ported
+    #: storage ``BackendFactory`` matches this value directly, like the host.
+    memory_read_backend: str = Field("ELASTIC", validation_alias="MEMORY_READ_BACKEND")
+    #: Allow the Elasticsearch index ensure step to rebuild a *newer* index from an
+    #: older definition (host ``ES_ALLOW_DOWNGRADE``); off by default.
+    es_allow_downgrade: bool = Field(False, validation_alias="ES_ALLOW_DOWNGRADE")
+    #: Confirm/update the storage indexes (Elasticsearch aliases + Neo4j indexes)
+    #: at startup, like the host does in ``main.py``. Off by default so unit tests
+    #: and offline tooling never touch a real cluster; deployments opt in.
+    storage_index_bootstrap: bool = Field(
+        False, validation_alias="PROFILE_STORAGE_INDEX_BOOTSTRAP"
     )
 
     @field_validator("model_service_base_url")
@@ -289,6 +331,16 @@ class ProfileSettings(BaseSettings):
         password = f":{quote_plus(self.redis_password)}@" if self.redis_password else ""
         return f"redis://{password}{self.redis_host}:{self.redis_port}/{self.redis_db}"
 
+    @property
+    def resolved_write_ingest_admission_redis_url(self) -> str:
+        """Redis URL backing the memory-jobs admission keyspace.
+
+        Falls back to the business Redis URL because the admission keyspace lives
+        in the same logical database as the business data by default.
+        """
+
+        return self.write_ingest_admission_redis_url or self.resolved_redis_url
+
     def _deployment_scoped_name(self, explicit: str, base: str, env_name: str) -> str:
         """Resolve a deployment-scoped Redis name from an override or DB_NAME."""
 
@@ -327,3 +379,4 @@ class ProfileSettings(BaseSettings):
         if parsed.port is not None:
             return [host]
         return [f"{host}:{self.elasticsearch_port}"]
+

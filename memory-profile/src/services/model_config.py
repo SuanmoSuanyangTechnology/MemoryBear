@@ -24,6 +24,7 @@ from typing import Any, Protocol
 from uuid import UUID
 
 from src.infrastructure.model_service import (
+    ModelProbeOutcome,
     ModelServiceManager,
     ProfileChatModel,
     RerankHit,
@@ -142,6 +143,17 @@ class ModelConfigService:
             raise ModelConfigurationError(f"{label} 模型 {model_id} 不属于当前租户")
 
         return ResolvedModel(model_config_id=model_id, tenant_id=tenant_id, slot=slot)
+
+    async def probe_chat_model_for_workspace(
+        self,
+        workspace: Mapping[str, Any],
+    ) -> ModelProbeOutcome:
+        """Probe the workspace LLM credential/channel without retaining it."""
+
+        resolved = await self.resolve_workspace(workspace, ModelSlot.LLM)
+        return await self.model_service.probe_stored_config(
+            resolved.model_config_id, resolved.tenant_id, "llm"
+        )
 
     async def chat_model_for_workspace(
         self,

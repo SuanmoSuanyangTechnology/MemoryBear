@@ -369,6 +369,7 @@ export const userMemory = {
       normal_mode: "Standard Retrieval",
       quick_mode: "Quick Retrieval",
       express_mode: "Express Retrieval",
+      community_mode: 'Community Retrieval',
 
       time_asc: 'Time Ascending',
       time_desc: 'Time Descending',

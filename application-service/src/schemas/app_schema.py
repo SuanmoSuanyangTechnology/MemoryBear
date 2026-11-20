@@ -165,6 +165,10 @@ class ToolConfig(BaseModel):
     enabled: bool = Field(default=False, description="是否启用该工具")
     tool_id: Optional[str] = Field(default=None, description="工具ID")
     operation: Optional[str] = Field(default=None, description="工具特定配置")
+    # 保存时的名称快照。工具行被删除 / 跨租户 / 导入后无法回查时，列表仍能展示
+    # 名称而不是裸 id；工具还在时每次保存都会用库里的最新名称覆盖，前端则应优先
+    # 使用批量接口返回的实时名称，快照只做缺失兜底。
+    name: Optional[str] = Field(default=None, description="工具名称快照（保存时刷新）")
 
 
 class SkillConfig(BaseModel):

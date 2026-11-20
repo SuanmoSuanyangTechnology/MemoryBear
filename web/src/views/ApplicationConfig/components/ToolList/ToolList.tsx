@@ -40,6 +40,7 @@ const ToolList: FC<ToolListProps> = ({ value, onChange }) => {
     getToolMethodsBatch(toolIds).then(res => {
       const batchData = res as { items: Array<{ tool_id: string; name: string; tool_type: string; is_active: boolean; methods: ToolMethod[] }>; missing_tool_ids: string[] }
       const toolMap = new Map(batchData.items.map(item => [item.tool_id, item]))
+      const missingSet = new Set(batchData.missing_tool_ids || [])
 
       const groupedByTool = new Map<string, ToolEntry[]>()
       for (const entry of value) {
@@ -51,22 +52,34 @@ const ToolList: FC<ToolListProps> = ({ value, onChange }) => {
       const displayList: DisplayTool[] = []
       for (const [toolId, entries] of groupedByTool) {
         const batchItem = toolMap.get(toolId)
-        if (!batchItem) continue
+        const isMissing = missingSet.has(toolId)
 
-        const tool: ToolItem = {
-          id: batchItem.tool_id,
-          name: batchItem.name,
-          description: '',
-          icon: null,
-          tool_type: batchItem.tool_type as ToolItem['tool_type'],
-          method_count: batchItem.methods.length,
-          is_active: batchItem.is_active,
-          status: (batchItem as any).status,
-        }
+        if (!batchItem && !isMissing) continue
+
+        const tool: ToolItem = batchItem
+          ? {
+              id: batchItem.tool_id,
+              name: batchItem.name,
+              description: '',
+              icon: null,
+              tool_type: batchItem.tool_type as ToolItem['tool_type'],
+              method_count: batchItem.methods.length,
+              is_active: batchItem.is_active,
+              status: (batchItem as any).status,
+            }
+          : {
+              id: toolId,
+              name: entries[0].name || toolId,
+              description: '',
+              icon: null,
+              method_count: 0,
+              is_active: true,
+              status: 'missing',
+            }
 
         displayList.push({
           tool,
-          methods: batchItem.methods,
+          methods: batchItem?.methods || [],
           entries,
         })
       }

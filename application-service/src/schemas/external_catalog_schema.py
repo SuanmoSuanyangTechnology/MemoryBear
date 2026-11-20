@@ -145,12 +145,6 @@ class InstallRequest(BaseModel):
             raise ValueError("invalid version format")
         return value
 
-    @model_validator(mode="after")
-    def app_requires_workspace(self) -> InstallRequest:
-        if self.resource_type == ResourceType.APP and not self.workspace_id:
-            raise ValueError("workspace_id is required for app installations")
-        return self
-
 
 class PendingBinding(BaseModel):
     kind: str

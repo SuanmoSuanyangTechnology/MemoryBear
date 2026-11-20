@@ -4,12 +4,21 @@ from __future__ import annotations
 
 from typing import Any
 
-from error_core.codes import BizCode, coerce_code, code_name, http_status_for
+from error_core.codes import (
+    HTTP_STATUS_TO_BIZ_CODE,
+    BizCode,
+    code_name,
+    coerce_code,
+    http_status_for,
+    is_known_code,
+)
 from error_core.diagnostics import format_diagnostics
+from error_core.knowledge import knowledge_message
 from error_core.messages import fallback_message, user_message
 
 from ..errors import BusinessException
 from ..i18n import get_current_locale
+from ..integrations.knowledge.errors import KnowledgeServiceError
 from ..integrations.model.errors import ModelInvokeFailedError
 from ..trace import get_trace_id
 
@@ -41,6 +50,19 @@ def workflow_error_info(
         ) or fallback_message(http_status_for(code), locale)
         detail = getattr(exc, "detail", "") or str(exc) or code_name(code)
         retryable = bool(exc.retryable)
+    elif isinstance(exc, KnowledgeServiceError):
+        code = (
+            exc.code
+            if exc.code != BizCode.OK and is_known_code(exc.code)
+            else HTTP_STATUS_TO_BIZ_CODE.get(exc.status_code, BizCode.INTERNAL_ERROR).value
+        )
+        msg = knowledge_message(code, locale)
+        detail = (
+            f"upstream_status={exc.status_code} upstream_code={exc.code} "
+            f"upstream_trace_id={exc.trace_id}: {exc.diagnostic or exc}"
+        )
+        status = exc.status_code if exc.status_code >= 400 else http_status_for(code)
+        retryable = status == 429 or status >= 500
     elif isinstance(exc, BusinessException):
         code = coerce_code(exc.code)
         if code in (None, BizCode.OK.value):

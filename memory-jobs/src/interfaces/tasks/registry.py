@@ -18,11 +18,13 @@ from dataclasses import dataclass
 from task_bridge.mem_router import TaskName
 
 from src.application.jobs import (
+    DoMetadataMigrationJob,
     FanOutWorkspaceJob,
     GenerateInterestDistributionJob,
     GenerateProfileCacheJob,
     PingJob,
     PrewarmInterestDistributionsJob,
+    ScanMetadataMigrationJob,
     ScanProfileCachesJob,
 )
 from src.application.ports.jobs import JobHandler, JobSpec
@@ -69,6 +71,16 @@ JOBS: tuple[JobRegistration, ...] = (
         build=lambda: ScanProfileCachesJob(
             get_container().profile_cache.scan()
         ),
+    ),
+    JobRegistration(
+        name=TaskName.METADATA_MIGRATION_SCAN.value,
+        spec=ScanMetadataMigrationJob.spec,
+        build=lambda: ScanMetadataMigrationJob(get_container().metadata_migration.scan()),
+    ),
+    JobRegistration(
+        name=TaskName.METADATA_MIGRATION_DO.value,
+        spec=DoMetadataMigrationJob.spec,
+        build=lambda: DoMetadataMigrationJob(get_container().metadata_migration.do()),
     ),
     JobRegistration(
         name=TaskName.INTEREST_DISTRIBUTION_GENERATE.value,

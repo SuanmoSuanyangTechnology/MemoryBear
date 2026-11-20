@@ -5,7 +5,7 @@ reads them. The one write this service performs (the generated insight/summary
 text on ``end_users``) goes through ``EndUser`` in ``end_user_model``.
 """
 
-from sqlalchemy import Boolean, Column, DateTime, String
+from sqlalchemy import ARRAY, Boolean, Column, DateTime, String
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 
 from src.models.base import ReadOnlyBase
@@ -33,6 +33,13 @@ class ModelConfig(ReadOnlyBase):
     type = Column(String, nullable=False)
     is_active = Column(Boolean, nullable=False)
     is_public = Column(Boolean, nullable=False)
+    model_id = Column(UUID(as_uuid=True), nullable=True)
+    provider = Column(String, nullable=True)
+    capability = Column(ARRAY(String), nullable=True)
+    is_omni = Column(Boolean, nullable=True)
+    input_modalities = Column(ARRAY(String), nullable=True)
+    output_modalities = Column(ARRAY(String), nullable=True)
+    features = Column(ARRAY(String), nullable=True)
 
 
 class EndUserInfo(ReadOnlyBase):
@@ -40,5 +47,10 @@ class EndUserInfo(ReadOnlyBase):
 
     id = Column(UUID(as_uuid=True), primary_key=True)
     end_user_id = Column(UUID(as_uuid=True), nullable=False)
+    #: Display columns mirrored from the API-owned end_user_info table.
+    other_name = Column(String, nullable=False)
+    aliases = Column(ARRAY(String), nullable=True)
     meta_data = Column(JSONB, nullable=True)
+    meta_data_new = Column(JSONB, nullable=True)
+    created_at = Column(DateTime, nullable=True)
     updated_at = Column(DateTime, nullable=True)

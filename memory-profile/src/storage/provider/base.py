@@ -1,0 +1,218 @@
+from abc import ABC, abstractmethod
+import asyncio
+from collections.abc import Sequence
+from typing import Self
+
+from src.storage.enums import MemoryNodeLabel, MemoryRelationshipType
+from src.storage.models import (
+    NodeFilter,
+    NodeProjection,
+    NodeSearchSpec,
+    NodeSort,
+    RelationshipFilter,
+    RelationshipPattern,
+    RelationshipProjection,
+    RelationshipSort,
+    StorageReadResult,
+    StorageWriteResult,
+)
+
+SCAN_PAGE_SIZE = 500
+MAX_SCAN_PAGE_SIZE = 5_000
+
+
+class BaseClient(ABC):
+
+    @classmethod
+    @abstractmethod
+    async def create(cls) -> Self:
+        """Create and connect a client instance."""
+        pass
+
+    @staticmethod
+    def verify_label(label: MemoryNodeLabel) -> None:
+        if not isinstance(label, MemoryNodeLabel):
+            raise KeyError(f"node type - {label} not supported")
+
+    @classmethod
+    def verify_input(cls, label: MemoryNodeLabel, data: dict) -> str:
+        cls.verify_label(label)
+        node_id = data.get("id")
+        if node_id is None:
+            raise ValueError("Memory Node id field is required")
+        return node_id
+
+    @abstractmethod
+    async def health(self):
+        pass
+
+    @abstractmethod
+    async def connect(self):
+        pass
+
+    @abstractmethod
+    async def close(self):
+        pass
+
+    # The write surface stays declared (the storage router and the jobs side share
+    # this interface) but is not abstract: memory-profile is a read-only consumer,
+    # node/edge writes are executed by the memory-jobs service.
+    async def save_node(
+            self,
+            label: MemoryNodeLabel,
+            data: dict,
+    ) -> StorageWriteResult:
+        raise NotImplementedError(
+            f"{type(self).__name__} is read-only; node writes run in memory-jobs"
+        )
+
+    async def update_node(
+            self,
+            label: MemoryNodeLabel,
+            data: dict,
+            node_filter: NodeFilter,
+    ) -> StorageWriteResult:
+        raise NotImplementedError(
+            f"{type(self).__name__} is read-only; node writes run in memory-jobs"
+        )
+
+    async def delete_node(
+            self,
+            label: MemoryNodeLabel,
+            node_filter: NodeFilter,
+            draft: bool = False,
+    ) -> StorageWriteResult:
+        raise NotImplementedError(
+            f"{type(self).__name__} is read-only; node writes run in memory-jobs"
+        )
+
+    @abstractmethod
+    async def get_node(
+            self,
+            label: MemoryNodeLabel,
+            node_filter: NodeFilter,
+            projection: NodeProjection | None = None,
+            node_sort: NodeSort | None = None,
+    ) -> StorageReadResult:
+        pass
+
+    async def scan_nodes(
+            self,
+            label: MemoryNodeLabel,
+            node_filter: NodeFilter,
+            cursor: str | None = None,
+            limit: int = SCAN_PAGE_SIZE,
+            projection: NodeProjection | None = None,
+    ) -> tuple[list[dict], str | None]:
+        raise NotImplementedError(
+            f"{type(self).__name__} does not support paged node scans"
+        )
+
+    async def update_node_embeddings(
+            self,
+            label: MemoryNodeLabel,
+            field: str,
+            updates: Sequence[tuple[str, Sequence[float]]],
+    ) -> StorageWriteResult:
+        raise NotImplementedError(
+            f"{type(self).__name__} does not support bulk embedding writes"
+        )
+
+    @abstractmethod
+    async def search_by_fulltext(
+            self,
+            label: MemoryNodeLabel,
+            node_filter: NodeFilter,
+            text: str,
+            limit: int,
+            projection: NodeProjection | None = None,
+    ) -> StorageReadResult:
+        pass
+
+    @abstractmethod
+    async def search_by_embedding(
+            self,
+            label: MemoryNodeLabel,
+            node_filter: NodeFilter,
+            embed: list,
+            limit: int,
+            projection: NodeProjection | None = None,
+    ) -> StorageReadResult:
+        pass
+
+    async def search_many_by_fulltext(
+            self,
+            specs: list[NodeSearchSpec],
+            text: str,
+            limit: int,
+    ) -> list[StorageReadResult]:
+        """Search multiple labels, falling back to one request per label."""
+        return list(await asyncio.gather(*(
+            self.search_by_fulltext(
+                spec.label,
+                spec.node_filter,
+                text,
+                limit,
+                spec.projection,
+            )
+            for spec in specs
+        )))
+
+    async def search_many_by_embedding(
+            self,
+            specs: list[NodeSearchSpec],
+            embed: list,
+            limit: int,
+    ) -> list[StorageReadResult]:
+        """Search multiple labels, falling back to one request per label."""
+        return list(await asyncio.gather(*(
+            self.search_by_embedding(
+                spec.label,
+                spec.node_filter,
+                embed,
+                limit,
+                spec.projection,
+            )
+            for spec in specs
+        )))
+
+    async def save_relationship(
+            self,
+            relationship_type: MemoryRelationshipType,
+            source: str,
+            target: str,
+            data: dict,
+    ) -> StorageWriteResult:
+        raise NotImplementedError(
+            f"{type(self).__name__} does not support relationship writes"
+        )
+
+    async def get_relationship(
+            self,
+            pattern: RelationshipPattern,
+            rel_filter: RelationshipFilter,
+            projection: RelationshipProjection | None = None,
+            sort: RelationshipSort | None = None,
+    ) -> StorageReadResult:
+        raise NotImplementedError(
+            f"{type(self).__name__} does not support relationship queries"
+        )
+
+    async def update_relationship(
+            self,
+            relationship_type: MemoryRelationshipType,
+            data: dict,
+            rel_filter: RelationshipFilter,
+    ) -> StorageWriteResult:
+        raise NotImplementedError(
+            f"{type(self).__name__} does not support relationship updates"
+        )
+
+    async def delete_relationship(
+            self,
+            relationship_type: MemoryRelationshipType,
+            rel_filter: RelationshipFilter,
+    ) -> StorageWriteResult:
+        raise NotImplementedError(
+            f"{type(self).__name__} does not support relationship deletes"
+        )

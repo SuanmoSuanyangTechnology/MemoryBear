@@ -11,6 +11,7 @@ import RbModal from '@/components/RbModal';
 import CustomSelect from '@/components/CustomSelect';
 import { appPublicationRelist, resourcesVersionListUrl } from '@/api/application';
 import type { RelistModalRef, MySharedOutItem } from '../types';
+import { formatVersion } from '@/utils/format';
 
 const { TextArea } = Input;
 
@@ -93,7 +94,7 @@ const RelistModal = forwardRef<RelistModalRef, { onRefresh: () => void; onSucces
                 ...item,
                 label: (
                   <>
-                    {item.version} · {t('application.relistVersionApproved')} · {item.change_note || ''}
+                    {formatVersion(item.version)} · {t('application.relistVersionApproved')} · {item.change_note || ''}
                   </>
                 ),
               }))

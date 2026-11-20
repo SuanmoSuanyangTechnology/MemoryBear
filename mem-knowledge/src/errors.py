@@ -43,6 +43,36 @@ class ErrorDefinition:
 
 # 存量入口保留旧 HTTP 与重试策略；公开业务码单独映射，不改变任务结果原因键。
 _DEFINITIONS = {
+    "KB_SHARE_SOURCE_NOT_FOUND": ErrorDefinition(
+        404, False, 9470, "business", {}, "NOT_FOUND"
+    ),
+    "KB_SHARE_TARGET_NOT_FOUND": ErrorDefinition(
+        404, False, 9471, "business", {}, "NOT_FOUND"
+    ),
+    "KB_SHARE_CROSS_TENANT": ErrorDefinition(
+        403, False, 9472, "business", {}, "PERMISSION_DENIED"
+    ),
+    "KB_SHARE_SOURCE_NOT_ALLOWED": ErrorDefinition(
+        400, False, 9473, "business", {}, "INVALID_ARGUMENT"
+    ),
+    "KB_SHARE_SOURCE_UNAVAILABLE": ErrorDefinition(
+        409, False, 9474, "business", {}, "FAILED_PRECONDITION"
+    ),
+    "KB_SHARE_TARGET_UNAVAILABLE": ErrorDefinition(
+        409, False, 9475, "business", {}, "FAILED_PRECONDITION"
+    ),
+    "KB_SHARE_SAME_WORKSPACE": ErrorDefinition(
+        400, False, 9476, "business", {}, "INVALID_ARGUMENT"
+    ),
+    "KB_SHARE_REFERENCE_UNAVAILABLE": ErrorDefinition(
+        409, False, 9477, "business", {}, "FAILED_PRECONDITION"
+    ),
+    "KB_SHARE_DUPLICATE": ErrorDefinition(
+        409, False, 9478, "business", {}, "FAILED_PRECONDITION"
+    ),
+    "KB_SHARE_SOURCE_OUTSIDE_WORKSPACE": ErrorDefinition(
+        403, False, 9479, "business", {}, "PERMISSION_DENIED"
+    ),
     "KB_CONNECTOR_CREDENTIAL_INVALID": ErrorDefinition(
         500, False, 9380, "business", {}, "INTERNAL"
     ),
@@ -83,6 +113,7 @@ _DEFINITIONS = {
     "KB_FAQ_SOURCE_CHANGED": ErrorDefinition(
         409, False, 9424, "business", {}, "FAILED_PRECONDITION"
     ),
+    "KB_FAQ_IMPORT_BUSY": ErrorDefinition(409, False, 9494, "business", {}, "FAILED_PRECONDITION"),
     "KB_FAQ_JOB_BUSY": ErrorDefinition(409, False, 9426, "business", {}, "FAILED_PRECONDITION"),
     "KB_FAQ_JOB_TERMINAL": ErrorDefinition(409, False, 9427, "business", {}, "FAILED_PRECONDITION"),
     "KB_PRINCIPAL_INVALID": ErrorDefinition(400, False, 2001, "business", {}, "UNAUTHENTICATED"),
@@ -170,6 +201,9 @@ _DEFINITIONS = {
     ),
     "KB_EXTERNAL_ID_EXISTS": ErrorDefinition(400, False, 5002, "business", {}, "ALREADY_EXISTS"),
     "KB_FEISHU_AUTH_INVALID": ErrorDefinition(200, False, 2001, "business", {}, "INVALID_ARGUMENT"),
+    "KB_FILE_FOLDER_DEPTH_EXCEEDED": ErrorDefinition(
+        400, False, 9254, "business", {}, "INVALID_ARGUMENT"
+    ),
     "KB_FILE_NOT_FOUND": ErrorDefinition(400, False, 4006, "business", {}, "NOT_FOUND"),
     "KB_FILE_STORAGE_KEY_MISSING": ErrorDefinition(
         400, False, 9249, "business", {}, "FAILED_PRECONDITION"
@@ -240,6 +274,12 @@ _DEFINITIONS = {
     "KB_KNOWLEDGE_CREATOR_NOT_FOUND": ErrorDefinition(400, False, 9450, "business", {}, "INTERNAL"),
     "KB_KNOWLEDGE_DOWNLOAD_EMPTY": ErrorDefinition(
         400, False, 9248, "business", {}, "FAILED_PRECONDITION"
+    ),
+    "KB_KNOWLEDGE_FOLDER_DEPTH_EXCEEDED": ErrorDefinition(
+        400, False, 9252, "business", {}, "INVALID_ARGUMENT"
+    ),
+    "KB_KNOWLEDGE_FOLDER_PARENT_INVALID": ErrorDefinition(
+        400, False, 9253, "business", {}, "INVALID_ARGUMENT"
     ),
     "KB_KNOWLEDGE_NAME_EXISTS": ErrorDefinition(
         400, False, 5001, "business", {"knowledge_name": str}, "ALREADY_EXISTS"

@@ -128,9 +128,9 @@ class IterationNodeConfig(BaseNodeConfig):
         description="Output of the loop iteration"
     )
 
-    output_type: VariableType = Field(
+    output_type: VariableType | None = Field(
         default=None,
-        description="Data type of the loop iteration output"
+        description="Data type of the loop iteration output（Dify 的 IterationNodeData 无此字段，导入后为空，运行时按 ANY 处理）"
     )
 
     error_handle_mode: IterationErrorHandleMode = Field(
