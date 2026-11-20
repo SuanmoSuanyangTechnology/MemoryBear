@@ -2,11 +2,14 @@
 
 from fastapi import APIRouter
 
+from ..plugins import get_registered_routers
 from .routes.annotations import router as annotations_router
 from .routes.annotations import v1_router as annotations_v1_router
 from .routes.app_categories import router as app_categories_router
+from .routes.app_config import router as app_config_router
 from .routes.app_logs import router as app_logs_router
 from .routes.apps import router as apps_router
+from .routes.assets import assets_v1_router
 from .routes.assets import router as assets_router
 from .routes.conversation_shares import router as conversation_shares_router
 from .routes.draft_run import router as draft_run_router
@@ -24,14 +27,18 @@ from .routes.release_shares import router as release_shares_router
 from .routes.skills import router as skills_router
 from .routes.tools import router as tools_router
 
-from ..plugins import get_registered_routers
-
 internal_v1_router = APIRouter(prefix="/internal/v1")
 internal_v1_router.include_router(health_router)
 # `/apps/assets/*` must be registered before `apps_router`, otherwise
 # `/apps/{app_id}` matches "assets" first and the catalog endpoints 404/422.
 internal_v1_router.include_router(assets_router)
+# `/v1/assets/*` alias: separate prefix (`/assets`), so it cannot be swallowed
+# by `/apps/{app_id}` regardless of order — kept adjacent for readability.
+internal_v1_router.include_router(assets_v1_router)
 internal_v1_router.include_router(app_categories_router)
+# The `/v1` config pair keeps its own path (`/{app_id}/app-config`) so the
+# console's `GET /apps/{id}/config` handler stays untouched by the v1 dispatch.
+internal_v1_router.include_router(app_config_router)
 internal_v1_router.include_router(apps_router)
 internal_v1_router.include_router(annotations_router)
 internal_v1_router.include_router(annotations_v1_router)

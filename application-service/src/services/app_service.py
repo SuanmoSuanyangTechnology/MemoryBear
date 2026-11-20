@@ -24,6 +24,7 @@ from sqlalchemy import and_, column, exists, func, or_, select
 from sqlalchemy import update as sa_update
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Session
+from starlette.exceptions import HTTPException
 
 from ..cache.workflow_cache import delete_workflow_config
 from ..errors import (
@@ -418,6 +419,30 @@ class AppService:
                 resolved, tools
             )
 
+        # Validate the model reference **before** the insert. Without this the bad
+        # id hits `agent_configs.default_model_config_id`'s FK, and the resulting
+        # IntegrityError is wrapped by `create_app`'s generic `except` into
+        # `INTERNAL_ERROR` (HTTP 500) carrying the raw SQL — which reads as "the
+        # service is broken" instead of "you passed a model_id where the model
+        # config id belongs". Mirrors `update_agent_config`, so create and update
+        # answer the same way for the same input.
+        if config_data.default_model_config_id is not None:
+            model_tenant_id = tenant_id or (
+                cross_domain_read.get_workspace_tenant_id(self.db, workspace_id)
+                if workspace_id is not None
+                else None
+            )
+            if resolve_invoke_ref(
+                self.db,
+                config_data.default_model_config_id,
+                tenant_id=model_tenant_id,
+            ) is None:
+                raise_model_unavailable(
+                    self.db,
+                    config_data.default_model_config_id,
+                    tenant_id=model_tenant_id,
+                )
+
         agent_cfg = AgentConfig(
             id=uuid.uuid4(),
             app_id=app_id,
@@ -488,76 +513,56 @@ class AppService:
             config_data: Multi-agent config data (dict)
             now: Current time
         """
-        # Convert the dict into MultiAgentConfigCreate
-        from ..schemas.multi_agent_schema import (
-            ExecutionConfig,
-            MultiAgentConfigCreate,
-            RoutingRule,
-            SubAgentConfig,
-        )
+        # Delegate to the update path's validator instead of indexing the dict.
+        #
+        # The hand-rolled version had two defects, both surfacing as 500:
+        #   1. ``config_data['master_agent_id']`` / ``['orchestration_mode']``
+        #      raised a bare ``KeyError``, which ``create_app`` wraps into
+        #      ``INTERNAL_ERROR`` — a missing field read as a server crash.
+        #   2. The master agent was resolved against ``AgentConfig``, but
+        #      ``multi_agent_configs.master_agent_id`` FKs ``app_releases.id``
+        #      (a master agent is referenced by its published release). A valid
+        #      release id was reported as missing, and an ``agent_configs.id``
+        #      reached the database and came back as ``ForeignKeyViolation``.
+        # ``check_config_data`` already implements every rule (model gate,
+        # sub-agent workspace + release resolution, supervisor tools), so create
+        # and update now answer identically for the same input.
+        from pydantic import ValidationError
 
-        # Convert sub_agents
-        sub_agents = [SubAgentConfig(**sa) for sa in config_data.get('sub_agents', [])]
+        from ..schemas.multi_agent_schema import ExecutionConfig, MultiAgentConfigUpdate
+        from .multi_agent_service import MultiAgentService
 
-        # Convert routing_rules (if any)
-        routing_rules = None
-        if config_data.get('routing_rules'):
-            routing_rules = [RoutingRule(**rr) for rr in config_data['routing_rules']]
+        if not isinstance(config_data, dict):
+            raise BusinessException(
+                "multi_agent_config 必须是对象", BizCode.INVALID_PARAMETER
+            )
 
-        # Convert execution_config
-        execution_config = ExecutionConfig(**config_data.get('execution_config', {}))
+        try:
+            payload = MultiAgentConfigUpdate(**config_data)
+        except ValidationError as error:
+            details = "; ".join(
+                f"{'.'.join(str(part) for part in item['loc'])}: {item['msg']}"
+                for item in error.errors()
+            )
+            raise BusinessException(
+                f"multi_agent_config 参数非法: {details}",
+                BizCode.INVALID_PARAMETER,
+            ) from error
 
-        # Build the MultiAgentConfigCreate object
-        config = MultiAgentConfigCreate(
-            master_agent_id=config_data['master_agent_id'],
-            orchestration_mode=config_data['orchestration_mode'],
-            sub_agents=sub_agents,
-            routing_rules=routing_rules,
-            execution_config=execution_config,
-            aggregation_strategy=config_data.get('aggregation_strategy', 'merge')
-        )
-
-        # Verify the master agent exists
-        master_agent = self.db.get(AgentConfig, config.master_agent_id)
-        if not master_agent:
-            raise ResourceNotFoundException("主 Agent", str(config.master_agent_id))
-
-        # Verify each sub-agent exists
-        for sub_agent in config.sub_agents:
-            agent = self.db.get(AgentConfig, sub_agent.agent_id)
-            if not agent:
-                raise ResourceNotFoundException("子 Agent", str(sub_agent.agent_id))
-
-        # Create the multi-agent config
-        # Convert UUIDs to strings for JSON serialization
-        sub_agents_data = []
-        for sub_agent in config.sub_agents:
-            sa_dict = sub_agent.model_dump()
-            sa_dict['agent_id'] = str(sa_dict['agent_id'])  # UUID -> str
-            sub_agents_data.append(sa_dict)
-
-        routing_rules_data = None
-        if config.routing_rules:
-            routing_rules_data = []
-            for rule in config.routing_rules:
-                rule_dict = rule.model_dump()
-                rule_dict['target_agent_id'] = str(rule_dict['target_agent_id'])  # UUID -> str
-                routing_rules_data.append(rule_dict)
-
-        multi_agent_cfg = MultiAgentConfig(
-            id=uuid.uuid4(),
-            app_id=app_id,
-            master_agent_id=config.master_agent_id,
-            orchestration_mode=config.orchestration_mode,
-            sub_agents=sub_agents_data,
-            routing_rules=routing_rules_data,
-            execution_config=config.execution_config.model_dump(),
-            aggregation_strategy=config.aggregation_strategy,
-            is_active=True,
-            created_at=now,
-            updated_at=now,
-        )
-        self.db.add(multi_agent_cfg)
+        config = MultiAgentService(self.db).check_config_data(app_id, payload)
+        # The validator builds the row but leaves the create-only columns to the
+        # caller: `sub_agents` is NOT NULL (update treats None as "keep"), and an
+        # omitted `execution_config` must keep the schema defaults rather than an
+        # empty dict.
+        config.id = uuid.uuid4()
+        if config.sub_agents is None:
+            config.sub_agents = []
+        if not config.execution_config:
+            config.execution_config = ExecutionConfig().model_dump()
+        config.is_active = True
+        config.created_at = now
+        config.updated_at = now
+        self.db.add(config)
         logger.debug(
             "多 Agent 配置已创建",
             extra={"app_id": str(app_id), "mode": config.orchestration_mode},
@@ -986,6 +991,14 @@ class AppService:
         except BusinessException:
             # Keep original business codes for validation errors (e.g. ontology
             # not found 4000 / cross-tenant 3001); do not wrap them as 10001
+            self.db.rollback()
+            raise
+        except HTTPException:
+            # The i18n validation errors (``SubAgentValidationError`` and friends)
+            # are HTTPException subclasses carrying their own 400 + 1003 envelope
+            # plus the per-member detail. Letting them fall into the generic
+            # branch below turned an unusable sub-agent into 500 / INTERNAL_ERROR
+            # and hid every name the user needed to fix.
             self.db.rollback()
             raise
         except Exception as e:
@@ -2660,25 +2673,38 @@ class AppService:
 
         return self.release_schemas([release])[0]
 
-    def release_schemas(self, releases: list[AppRelease]) -> list[app_schema.AppRelease]:
+    def release_schemas(
+            self, releases: list[AppRelease], *, include_config: bool = True
+    ) -> list[app_schema.AppRelease]:
         """Serialize releases with the host publisher-name fallback chain.
 
         The host reads ``release.publisher.username or email or "未知用户"``
         through the lazy relationship; the service-side model omits that
         relationship, so the publishers are batch-loaded up front and the same
         fallback applies for missing rows (deleted users).
+
+        ``include_config=False`` drops the frozen config snapshot from each row
+        (``{}``, not ``None`` — the field is a dict on the wire). A cluster or
+        workflow snapshot reaches megabytes, so the version list stays usable
+        for callers that only need version metadata.
         """
 
         names = cross_domain_read.get_user_display_names_by_ids(
             self.db, {r.published_by for r in releases if r.published_by}
         )
         return [
-            self._release_to_schema(r, names.get(r.published_by) or "未知用户")
+            self._release_to_schema(
+                r, names.get(r.published_by) or "未知用户", include_config=include_config
+            )
             for r in releases
         ]
 
     def _release_to_schema(
-            self, release: AppRelease, publisher_name: str
+            self,
+            release: AppRelease,
+            publisher_name: str,
+            *,
+            include_config: bool = True,
     ) -> app_schema.AppRelease:
         return app_schema.AppRelease(
             id=release.id,
@@ -2692,7 +2718,7 @@ class AppService:
             name=release.name,
             type=release.type,
             visibility=release.visibility,
-            config=release.config,
+            config=release.config if include_config else {},
             usage_examples=_expand_usage_examples(release.usage_examples),
             setup_steps=release.setup_steps,
             categories=list(release.categories or []),
