@@ -9,10 +9,10 @@ class RAGTag(BaseModel):
 
 
 class RAGProfile(BaseModel):
-    summary: str = Field(min_length=1)
+    summary: str
     tags: list[RAGTag]
     personas: list[str]
-    memory_insight: str = Field(min_length=1)
+    memory_insight: str
     behavior_pattern: str
     key_findings: str
     growth_trajectory: str

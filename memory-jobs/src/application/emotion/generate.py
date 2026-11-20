@@ -73,9 +73,12 @@ class GenerateEmotionSuggestionsUseCase:
             logger.warning(
                 "emotion suggestion generation failed; using legacy fallback", exc_info=True
             )
+            data = None
+        if data is None or len(data["suggestions"]) < 3:
             data = EmotionSuggestions.model_validate(
                 analysis.default_suggestions(health, language)
             ).model_dump(mode="json")
+        data["suggestions"] = data["suggestions"][:5]
         with self.uow.transaction() as repos:
             repos.emotion_suggestions.save(context, data)
         return EmotionSuggestionsResult(data)

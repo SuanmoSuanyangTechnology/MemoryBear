@@ -2,20 +2,27 @@
 
 from __future__ import annotations
 
-from datetime import date
+import logging
+from datetime import UTC, date, datetime, time, timedelta
 from uuid import UUID
+from zoneinfo import ZoneInfo
 
 from src.common.errors import BizCode, ProfileError
-from src.common.normalization import resolve_timezone
+from src.common.normalization import as_utc_naive, resolve_timezone
 from src.repositories.emotion_analytics import EmotionRepository
+from src.repositories.emotion_backfill_mutation import EmotionBackfillMutationRepository
 from src.runtime import ProfileRuntime
 from src.services.emotion_calculations import EmotionCalculations
 from src.services.end_user import EndUserService
+
+logger = logging.getLogger(__name__)
 
 
 class EmotionAnalyticsService:
     def __init__(self, runtime: ProfileRuntime) -> None:
         self.repo = EmotionRepository(runtime.postgres, runtime.neo4j)
+        self.backfill = EmotionBackfillMutationRepository(runtime.postgres, runtime.neo4j)
+        self.redis = runtime.redis
         self.calc = EmotionCalculations(self.repo)
         self.users = EndUserService.from_postgres(runtime.postgres)
 
@@ -54,6 +61,24 @@ class EmotionAnalyticsService:
         uid = await self.authorize(workspace_id, value)
         return await self.repo.suggestions(uid)
 
+    async def _backfill_for_timezone(self, user_id: UUID, timezone: str) -> None:
+        try:
+            local_now = datetime.now(UTC).astimezone(ZoneInfo(timezone))
+            offset = local_now.utcoffset()
+            if offset is not None and offset >= timedelta(hours=8):
+                return
+            local_midnight = datetime.combine(local_now.date(), time.min, local_now.tzinfo)
+            end = as_utc_naive(local_midnight)
+            start = await self.backfill.latest_created_at(user_id)
+            if start is None or start >= end:
+                return
+            redis = await self.redis.client()
+            # Share the deduplication key with the original API during rollout.
+            if await redis.set(f"emotion_stats:backfill:{user_id}", "1", nx=True, ex=60):
+                await self.backfill.backfill(user_id, start, end)
+        except Exception:
+            logger.warning("Realtime emotion backfill failed for user %s", user_id, exc_info=True)
+
     async def daily(
         self,
         workspace_id: UUID,
@@ -85,6 +110,7 @@ class EmotionAnalyticsService:
             ) from exc
         if start and end and start > end:
             raise ProfileError(BizCode.INVALID_PARAMETER, "start_date 不能晚于 end_date")
+        await self._backfill_for_timezone(user_id, timezone)
         rows, total = await self.repo.daily(
             user_id,
             timezone,

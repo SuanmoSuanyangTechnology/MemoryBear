@@ -74,16 +74,6 @@ class ProfileSettings(BaseSettings):
         validation_alias="ACL_RULES_CHANGED_CHANNEL",
     )
 
-    memory_read_backend: Literal["ELASTIC", "NEO4J"] = Field(
-        "ELASTIC", validation_alias="MEMORY_READ_BACKEND"
-    )
-
-    @field_validator("memory_read_backend", mode="before")
-    @classmethod
-    def normalize_read_backend(cls, value: str) -> str:
-        normalized = value.strip().upper()
-        return "ELASTIC" if normalized == "ELASTICSEARCH" else normalized
-
     # 生成类用例（memory insight / user summary / interest distribution）走模型服务
     # invoke 接缝；凭据、渠道选路与 failover 都在模型服务侧（与 api 同口径）。
     model_service_base_url: str = Field(
@@ -255,7 +245,16 @@ class ProfileSettings(BaseSettings):
     )
     #: Which backend serves graph reads (``ELASTIC`` / ``NEO4J``); the ported
     #: storage ``BackendFactory`` matches this value directly, like the host.
-    memory_read_backend: str = Field("ELASTIC", validation_alias="MEMORY_READ_BACKEND")
+    memory_read_backend: Literal["ELASTIC", "NEO4J"] = Field(
+        "ELASTIC", validation_alias="MEMORY_READ_BACKEND"
+    )
+
+    @field_validator("memory_read_backend", mode="before")
+    @classmethod
+    def normalize_read_backend(cls, value: str) -> str:
+        normalized = value.strip().upper()
+        return "ELASTIC" if normalized == "ELASTICSEARCH" else normalized
+
     #: Allow the Elasticsearch index ensure step to rebuild a *newer* index from an
     #: older definition (host ``ES_ALLOW_DOWNGRADE``); off by default.
     es_allow_downgrade: bool = Field(False, validation_alias="ES_ALLOW_DOWNGRADE")

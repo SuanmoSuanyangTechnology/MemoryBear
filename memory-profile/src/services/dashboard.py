@@ -85,12 +85,27 @@ class DashboardService:
         rows, total = await self.repo.end_users(
             context.workspace_id, page, pagesize, keyword, label, rag_counts
         )
-        config = await self.repo.workspace_config(context.workspace_id)
+        pagination = {
+            "page": page,
+            "pagesize": pagesize,
+            "total": total,
+            "hasnext": page * pagesize < total,
+        }
+        if not rows:
+            return {"items": [], "page": pagination}
+        try:
+            config = await self.repo.workspace_config(context.workspace_id)
+        except Exception:
+            logger.warning("Dashboard memory config lookup failed", exc_info=True)
+            config = {"memory_config_id": None, "memory_config_name": None}
         limits = await self.quota.effective_limits(context.tenant_id)
         ids = [str(row["id"]) for row in rows]
         active = {}
-        if ids and not is_rag:
-            active = await self.repo.active_counts(self.neo4j, ids)
+        if not is_rag:
+            try:
+                active = await self.repo.active_counts(self.neo4j, ids)
+            except Exception:
+                logger.warning("Dashboard active memory count lookup failed", exc_info=True)
         items = []
         for row in rows:
             uid = str(row["id"])
@@ -128,15 +143,7 @@ class DashboardService:
                     "memory_config": config,
                 }
             )
-        return {
-            "items": items,
-            "page": {
-                "page": page,
-                "pagesize": pagesize,
-                "total": total,
-                "hasnext": page * pagesize < total,
-            },
-        }
+        return {"items": items, "page": pagination}
 
     async def counts(self, context: MemoryPrincipal, ids: list[str] | None = None):
         workspace = await self._workspace(context)

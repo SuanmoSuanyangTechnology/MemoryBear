@@ -20,7 +20,7 @@ from src.storage.provider.elasticsearch.index.definitions import (
     get_index_name,
     validate_definition_registry,
 )
-from .migration_lock import (
+from src.storage.provider.elasticsearch.index.migration_lock import (
     AsyncRedisClient,
     RedisMigrationLease,
 )

@@ -62,28 +62,40 @@ class TriggerForgettingUseCase:
         successful = []
         failed = 0
         for pair in unique:
-            text = f"{pair['entity_name']}: {pair.get('statement_text') or ''}"
+            statement = pair.get("statement_text") or ""
+            text = f"[{pair.get('entity_type')}]{pair['entity_name']}: {statement}"
+            if len(text) > 200:
+                text = f"{text[:197]}..."
             summary = {"content": text, "title": "未命名", "episodic_type": "conversation"}
             if context["enable_llm_summary"]:
-                if model is None:
-                    model = model_for_context(self.models, context)
-                prompt = self.prompts.forgetting_summary(pair=pair)
-                summary = structured_data(
-                    model.call_structured([{"role": "user", "content": prompt}], FusionSummary),
-                    FusionSummary,
-                )
-            # Infrastructure/commit uncertainty must fail the task, not become a
-            # successful report that would hide reconciliation work.
+                try:
+                    if model is None:
+                        model = model_for_context(self.models, context)
+                    prompt = self.prompts.forgetting_summary(pair=pair)
+                    summary = structured_data(
+                        model.call_structured([{"role": "user", "content": prompt}], FusionSummary),
+                        FusionSummary,
+                    )
+                except Exception:
+                    logger.warning("forgetting summary failed; using simple summary", exc_info=True)
             with self.uow.read() as repos:
                 repos.task_context.check(context)
-            if self.sources.merge_pair(context, pair, summary, command.attempt_token):
+            try:
+                merged = self.sources.merge_pair(context, pair, summary, command.attempt_token)
+            except Exception:
+                logger.exception("forgetting pair fusion failed")
+                merged = False
+            if not merged:
+                failed += 1
+                continue
+            successful.append(pair)
+            try:
                 with self.uow.transaction() as repos:
                     repos.forgetting.record_pair(
                         context, pair, command.attempt_token, start_time.isoformat()
                     )
-                successful.append(pair)
-            else:
-                failed += 1
+            except Exception:
+                logger.exception("forgetting pair audit failed; continuing with graph result")
         after = self.sources.knowledge_count(uid)
         now = datetime.now(UTC)
         before = nodes_before
@@ -99,8 +111,13 @@ class TriggerForgettingUseCase:
             "failed_count": failed,
             "success_rate": count / (count + failed) if count + failed else 1.0,
         }
-        context["active_count_after"] = self.sources.active_count(uid)
-        context.update(self.sources.activation_stats(uid, context["forgetting_threshold"]))
-        with self.uow.transaction() as repos:
-            repos.forgetting.finish_forgetting(context, report, successful, command.attempt_token)
+        try:
+            context["active_count_after"] = self.sources.active_count(uid)
+            context.update(self.sources.activation_stats(uid, context["forgetting_threshold"]))
+            with self.uow.transaction() as repos:
+                repos.forgetting.finish_forgetting(
+                    context, report, successful, command.attempt_token
+                )
+        except Exception:
+            logger.exception("forgetting history or memory count update failed")
         return ForgettingResult(report)

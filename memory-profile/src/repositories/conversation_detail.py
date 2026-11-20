@@ -5,7 +5,7 @@ from uuid import UUID
 from sqlalchemy import select
 
 from src.models.references import Conversation, EndUser, Workspace
-from src.models.references.conversation_detail_model import ConversationDetail
+from src.models.references.memory_statistics_model import ConversationDetail
 
 
 class ConversationDetailRepository:
