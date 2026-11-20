@@ -80,13 +80,20 @@ const WordCloudCard: FC = () => {
       count: item.count,
       percentage: item.percentage
     }))
+
+    // Dynamic outer-ring max: highest percentage + ~10% headroom,
+    // rounded up to a multiple of 10, capped at 100.
+    // e.g. 24.8% -> 30, 50% -> 60, 95% -> 100.
+    const maxPercentage = Math.max(...radarData.map(item => item.percentage))
+    const outerMax = Math.min(Math.ceil((maxPercentage * 1.1) / 10) * 10, 100)
+    const customValues = [1, 2, 3, 4, 5].map((step) => Math.round((outerMax / 5) * step))
     
     return {
       color: ['#155EEF'],
       radar: {
         indicator: radarData.map(item => ({
           name: t(`statementDetail.${item.name}`),
-          max: 100,
+          max: outerMax,
           min: 1,
           color: '#5B6167',
           axisLine: {
@@ -101,7 +108,7 @@ const WordCloudCard: FC = () => {
             show: true,
             color: '#A8A9AA',
             fontSize: 10,
-            customValues: [20, 40, 60, 80, 100],
+            customValues,
             align: 'center',
             margin: 0,
           }
