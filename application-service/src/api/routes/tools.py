@@ -14,7 +14,8 @@ import uuid
 from typing import Annotated
 
 import anyio.from_thread
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi.exceptions import RequestValidationError
 from sqlalchemy.orm import Session
 
 from ...errors import BizCode, BusinessException
@@ -30,7 +31,7 @@ from ...schemas.tool_schema import (
     ToolUpdateRequest,
 )
 from ...services.tool_service import ToolService
-from ..dependencies import Principal, get_principal, get_runtime, get_sync_db
+from ..dependencies import API_KEY_ID_HEADER, Principal, get_principal, get_runtime, get_sync_db
 from ..schemas.common import success
 from ..schemas.response_schema import ApiResponse
 
@@ -62,6 +63,20 @@ def list_tools(
         include_external_status: bool = Query(False),
 ):
     """List tools"""
+    # An unknown enum value is a caller error, not a server fault. Building the
+    # enum lazily inside the ``try`` below turned it into ``INTERNAL_ERROR``
+    # (500), which tells an integration that the tool registry is broken.
+    invalid = [
+        {"loc": ("query", field), "msg": f"非法取值: {value}", "type": "enum"}
+        for field, value, enum in (
+            ("tool_type", tool_type, ToolType),
+            ("status", status, ToolStatus),
+        )
+        if value and value not in {member.value for member in enum}
+    ]
+    if invalid:
+        raise RequestValidationError(invalid)
+
     try:
         service = ToolService(db)
         # Make sure the builtin tools are initialized
@@ -150,8 +165,34 @@ def get_tool(
 
 
 @router.post("", summary="创建工具", response_model=ApiResponse)
-def create_tool(request: ToolCreateRequest, db: DbSession, principal: Caller):
-    """Create a tool"""
+def create_tool(
+    request: ToolCreateRequest,
+    http_request: Request,
+    db: DbSession,
+    principal: Caller,
+):
+    """Create a tool.
+
+    On the ``/v1`` face (gateway-injected ``X-Api-Key-ID``) only ``mcp`` is
+    accepted. A ``custom`` tool carries a caller-supplied ``server_url`` that the
+    service fetches at creation time, and ``/v1/skills/packages/import`` already
+    had to be allow-listed for the same reason — the API-key face must not turn
+    an integration credential into an arbitrary outbound request. ``builtin`` is
+    rejected by the service for everyone, and ``workflow`` tools only come out of
+    a workflow publish, so neither needs a v1 branch here.
+
+    The JWT face is untouched: the console still creates custom tools.
+    """
+    # Outside the try: that block rewrites every ``BusinessException`` into the
+    # legacy ``BAD_REQUEST`` shape and drops ``data``, which would erase the
+    # ``reason`` below. This one rejection must keep its own code and payload.
+    if http_request.headers.get(API_KEY_ID_HEADER) and request.tool_type != ToolType.MCP:
+        raise BusinessException(
+            "API Key 只允许创建 MCP 类型工具",
+            BizCode.INVALID_PARAMETER,
+            data={"reason": "TOOL_TYPE_NOT_OPEN", "tool_type": request.tool_type.value},
+        )
+
     try:
         # Merge the MCP source fields into config
         if request.tool_type == ToolType.MCP:

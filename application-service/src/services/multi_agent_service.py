@@ -280,6 +280,11 @@ class MultiAgentService:
         return {
             "id": config.id,
             "app_id": config.app_id,
+            # The master agent is stored as a release id and validated on write;
+            # echoing it back keeps create → read verifiable (the PUT response
+            # already carries it through MultiAgentConfigSchema).
+            "master_agent_id": config.master_agent_id,
+            "master_agent_name": config.master_agent_name,
             "default_model_config_id": config.default_model_config_id,
             "model_parameters": config.model_parameters,
             "orchestration_mode": config.orchestration_mode,
@@ -323,6 +328,28 @@ class MultiAgentService:
                     self.db,
                     data.default_model_config_id,
                     tenant_id=tenant_id,
+                )
+
+        # 2b. Validate the master agent when provided.
+        #
+        # `multi_agent_configs.master_agent_id` FKs `app_releases.id` (the master
+        # is referenced by its published release, not by `agent_configs.id`).
+        # Without this check an unknown id reached the INSERT and surfaced as
+        # `ForeignKeyViolation` → 500 / INTERNAL_ERROR on both the create and the
+        # update path. Validation lives here so both paths answer identically.
+        if data.master_agent_id is not None:
+            master_release = self.db.get(AppRelease, data.master_agent_id)
+            if master_release is None:
+                raise BusinessException(
+                    f"主 Agent 不存在：{data.master_agent_id}（该字段要填主 Agent 的"
+                    f"发布版本 ID，不是应用 ID 或配置 ID）",
+                    BizCode.INVALID_PARAMETER,
+                )
+            master_app = self.db.get(App, master_release.app_id)
+            if master_app is None or master_app.workspace_id != app.workspace_id:
+                raise BusinessException(
+                    f"主 Agent 不属于本空间：{data.master_agent_id}",
+                    BizCode.INVALID_PARAMETER,
                 )
 
         # 3. Validate sub-agents exist and resolve their release IDs
@@ -375,6 +402,17 @@ class MultiAgentService:
         # routing_rules_data = [
         #     convert_uuids_to_str(rule.model_dump()) for rule in data.routing_rules
         # ] if data.routing_rules else None
+        # Was left commented out, which meant the field was accepted and then
+        # silently dropped: GET always answered null, and the publish snapshot
+        # carried it through as null too. Persist it like every other field.
+        routing_rules_data = (
+            [
+                convert_uuids_to_str(rule.model_dump())
+                for rule in data.routing_rules
+            ]
+            if data.routing_rules
+            else None
+        )
 
         # Handle execution_config (may be None, a dict, or a Pydantic model)
         if data.execution_config is None:
@@ -421,7 +459,7 @@ class MultiAgentService:
             model_parameters=model_parameters_data,
             orchestration_mode=data.orchestration_mode,
             sub_agents=sub_agents_data,
-            # routing_rules=routing_rules_data,
+            routing_rules=routing_rules_data,
             execution_config=execution_config_data,
             supervisor_config=supervisor_config_data,
             aggregation_strategy=data.aggregation_strategy
@@ -472,6 +510,13 @@ class MultiAgentService:
 
         # Fully replace the config; for DB NOT NULL columns, keep the old value
         # when the new value is None
+        #
+        # ``master_agent_id`` is validated by ``check_config_data`` but the row is
+        # NOT NULL-safe on its own (column is nullable), so it must be copied
+        # explicitly. Omitting these two lines made a PUT that only changed the
+        # master agent return 200 without persisting anything.
+        config.master_agent_id = new_config.master_agent_id
+        config.master_agent_name = new_config.master_agent_name
         config.default_model_config_id = new_config.default_model_config_id
         config.model_parameters = new_config.model_parameters
         config.orchestration_mode = new_config.orchestration_mode or config.orchestration_mode
@@ -1612,3 +1657,33 @@ class MultiAgentService:
             "version": new_version,
             "conversation_id": str(conversation_id),
         })
+def default_multi_agent_config(app_id: uuid.UUID) -> dict[str, Any]:
+    """The cluster default template, returned when no config row exists yet.
+
+    Kept here rather than in a route module because two faces read it (the JWT
+    ``GET /apps/{id}/multi-agent`` and the v1 ``GET /apps/{id}/app-config``);
+    copying it into both would let the templates drift apart silently.
+    """
+
+    return {
+        "app_id": str(app_id),
+        "default_model_config_id": None,
+        "model_parameters": None,
+        "orchestration_mode": "supervisor_loop",
+        "sub_agents": [],
+        "routing_rules": [],
+        "execution_config": {
+            # Aligned with the ExecutionConfig schema defaults. The advanced guard
+            # options (timeout / stream_idle_timeout / parallel_limit /
+            # retry_on_failure / max_retries) have no frontend entry point and
+            # take effect via the backend schema defaults instead
+            "max_iterations": 10
+        },
+        # The supervisor is an Agent: default is the bare supervisor
+        # (None = hardcoded prompt + SubAgentTool only)
+        "supervisor_config": None,
+        # No cluster variables declared by default (None = runtime falls back
+        # to the union of sub-agent variables)
+        "variables": None,
+        "aggregation_strategy": "merge",
+    }

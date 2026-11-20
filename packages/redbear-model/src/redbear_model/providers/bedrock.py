@@ -2,9 +2,17 @@
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
-from redbear_model.contracts import ModelFeature, ResolvedModelConfig
+from redbear_model.contracts import (
+    EmbeddingContent,
+    EmbeddingPurpose,
+    ImageEmbeddingContent,
+    ModelFeature,
+    ModelProvider,
+    ResolvedModelConfig,
+)
 from redbear_model.errors import ProviderDependencyMissingError
 
 BEDROCK_MODEL_MAPPING = {
@@ -173,3 +181,107 @@ def load_bedrock_embedding_class():
     except ModuleNotFoundError as exc:
         raise ProviderDependencyMissingError("bedrock", "bedrock") from exc
     return BedrockEmbeddings
+
+
+def is_bedrock_nova_embedding(config: ResolvedModelConfig) -> bool:
+    return (
+        config.provider is ModelProvider.BEDROCK
+        and normalize_bedrock_model_id(config.model_name)
+        == "amazon.nova-2-multimodal-embeddings-v1:0"
+    )
+
+
+def embed_bedrock_nova(
+    client: Any, model_name: str, content: EmbeddingContent, purpose: EmbeddingPurpose
+) -> list[float]:
+    params: dict[str, Any] = {
+        "embeddingPurpose": (
+            "GENERIC_INDEX" if purpose is EmbeddingPurpose.INDEX else "GENERIC_RETRIEVAL"
+        ),
+    }
+    if isinstance(content, ImageEmbeddingContent):
+        media_format = content.media_type.split("/", 1)[1]
+        if media_format not in {"jpeg", "png", "webp"}:
+            raise ValueError("Nova embedding images must be JPEG, PNG, or WebP")
+        params["image"] = {
+            "format": media_format,
+            "source": {"bytes": content.data_uri.split(",", 1)[1]},
+        }
+    else:
+        params["text"] = {"value": content.text, "truncationMode": "END"}
+
+    response = client.invoke_model(
+        modelId=normalize_bedrock_model_id(model_name),
+        contentType="application/json",
+        accept="application/json",
+        body=json.dumps({"taskType": "SINGLE_EMBEDDING", "singleEmbeddingParams": params}),
+    )
+    with response["body"] as body:
+        embeddings = json.load(body)["embeddings"]
+    if len(embeddings) != 1 or not embeddings[0]["embedding"]:
+        raise RuntimeError("Nova embedding did not return a single non-empty vector")
+    return embeddings[0]["embedding"]
+
+
+def load_bedrock_rerank_class():
+    try:
+        from langchain_aws import BedrockRerank
+    except ModuleNotFoundError as exc:
+        raise ProviderDependencyMissingError("bedrock", "bedrock") from exc
+    return BedrockRerank
+
+
+def bedrock_rerank_model_arn(model_name: str, region: str) -> str:
+    """模型名 → Bedrock rerank 需要的 model ARN。
+
+    ``BedrockRerank`` 只接受 ``model_arn``（不是 ``model_id``），广场里存的却是
+    ``amazon.rerank-v1:0`` 这类模型标识，必须在这里拼成 foundation-model ARN。
+    用户直接填 ARN 时原样透传，不做二次拼接。
+
+    注意不传 region 给 ``normalize_bedrock_model_id``：那个函数的 region 参数是
+    跨区推理前缀（``us.anthropic...``）的语义，rerank 模型不吃这个前缀，带上会把
+    ``us-east-1.amazon.rerank-v1:0`` 这类非法标识塞进 ARN。
+    """
+    if model_name.startswith("arn:"):
+        return model_name
+    return (
+        f"arn:aws:bedrock:{region}::foundation-model/"
+        f"{normalize_bedrock_model_id(model_name)}"
+    )
+
+
+def build_bedrock_rerank_params(config: ResolvedModelConfig) -> dict[str, Any]:
+    """``BedrockRerank`` 构造参数（凭据/区域口径与 chat、embedding 一致）。
+
+    凭据必须包成 ``SecretStr``：``BedrockRerank`` 的 ``model_validator(mode="before")``
+    在字段校验**之前**就调用 ``create_aws_client``，那里直接对入参调
+    ``get_secret_value()``；传裸 ``str`` 会在构造期抛
+    ``'str' object has no attribute 'get_secret_value'``。
+    """
+    try:
+        from botocore.config import Config as BotoConfig
+    except ModuleNotFoundError as exc:
+        raise ProviderDependencyMissingError("bedrock", "bedrock") from exc
+
+    from pydantic import SecretStr
+
+    access_key, secret_key = _credentials(config)
+    region = config.base_url or "us-east-1"
+    params: dict[str, Any] = {
+        "model_arn": bedrock_rerank_model_arn(config.model_name, region),
+        "region_name": region,
+        "aws_access_key_id": SecretStr(access_key),
+        "config": BotoConfig(
+            max_pool_connections=config.runtime.bedrock_max_pool_connections,
+            retries={
+                "max_attempts": config.runtime.bedrock_max_retries,
+                "mode": "adaptive",
+            },
+        ),
+    }
+    if secret_key:
+        params["aws_secret_access_key"] = SecretStr(secret_key)
+    top_n = config.provider_params.get("top_n")
+    if isinstance(top_n, int) and top_n > 0:
+        params["top_n"] = top_n
+    return params

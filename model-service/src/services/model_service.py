@@ -42,6 +42,7 @@ from ..errors import BizCode, BusinessException
 from ..infrastructure.model_provider_config import (
     get_default_provider_api_base,
     is_local_deployment_provider,
+    require_provider_supports_model_type,
     validate_api_base_against_default,
 )
 from ..infrastructure.redis_cache import (
@@ -1003,11 +1004,16 @@ class ModelConfigService:
                 embedding = RedBearEmbeddings(shared_config)
                 test_texts = [test_message, "测试文本"]
 
-                # 火山引擎使用 embed_batch，其他使用 embed_documents
-                if provider_lower == "volcano":
-                    vectors = await asyncio.to_thread(embedding.embed_batch, test_texts)
-                else:
+                try:
                     vectors = await asyncio.to_thread(embedding.embed_documents, test_texts)
+                finally:
+                    await embedding.aclose()
+                if (
+                    len(vectors) != len(test_texts)
+                    or not vectors[0]
+                    or any(len(vector) != len(vectors[0]) for vector in vectors)
+                ):
+                    raise RuntimeError("Embedding response does not match the request")
 
                 elapsed_time = time.time() - start_time
 
@@ -1031,7 +1037,12 @@ class ModelConfigService:
                 rerank = RedBearRerank(shared_config)
                 query = test_message
                 documents = ["这是第一个文档", "这是第二个文档", "这是第三个文档"]
-                results = await asyncio.to_thread(rerank.rerank, query=query, documents=documents, top_n=3)
+                try:
+                    results = await asyncio.to_thread(
+                        rerank.rerank, query=query, documents=documents, top_n=3
+                    )
+                finally:
+                    await rerank.aclose()
                 elapsed_time = time.time() - start_time
 
                 return {
@@ -1288,6 +1299,9 @@ class ModelConfigService:
         _assert_plaza_entry_absent(
             db, name=model_data.name, provider=model_data.provider, model_type=model_data.type
         )
+        # Before any network probe: a combination with no runtime adapter can only
+        # fail, and letting it reach the probe surfaced "未知错误: 调用模型服务失败".
+        require_provider_supports_model_type(model_data.provider, model_data.type)
         if is_asr_model(model_data.type):
             snapshot, credential = ModelConfigService._prepare_asr_model(
                 db, model_data, tenant_id
@@ -1411,6 +1425,10 @@ class ModelConfigService:
             model_data.provider if "provider" in fields_set else existing_model.provider,
             normalize_type(model_data.type) if "type" in fields_set else existing_model.type,
         )
+        # provider × type 只在组合本身变化时校验：存量非法组合（如手建的 ollama
+        # rerank）改描述、改名称都不该被拦，否则这些行连改名都做不到。
+        if (new_triple[1], new_triple[2]) != (existing_model.provider, existing_model.type):
+            require_provider_supports_model_type(new_triple[1], new_triple[2])
         if new_triple != (existing_model.name, existing_model.provider, existing_model.type):
             _assert_plaza_entry_absent(
                 db,
@@ -1816,6 +1834,9 @@ class ModelBaseService:
         existing = ModelBaseRepository.get_by_name_and_provider(db, data.name, data.provider)
         if existing:
             raise BusinessException("模型已存在", BizCode.DUPLICATE_NAME)
+        # Same gate as the custom-model path: a plaza entry with no runtime adapter
+        # would be addable here and only fail later at invoke time.
+        require_provider_supports_model_type(data.provider, data.type)
         create_data = data.model_dump(
             exclude={"input_modalities", "output_modalities", "features"}
         )
@@ -1898,6 +1919,7 @@ class ModelBaseService:
         if ModelBaseRepository.check_added_by_tenant(db, model_base_id, tenant_id):
             raise BusinessException("模型已添加", BizCode.DUPLICATE_NAME)
 
+        require_provider_supports_model_type(model_base.provider, model_base.type)
         model_config_data = {
             "model_id": model_base_id,
             "tenant_id": tenant_id,
