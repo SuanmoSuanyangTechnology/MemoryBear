@@ -120,12 +120,10 @@ def get_app_config(
 
     service = AppService(db)
     app = service._get_app_or_404(app_id)
+    service._validate_app_accessible(app, workspace_id)
     _require_type(app, type)
 
     if type == AppType.MULTI_AGENT:
-        # Read access mirrors the JWT handler: shared (installed) apps are
-        # readable, so the check is the accessible variant, not the writable one.
-        service._validate_app_accessible(app, workspace_id)
         config = MultiAgentService(db).get_multi_agent_configs(app_id)
         if not config:
             return success(
@@ -164,11 +162,11 @@ def update_app_config(
 
     service = AppService(db)
     app = service._get_app_or_404(app_id)
+    service._validate_app_writable(app, workspace_id)
     _require_type(app, type)
 
     if type == AppType.MULTI_AGENT:
         data = MultiAgentConfigUpdate.model_validate(payload)
-        service._validate_app_writable(app, workspace_id)
         config = MultiAgentService(db).update_config(app_id, data)
         return success(
             data=MultiAgentConfigSchema.model_validate(config),
