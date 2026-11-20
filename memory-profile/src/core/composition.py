@@ -127,10 +127,12 @@ def _build_side_effects(runtime: ProfileRuntime) -> Any:
     return build_side_effects(runtime)
 
 
-def _build_alerts() -> Any:
+def _build_alerts(runtime: ProfileRuntime) -> Any:
     from src.core.adapters.read.alerts import build_alert_port
 
-    return build_alert_port()
+    # ``memory_enterprise`` is the enterprise switch: an empty base URL keeps
+    # the open build's log-only adapter.
+    return build_alert_port(getattr(runtime, "memory_enterprise", None))
 
 
 def build_memory_read_module(
@@ -160,7 +162,7 @@ def build_memory_read_module(
         runtime, prompts=prompts, models=models
     )
     side_effects = overrides.get("side_effects") or _build_side_effects(runtime)
-    alerts = overrides.get("alerts") or _build_alerts()
+    alerts = overrides.get("alerts") or _build_alerts(runtime)
     from src.core.adapters.read.degrade_cache import RedisDegradeCache
 
     degrade_cache = overrides.get("degrade_cache") or RedisDegradeCache(runtime.redis)

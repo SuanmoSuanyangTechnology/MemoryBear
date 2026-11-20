@@ -32,6 +32,12 @@ MEMORY_LIMITS_PATH = "/internal/v1/quota/tenants/{tenant_id}/memory-limits"
 METADATA_SCOPE_PATH = "/internal/v1/ontology/metadata-scope"
 
 
+#: Retrieval-failure alerts handed to the enterprise notification center. The
+#: enterprise service owns the Redis obligation and the Celery dispatch; this
+#: call is transport only.
+RETRIEVAL_ALERT_PATH = "/internal/v1/notifications/retrieval-alerts"
+
+
 class MemoryEnterpriseManager:
     """Lazily own the enterprise-service HTTP pool."""
 
@@ -131,3 +137,45 @@ class MemoryEnterpriseManager:
         payload = response.json()
         names = payload.get("names") if isinstance(payload, dict) else None
         return {str(key): str(value) for key, value in (names or {}).items()}
+
+    async def report_retrieval_alert(
+        self,
+        *,
+        tenant_id: str,
+        workspace_id: str,
+        end_user_id: str,
+        operation_id: str,
+        error_code: str,
+        stage: str,
+        impact: str,
+        model_type: str,
+    ) -> dict[str, Any]:
+        """Hand one degraded-retrieval alert to the enterprise service.
+
+        The enterprise service persists the notification obligation and
+        dispatches the API worker's emit task. Raises on a transport failure,
+        a business rejection (non-zero ``code``) or an unusable payload; the
+        caller treats the alert as not delivered.
+        """
+
+        response = await (await self.client()).post(
+            RETRIEVAL_ALERT_PATH,
+            json={
+                "tenant_id": tenant_id,
+                "workspace_id": workspace_id,
+                "end_user_id": end_user_id,
+                "operation_id": operation_id,
+                "error_code": error_code,
+                "stage": stage,
+                "impact": impact,
+                "model_type": model_type,
+            },
+        )
+        response.raise_for_status()
+        payload = response.json()
+        if not isinstance(payload, dict) or payload.get("code") != 0:
+            raise ValueError("memory-enterprise rejected the retrieval alert")
+        data = payload.get("data")
+        if not isinstance(data, dict):
+            raise ValueError("memory-enterprise returned an unexpected alert payload")
+        return data
