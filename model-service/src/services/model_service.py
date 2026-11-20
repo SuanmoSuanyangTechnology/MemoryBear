@@ -591,8 +591,8 @@ def _model_option_cache_state(model: ModelConfig) -> tuple[uuid.UUID | None, boo
     return model.tenant_id, public_speedbear
 
 
-def _invalidate_model_option_states(*states: tuple[uuid.UUID | None, bool]) -> None:
-    invalidate_workspace_model_options(
+def _invalidate_model_option_states(*states: tuple[uuid.UUID | None, bool]) -> bool:
+    return invalidate_workspace_model_options(
         (tenant_id for tenant_id, _ in states),
         public_catalog_changed=any(is_public for _, is_public in states),
     )
@@ -602,10 +602,10 @@ def _model_base_configs(db: Session, model_base_id: uuid.UUID) -> list[ModelConf
     return db.query(ModelConfig).filter(ModelConfig.model_id == model_base_id).all()
 
 
-def _invalidate_model_base_caches(configs: Sequence[ModelConfig]) -> None:
+def _invalidate_model_base_caches(configs: Sequence[ModelConfig]) -> bool:
     """基础模型弃用态变更后：清运行期模型缓存（按租户精确删）与工作空间模型选项缓存。"""
     if not configs:
-        return
+        return True
     config_ids = [config.id for config in configs]
     invalidate_runtime_model_info_batch(config_ids)
     by_tenant: dict[uuid.UUID, list[uuid.UUID]] = {}
@@ -614,7 +614,7 @@ def _invalidate_model_base_caches(configs: Sequence[ModelConfig]) -> None:
             by_tenant.setdefault(config.tenant_id, []).append(config.id)
     for tenant_id, ids in by_tenant.items():
         invalidate_runtime_model_info_batch(ids, tenant_id)
-    _invalidate_model_option_states(*[_model_option_cache_state(config) for config in configs])
+    return _invalidate_model_option_states(*[_model_option_cache_state(config) for config in configs])
 
 
 def _probe_availability(

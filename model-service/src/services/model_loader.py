@@ -74,7 +74,7 @@ def _sync_model(db: Session, data: dict) -> tuple[bool, UUID | None]:
         .where(ModelBase.name == data["name"], ModelBase.provider == data["provider"])
         .with_for_update()
     ).one()
-    if existing.is_official is False:
+    if existing.is_official is not True:
         return False, None
 
     changed_fields = {key: value for key, value in data.items() if getattr(existing, key) != value}
@@ -104,9 +104,9 @@ def load_models(db: Session, providers: list[str] | None = None, silent: bool = 
         silent: 是否静默模式（不输出详细日志）
 
     Returns:
-        dict: 加载结果统计 {"success": int, "skipped": int, "failed": int}
+        dict: 模型写入结果计数，以及缓存刷新是否失败。
     """
-    result = {"success": 0, "skipped": 0, "failed": 0}
+    result = {"success": 0, "skipped": 0, "failed": 0, "cache_refresh_failed": False}
     changed_base_ids: list[UUID] = []
 
     # 确定要加载的供应商
@@ -152,8 +152,9 @@ def load_models(db: Session, providers: list[str] | None = None, silent: bool = 
             configs = db.scalars(
                 select(ModelConfig).where(ModelConfig.model_id.in_(changed_base_ids))
             ).all()
-            _invalidate_model_base_caches(configs)
+            result["cache_refresh_failed"] = not _invalidate_model_base_caches(configs)
         except Exception:
+            result["cache_refresh_failed"] = True
             logger.exception("预置模型已同步，关联模型的缓存刷新失败")
 
     return result
