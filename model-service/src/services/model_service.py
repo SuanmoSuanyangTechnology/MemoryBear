@@ -530,6 +530,12 @@ def _require_wellformed_api_base(
     """
     provider_name = str(getattr(provider, "value", provider)).lower()
     if provider_name == ModelProvider.BEDROCK.value:
+        from redbear_model.providers.bedrock import resolve_bedrock_region
+
+        try:
+            resolve_bedrock_region(api_base)
+        except ValueError as exc:
+            raise BusinessException(str(exc), BizCode.INVALID_PARAMETER) from exc
         return
     if not (isinstance(api_base, str) and api_base.strip()):
         return

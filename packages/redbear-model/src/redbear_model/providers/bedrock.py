@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from typing import Any
 
 from redbear_model.contracts import (
@@ -81,6 +82,13 @@ def _credentials(config: ResolvedModelConfig) -> tuple[str, str | None]:
     return value, None
 
 
+def resolve_bedrock_region(value: str | None) -> str:
+    region = (value or "").strip() or "us-east-1"
+    if re.fullmatch(r"[a-z]{2,}(?:-[a-z]+)+-[0-9]+", region) is None:
+        raise ValueError("Bedrock API Base 必须填写 AWS 区域，例如 us-east-1")
+    return region
+
+
 def build_bedrock_params(config: ResolvedModelConfig) -> dict[str, Any]:
     try:
         from botocore.config import Config as BotoConfig
@@ -88,7 +96,7 @@ def build_bedrock_params(config: ResolvedModelConfig) -> dict[str, Any]:
         raise ProviderDependencyMissingError("bedrock", "bedrock") from exc
 
     access_key, secret_key = _credentials(config)
-    region = config.base_url or "us-east-1"
+    region = resolve_bedrock_region(config.base_url)
     config_only = {
         "deep_thinking",
         "thinking_budget_tokens",
@@ -203,9 +211,13 @@ def embed_bedrock_nova(
         media_format = content.media_type.split("/", 1)[1]
         if media_format not in {"jpeg", "png", "webp"}:
             raise ValueError("Nova embedding images must be JPEG, PNG, or WebP")
+        header = f"data:{content.media_type};base64,"
+        image_bytes = content.data_uri.removeprefix(header)
+        if image_bytes == content.data_uri or not image_bytes.strip():
+            raise ValueError("Nova embedding images require a matching base64 data URI")
         params["image"] = {
             "format": media_format,
-            "source": {"bytes": content.data_uri.split(",", 1)[1]},
+            "source": {"bytes": image_bytes},
         }
     else:
         params["text"] = {"value": content.text, "truncationMode": "END"}
@@ -217,10 +229,15 @@ def embed_bedrock_nova(
         body=json.dumps({"taskType": "SINGLE_EMBEDDING", "singleEmbeddingParams": params}),
     )
     with response["body"] as body:
-        embeddings = json.load(body)["embeddings"]
-    if len(embeddings) != 1 or not embeddings[0]["embedding"]:
+        payload = json.load(body)
+    embeddings = payload.get("embeddings") if isinstance(payload, dict) else None
+    if not isinstance(embeddings, list) or len(embeddings) != 1:
         raise RuntimeError("Nova embedding did not return a single non-empty vector")
-    return embeddings[0]["embedding"]
+    item = embeddings[0]
+    vector = item.get("embedding") if isinstance(item, dict) else None
+    if not isinstance(vector, list) or not vector:
+        raise RuntimeError("Nova embedding did not return a single non-empty vector")
+    return vector
 
 
 def load_bedrock_rerank_class():
@@ -266,7 +283,7 @@ def build_bedrock_rerank_params(config: ResolvedModelConfig) -> dict[str, Any]:
     from pydantic import SecretStr
 
     access_key, secret_key = _credentials(config)
-    region = config.base_url or "us-east-1"
+    region = resolve_bedrock_region(config.base_url)
     params: dict[str, Any] = {
         "model_arn": bedrock_rerank_model_arn(config.model_name, region),
         "region_name": region,

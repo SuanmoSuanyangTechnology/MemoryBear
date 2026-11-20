@@ -351,6 +351,11 @@ class MultiAgentService:
                     f"主 Agent 不属于本空间：{data.master_agent_id}",
                     BizCode.INVALID_PARAMETER,
                 )
+            if not master_release.is_active:
+                raise BusinessException(
+                    f"主 Agent 发布版本已停用：{data.master_agent_id}",
+                    BizCode.INVALID_PARAMETER,
+                )
 
         # 3. Validate sub-agents exist and resolve their release IDs
         # agent_id always stores the sub-agent's app ID (stable identity); the
