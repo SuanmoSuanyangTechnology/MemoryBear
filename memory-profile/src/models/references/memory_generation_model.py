@@ -5,8 +5,8 @@ reads them. The one write this service performs (the generated insight/summary
 text on ``end_users``) goes through ``EndUser`` in ``end_user_model``.
 """
 
-from sqlalchemy import ARRAY, Boolean, Column, DateTime, String
-from sqlalchemy.dialects.postgresql import JSONB, UUID
+from sqlalchemy import ARRAY, Boolean, Column, DateTime, String, text
+from sqlalchemy.dialects.postgresql import JSON, JSONB, UUID
 
 from src.models.base import ReadOnlyBase
 
@@ -31,15 +31,28 @@ class ModelConfig(ReadOnlyBase):
     tenant_id = Column(UUID(as_uuid=True), nullable=False)
     name = Column(String, nullable=False)
     type = Column(String, nullable=False)
+    provider = Column(String, nullable=False, comment="供应商", server_default="composite")
+    input_modalities = Column(ARRAY(String), default=list, nullable=False, server_default=text("'{}'::varchar[]"),
+                              comment="输入模态（如['text','image','audio','video']）")
+    output_modalities = Column(ARRAY(String), default=list, nullable=False, server_default=text("'{}'::varchar[]"),
+                               comment="输出模态（如['text','image','audio']）")
+    features = Column(ARRAY(String), default=list, nullable=False, server_default=text("'{}'::varchar[]"),
+                      comment="能力特征（如['thinking','json_output','function_call']）")
     is_active = Column(Boolean, nullable=False)
     is_public = Column(Boolean, nullable=False)
     model_id = Column(UUID(as_uuid=True), nullable=True)
-    provider = Column(String, nullable=True)
+    config = Column(JSON, nullable=True)
     capability = Column(ARRAY(String), nullable=True)
     is_omni = Column(Boolean, nullable=True)
-    input_modalities = Column(ARRAY(String), nullable=True)
-    output_modalities = Column(ARRAY(String), nullable=True)
-    features = Column(ARRAY(String), nullable=True)
+
+
+class ModelBase(ReadOnlyBase):
+    """API-owned base model identity and runtime deprecation flag."""
+
+    __tablename__ = "model_bases"
+
+    id = Column(UUID(as_uuid=True), primary_key=True)
+    is_deprecated = Column(Boolean, nullable=False)
 
 
 class EndUserInfo(ReadOnlyBase):

@@ -11,11 +11,8 @@ from typing import TYPE_CHECKING, Any
 from sqlalchemy import func, select
 
 from src.models.references.end_user_model import EndUser
-from src.models.references.memory_statistics_model import (
-    Conversation,
-    MemoryMessage,
-    ShortTermMemory,
-)
+from src.models.references.conversation_model import Conversation
+from src.models.references.memory_statistics_model import MemoryMessage, ShortTermMemory
 from src.repositories.graph import _ELIGIBLE_STATEMENTS
 from src.repositories.search import _INDEX_STATEMENT, _short_term_body, _validate_response
 

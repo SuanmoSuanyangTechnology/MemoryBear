@@ -11,13 +11,18 @@ FORBIDDEN_IMPORT_ROOTS = {"api", "app"}
 READ_ONLY_PG_REPOSITORIES = {
     SERVICE_ROOT / "src/repositories/display.py",
     SERVICE_ROOT / "src/repositories/perceptual.py",
-    SERVICE_ROOT / "src/repositories/implicit_memory.py",
     SERVICE_ROOT / "src/repositories/profile.py",
+    SERVICE_ROOT / "src/repositories/implicit_memory.py",
     SERVICE_ROOT / "src/repositories/end_user.py",
     SERVICE_ROOT / "src/repositories/memory_config.py",
     SERVICE_ROOT / "src/repositories/model_config.py",
     SERVICE_ROOT / "src/repositories/workspace.py",
     SERVICE_ROOT / "src/repositories/working_memory.py",
+}
+ALLOWED_REPOSITORY_WRITE_METHODS = {
+    SERVICE_ROOT / "src/repositories/implicit_memory.py": {
+        "ImplicitMemoryRepository.save_profile",
+    },
 }
 FORBIDDEN_SQL_BUILDERS = {"text", "insert", "update", "delete"}
 FORBIDDEN_SESSION_METHODS = {"add", "add_all", "commit", "delete", "flush", "merge"}
@@ -171,7 +176,20 @@ def check_read_only_repository(path: Path) -> list[str]:
 
     failures: list[str] = []
     tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    allowed_methods = ALLOWED_REPOSITORY_WRITE_METHODS.get(path, set())
+    allowed_nodes: set[ast.AST] = set()
+    for cls in tree.body:
+        if isinstance(cls, ast.ClassDef):
+            for method in cls.body:
+                if (
+                    isinstance(method, (ast.FunctionDef, ast.AsyncFunctionDef))
+                    and f"{cls.name}.{method.name}" in allowed_methods
+                ):
+                    for statement in method.body:
+                        allowed_nodes.update(ast.walk(statement))
     for node in ast.walk(tree):
+        if node in allowed_nodes:
+            continue
         if isinstance(node, ast.ImportFrom) and node.module == "sqlalchemy":
             forbidden = FORBIDDEN_SQL_BUILDERS.intersection(alias.name for alias in node.names)
             for name in sorted(forbidden):

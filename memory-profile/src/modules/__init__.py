@@ -14,6 +14,7 @@ from src.modules.memory_config import (
 )
 from src.modules.memory_config import router as memory_config_router
 from src.modules.memory_read import router as memory_read_router
+from src.modules.memory_storage import router as memory_storage_router
 from src.modules.perceptual import router as perceptual_router
 from src.modules.short import router as short_router
 from src.modules.value_ranking import router as value_ranking_router
@@ -21,6 +22,7 @@ from src.modules.working_memory import router as working_memory_router
 
 router = APIRouter(prefix="/internal/v1")
 router.include_router(health_router)
+router.include_router(memory_storage_router)
 router.include_router(analytics_router)
 router.include_router(memory_config_router)
 router.include_router(memory_read_router)
