@@ -34,7 +34,7 @@ class JobsRuntime:
         self.postgres = PostgresManager(self.settings)
         self.redis = RedisManager(self.settings)
         # API memory_write 锁固定使用 Celery backend DB，不是业务缓存 DB。
-        self.memory_write_redis = RedisManager(
+        self.result_backend_redis = RedisManager(
             self.settings, db=self.settings.redis_db_celery_backend,
         )
         self.elasticsearch = ElasticsearchManager(self.settings)
@@ -102,7 +102,7 @@ class JobsRuntime:
 
         self.postgres.reset_after_fork()
         self.redis.reset_after_fork()
-        self.memory_write_redis.reset_after_fork()
+        self.result_backend_redis.reset_after_fork()
         self.elasticsearch.reset_after_fork()
         self.neo4j.reset_after_fork()
         self.model_service.reset_after_fork()
@@ -112,7 +112,7 @@ class JobsRuntime:
         for name, manager in (
             ("postgres", self.postgres),
             ("redis", self.redis),
-            ("memory_write_redis", self.memory_write_redis),
+            ("result_backend_redis", self.result_backend_redis),
             ("elasticsearch", self.elasticsearch),
             ("neo4j", self.neo4j),
             ("model_service", self.model_service),

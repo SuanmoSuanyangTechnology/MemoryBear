@@ -64,7 +64,7 @@ def build_metadata_migration_wiring(
         uow=shared.unit_of_work,
         chat_models=shared.chat_models,
         prompts=shared.prompts,
-        lock=MetadataWriteLock(lambda: runtime.memory_write_redis.client()),
+        lock=MetadataWriteLock(lambda: runtime.result_backend_redis.client()),
         circuit_breaker=MetadataMigrationCircuitBreaker(
             lambda: runtime.redis.client(),
             ttl_seconds=shared.settings.metadata_migration_circuit_breaker_seconds,

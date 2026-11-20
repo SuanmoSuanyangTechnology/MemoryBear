@@ -306,11 +306,12 @@ beat_schedule_config = {
     #     "schedule": workspace_reflection_schedule,
     #     "args": (),
     # },
-    "regenerate-memory-cache": {
-        "task": "app.tasks.scan_refresh_insight_summary_cache",
-        "schedule": memory_cache_regeneration_schedule,
-        "args": (),
-    },
+    # 洞察/摘要缓存定时扫描由 memory-jobs 的 profile-cache-scan 接管。
+    # "regenerate-memory-cache": {
+    #     "task": "app.tasks.scan_refresh_insight_summary_cache",
+    #     "schedule": memory_cache_regeneration_schedule,
+    #     "args": (),
+    # },
     "refresh-user-tags": {
         "task": "app.tasks.scan_refresh_user_tags",
         "schedule": user_tag_refresh_schedule,
