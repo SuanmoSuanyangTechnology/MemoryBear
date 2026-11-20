@@ -3029,6 +3029,212 @@
         "status_code": 200
       }
     },
+    "GET /internal/v1/memory/value-ranking/permanent-memories": {
+      "endpoint": "list_permanent_memories",
+      "parameters": {
+        "query:end_user_id": {
+          "annotation": "str",
+          "constraints": [],
+          "default": null,
+          "in": "query",
+          "required": true
+        },
+        "query:page": {
+          "annotation": "int",
+          "constraints": [
+            "Ge(ge=1)"
+          ],
+          "default": 1,
+          "in": "query",
+          "required": false
+        },
+        "query:pagesize": {
+          "annotation": "int",
+          "constraints": [
+            "Ge(ge=1)",
+            "Le(le=100)"
+          ],
+          "default": 20,
+          "in": "query",
+          "required": false
+        }
+      },
+      "response": {
+        "declared": [],
+        "fields": {
+          "code": {
+            "annotation": "int",
+            "constraints": [],
+            "default": 0,
+            "required": false
+          },
+          "data": {
+            "annotation": "src.schemas.value_ranking.PermanentMemoryList",
+            "config": {
+              "extra": "forbid"
+            },
+            "constraints": [],
+            "default": null,
+            "fields": {
+              "items": {
+                "annotation": "list[src.schemas.value_ranking.PermanentMemoryItem]",
+                "constraints": [],
+                "default": null,
+                "fields": {
+                  "id": {
+                    "annotation": "str",
+                    "constraints": [],
+                    "default": null,
+                    "required": true
+                  },
+                  "label": {
+                    "annotation": "str",
+                    "constraints": [],
+                    "default": "Statement",
+                    "required": false
+                  },
+                  "properties": {
+                    "annotation": "src.schemas.value_ranking.PermanentMemoryProperties",
+                    "constraints": [],
+                    "default": null,
+                    "fields": {
+                      "created_at": {
+                        "annotation": "int | None",
+                        "constraints": [],
+                        "default": null,
+                        "required": false
+                      },
+                      "is_permanent": {
+                        "annotation": "bool",
+                        "constraints": [],
+                        "default": false,
+                        "required": false
+                      },
+                      "statement": {
+                        "annotation": "str",
+                        "constraints": [],
+                        "default": null,
+                        "required": true
+                      },
+                      "value_score": {
+                        "annotation": "float | None",
+                        "constraints": [],
+                        "default": null,
+                        "required": false
+                      }
+                    },
+                    "required": true
+                  }
+                },
+                "required": true
+              },
+              "page": {
+                "annotation": "src.common.pagination.PageMeta",
+                "config": {
+                  "extra": "forbid"
+                },
+                "constraints": [],
+                "default": null,
+                "fields": {
+                  "hasnext": {
+                    "annotation": "bool",
+                    "constraints": [],
+                    "default": null,
+                    "required": true
+                  },
+                  "page": {
+                    "annotation": "int",
+                    "constraints": [
+                      "Ge(ge=1)"
+                    ],
+                    "default": null,
+                    "required": true
+                  },
+                  "pagesize": {
+                    "annotation": "int",
+                    "constraints": [
+                      "Ge(ge=0)"
+                    ],
+                    "default": null,
+                    "required": true
+                  },
+                  "total": {
+                    "annotation": "int",
+                    "constraints": [
+                      "Ge(ge=0)"
+                    ],
+                    "default": null,
+                    "required": true
+                  }
+                },
+                "required": true
+              },
+              "quota": {
+                "annotation": "src.schemas.value_ranking.PermanentMemoryQuota",
+                "constraints": [],
+                "default": null,
+                "fields": {
+                  "permanent_limit": {
+                    "annotation": "int",
+                    "constraints": [
+                      "Ge(ge=0)"
+                    ],
+                    "default": null,
+                    "required": true
+                  },
+                  "remaining": {
+                    "annotation": "int",
+                    "constraints": [
+                      "Ge(ge=0)"
+                    ],
+                    "default": null,
+                    "required": true
+                  },
+                  "total_memory_limit": {
+                    "annotation": "int",
+                    "constraints": [
+                      "Gt(gt=0)"
+                    ],
+                    "default": null,
+                    "required": true
+                  },
+                  "used": {
+                    "annotation": "int",
+                    "constraints": [
+                      "Ge(ge=0)"
+                    ],
+                    "default": null,
+                    "required": true
+                  }
+                },
+                "required": true
+              }
+            },
+            "required": true
+          },
+          "error": {
+            "annotation": "str",
+            "constraints": [],
+            "default": "",
+            "required": false
+          },
+          "msg": {
+            "annotation": "str",
+            "constraints": [],
+            "default": "OK",
+            "required": false
+          },
+          "time": {
+            "annotation": "int",
+            "constraints": [],
+            "default": "<factory:now_ms#5bec5d10ddf5>",
+            "required": false
+          }
+        },
+        "model": "src.common.responses.ApiResponse[PermanentMemoryList]",
+        "status_code": 200
+      }
+    },
     "GET /internal/v1/memory/work/{end_user_id}/conversations": {
       "endpoint": "get_conversations",
       "parameters": {
