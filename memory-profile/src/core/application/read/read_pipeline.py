@@ -997,13 +997,15 @@ class ReadPipeline:
     ) -> None:
         if self._alerts is None:
             return
-        cfg = self.ctx.config
         try:
             await self._alerts.notify(
                 error,
                 operation_id=self._retrieval_operation_id,
-                tenant_id=str(getattr(cfg, "tenant_id", "") or ""),
-                workspace_id=str(getattr(cfg, "workspace_id", "") or ""),
+                # Identity lives on the context: ``config`` can be None (META
+                # reads), and the notification center requires a tenant for
+                # retrieval alerts.
+                tenant_id=str(self.ctx.tenant_id),
+                workspace_id=str(self.ctx.workspace_id),
                 end_user_id=str(self.ctx.end_user_id),
             )
         except Exception:
