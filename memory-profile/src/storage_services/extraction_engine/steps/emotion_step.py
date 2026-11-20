@@ -10,7 +10,7 @@ picks it up automatically when ``emotion_enabled`` is ``True``.
 import logging
 from typing import Any
 
-from src.models.emotion_models import EmotionExtraction
+from src.schemas.emotion_models import EmotionExtraction
 from src.common.prompt.prompt_utils import render_emotion_extraction_prompt
 
 from src.storage_services.extraction_engine.steps.base import ExtractionStep, StepContext

@@ -20,7 +20,7 @@ from datetime import datetime
 from src.emotion.emotion_buckets import normalize_emotion_type
 from src.common.datetime_utils import utcnow_naive
 from src.common.data.ontology import StatementType, TemporalInfo, RelevenceInfo
-from src.models.triplet_models import TripletExtractionResponse, Triplet
+from src.schemas.triplet_models import TripletExtractionResponse, Triplet
 
 
 class ConversationMessage(BaseModel):

@@ -17,7 +17,7 @@ import logging
 from typing import TYPE_CHECKING, List, NamedTuple, Optional, Tuple
 
 from src.storage_services.extraction_engine.data_preprocessing import SemanticPruner
-from src.models.config_models import PruningConfig
+from src.schemas.config_models import PruningConfig
 
 if TYPE_CHECKING:
     from src.schemas.memory_config import MemoryConfig
@@ -263,7 +263,7 @@ async def _call_llm_prune(
     Returns:
         PruneResult 命名元组
     """
-    from src.models.message_models import ConversationMessage
+    from src.schemas.message_models import ConversationMessage
 
     user_msg = ConversationMessage(role="user", msg=user_content)
     llm_user_msg = ConversationMessage(

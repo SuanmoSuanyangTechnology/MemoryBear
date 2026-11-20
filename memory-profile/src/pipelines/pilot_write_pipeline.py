@@ -18,7 +18,7 @@ from typing import TYPE_CHECKING, Any
 from src.storage_services.extraction_engine.extraction_pipeline_orchestrator import (
     NewExtractionOrchestrator,
 )
-from src.models.message_models import DialogData
+from src.schemas.message_models import DialogData
 from src.storage_services.extraction_engine.steps.dedup_step import (
     DedupResult,
     run_dedup,

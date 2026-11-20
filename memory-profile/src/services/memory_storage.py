@@ -14,7 +14,7 @@ from neo4j.time import DateTime as Neo4jDateTime
 
 from src.common.errors import BizCode, ProfileError
 from src.common.datetime_utils import parse_iso_to_utc_naive, to_timestamp_ms
-from src.models.event_category_models import EVENT_CATEGORY_NAMES, EVENT_CATEGORY_NAME_TO_ID
+from src.schemas.event_category_models import EVENT_CATEGORY_NAMES, EVENT_CATEGORY_NAME_TO_ID
 from src.emotion.emotion_buckets import emotion_valence
 from src.repositories.end_user import EndUserRepository
 from src.repositories.memory_storage import MemoryStorageRepository
@@ -36,7 +36,7 @@ from src.i18n import t
 from src.services.multimodal_service import MultimodalService
 from src.schemas.memory_storage import FileInput, FileType, ModelInfo, PilotRunInput, TransferMethod, TrialRunChatInput, WriteMessageItem
 from src.schemas.memory_config import ConfigurationError, MemoryConfig
-from src.models.message_models import DialogData
+from src.schemas.message_models import DialogData
 from src.bootstrap import get_settings
 
 logger = logging.getLogger(__name__)
@@ -1353,7 +1353,6 @@ class MemoryStorageService:
     ) -> tuple[bytes, str]:
         """校验本地附件归属并从配置的存储后端读取原始字节。"""
         import magic
-        from src.infrastructure.file_storage import FileStorageService
 
         metadata = await self.repository.metadata(
             file.upload_file_id, workspace_id=workspace_id, tenant_id=tenant_id
@@ -1365,7 +1364,7 @@ class MemoryStorageService:
         metadata_file_ext = metadata.file_ext
         metadata_file_name = metadata.file_name
 
-        content = await FileStorageService().download_file(file_key)
+        content = await self.runtime.attachment_storage.backend.download(file_key)
         if not content:
             raise ValueError("local attachment is empty")
 
@@ -1515,7 +1514,7 @@ class MemoryStorageService:
 
                 model_info = runtime
                 # 附件在进入试运行前已经完成输入校验，加载与格式化异常不在这里转换为 LLM 错误。
-                multimodal_service = MultimodalService(self.repository, model_info)
+                multimodal_service = MultimodalService(self.repository, model_info, attachment_storage=self.runtime.attachment_storage)
                 parts = await self._process_trial_run_files(
                     [ref["file"] for ref in refs],
                     multimodal_service,
@@ -1579,7 +1578,7 @@ class MemoryStorageService:
                 refs = attachment_groups[FileType.DOCUMENT]
                 documents: list[str] = []
                 # 文档字节在短会话关闭后下载和解析，避免长时间占用连接。
-                multimodal_service = MultimodalService(None, final_model_info)
+                multimodal_service = MultimodalService(None, final_model_info, attachment_storage=self.runtime.attachment_storage)
                 for ref in refs:
                     file = ref["file"]
                     if file.transfer_method == TransferMethod.LOCAL_FILE:
@@ -1753,7 +1752,7 @@ class MemoryStorageService:
                 if view is None:
                     return None
                 file = file.model_copy(deep=True)
-                media = MultimodalService(self.repository, view)
+                media = MultimodalService(self.repository, view, attachment_storage=self.runtime.attachment_storage)
                 if file.transfer_method == TransferMethod.LOCAL_FILE:
                     await self._load_trial_run_local_file(
                         file, config.workspace_id, config.tenant_id
@@ -2028,7 +2027,7 @@ class MemoryStorageService:
         """
         from src.common.datetime_utils import ensure_dialog_at, utcnow_naive
         from src.common.observability.logging import get_logger
-        from src.models.message_models import ConversationContext, ConversationMessage, DialogData
+        from src.schemas.message_models import ConversationContext, ConversationMessage, DialogData
         from src.storage_services.extraction_engine.pipeline_help import (
             _write_extracted_result_summary, export_test_input_doc,
         )
@@ -2486,7 +2485,7 @@ async def _run_pruning(
 
     enabled 始终反映配置开关（与 status 解耦），避免“启用但失败”被误读成“未启用”。
     """
-    from src.models.config_models import PruningConfig
+    from src.schemas.config_models import PruningConfig
     from src.storage_services.extraction_engine.data_preprocessing.data_pruning import (
         SemanticPruner,
     )

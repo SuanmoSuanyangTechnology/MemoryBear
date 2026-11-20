@@ -20,7 +20,7 @@ from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable, Dict, List, Optional
 
 from src.common.datetime_utils import to_iso_z
-from src.models.graph_models import (
+from src.schemas.graph_models import (
     ChunkNode,
     DialogueNode,
     EntityEntityEdge,
@@ -36,8 +36,8 @@ from src.models.graph_models import (
     AssistantConversationEdge,
     ConversationNode,
 )
-from src.models.message_models import Chunk, DialogData, Statement
-from src.models.triplet_models import Entity, Triplet
+from src.schemas.message_models import Chunk, DialogData, Statement
+from src.schemas.triplet_models import Entity, Triplet
 from src.common.name_similarity_utils import cosine_similarity
 
 logger = logging.getLogger(__name__)

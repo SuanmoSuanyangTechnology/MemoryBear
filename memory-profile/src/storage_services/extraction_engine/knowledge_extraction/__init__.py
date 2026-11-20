@@ -6,5 +6,4 @@
 - TripletExtractor: 三元组提取
 - EmbeddingGenerator: 嵌入向量生成
 - MemorySummaryGenerator: 记忆摘要生成
-- OntologyExtractor: 本体类提取
 """

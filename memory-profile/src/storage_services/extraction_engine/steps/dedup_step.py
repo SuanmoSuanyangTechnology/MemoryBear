@@ -19,13 +19,13 @@ import re
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
-from src.models.graph_models import (
+from src.schemas.graph_models import (
     EntityEntityEdge,
     ExtractedEntityNode,
     StatementEntityEdge,
 )
-from src.models.message_models import DialogData
-from src.models.variate_config import ExtractionPipelineConfig
+from src.schemas.message_models import DialogData
+from src.schemas.variate_config import ExtractionPipelineConfig
 from typing import Any as Neo4jConnector
 
 logger = logging.getLogger(__name__)

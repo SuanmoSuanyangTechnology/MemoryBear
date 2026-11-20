@@ -9,12 +9,12 @@ import logging
 from typing import Any
 
 from src.common.datetime_utils import to_iso_z, utcnow_naive
-from src.models.graph_models import (
+from src.schemas.graph_models import (
     EntityEntityEdge,
     ExtractedEntityNode,
     StatementEntityEdge,
 )
-from src.models.variate_config import DedupConfig
+from src.schemas.variate_config import DedupConfig
 from src.common.data.ontology import get_type_id
 
 logger = logging.getLogger(__name__)

@@ -2,8 +2,8 @@ import asyncio
 from typing import Dict
 
 from src.common.observability.logging import get_logger
-from src.models.message_models import DialogData, Statement
-from src.models.triplet_models import TripletExtractionResponse
+from src.schemas.message_models import DialogData, Statement
+from src.schemas.triplet_models import TripletExtractionResponse
 from src.common.prompt.prompt_utils import render_triplet_extraction_prompt
 from src.common.data.ontology import PREDICATE_DEFINITIONS
 

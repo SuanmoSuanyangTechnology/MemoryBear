@@ -17,7 +17,7 @@ import os
 from typing import List, Dict, Any, Optional, Union
 from pathlib import Path
 
-from src.models.message_models import DialogData, ConversationContext, ConversationMessage
+from src.schemas.message_models import DialogData, ConversationContext, ConversationMessage
 from src.common.datetime_utils import to_iso_z
 
 

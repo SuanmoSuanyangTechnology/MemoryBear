@@ -19,7 +19,7 @@ import logging
 from typing import List, Optional, Set
 
 from src.services.ontology_services.ontology_general_models import GeneralOntologyTypeRegistry
-from src.models.ontology_extraction_models import OntologyTypeInfo, OntologyTypeList
+from src.schemas.ontology_extraction_models import OntologyTypeInfo, OntologyTypeList
 
 logger = logging.getLogger(__name__)
 

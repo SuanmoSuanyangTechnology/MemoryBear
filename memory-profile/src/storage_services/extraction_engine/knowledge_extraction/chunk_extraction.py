@@ -4,10 +4,10 @@ from enum import Enum
 from pathlib import Path
 
 from src.common.observability.logging import get_logger
-from src.models.message_models import DialogData, Chunk
-from src.models.config_models import ChunkerConfig
+from src.schemas.message_models import DialogData, Chunk
+from src.schemas.config_models import ChunkerConfig
 from src.common.llm_tools.chunker_client import ChunkerClient
-from src.common.config.config_utils import get_chunker_config
+from src.storage_services.extraction_engine.data_preprocessing.config_utils import get_chunker_config
 
 logger = get_logger(f"memory.{__name__}")
 

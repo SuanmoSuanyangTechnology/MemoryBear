@@ -11,7 +11,9 @@
 # Only the local path dependencies this service builds; the rest of packages/
 # stays out of the build context.
 packages/scripts/
-packages/storage-core/
+!packages/storage-core/
+!packages/storage-core/pyproject.toml
+!packages/storage-core/src/**
 !packages/auth-sdk/
 !packages/auth-sdk/pyproject.toml
 !packages/auth-sdk/src/**

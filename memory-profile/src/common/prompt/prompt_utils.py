@@ -328,47 +328,6 @@ async def render_episodic_title_and_type_prompt(content: str, language: str = "z
     return rendered_prompt
 
 
-async def render_ontology_extraction_prompt(
-    scenario: str,
-    domain: str | None = None,
-    max_classes: int = 15,
-    json_schema: dict | None = None,
-    language: str = "zh",
-) -> str:
-    """
-    Renders the ontology extraction prompt using the extract_ontology.jinja2 template.
-
-    Args:
-        scenario: The scenario description text to extract ontology classes from
-        domain: Optional domain hint for the scenario (e.g., "Healthcare", "Education")
-        max_classes: Maximum number of classes to extract (default: 15)
-        json_schema: JSON schema for the expected output format
-        language: Language for output ("zh" for Chinese, "en" for English)
-
-    Returns:
-        Rendered prompt content as string
-    """
-    template = prompt_env.get_template("extract_ontology.jinja2")
-    rendered_prompt = template.render(
-        scenario=scenario,
-        domain=domain,
-        max_classes=max_classes,
-        json_schema=json_schema,
-        language=language,
-    )
-
-    # 记录渲染结果到提示日志
-    prompt_logger.info("\n=== RENDERED %s PROMPT ===\n%s\n%s\n", ("ontology extraction").upper(), rendered_prompt, "=" * 50)
-    # 可选：记录模板渲染信息
-    template_logger.debug("Rendering template: %s with context keys: %s", "extract_ontology.jinja2", list(({
-            "scenario_len": len(scenario) if scenario else 0,
-            "domain": domain,
-            "max_classes": max_classes,
-            "json_schema": "OntologyExtractionResponse.schema",
-            "language": language,
-        }).keys()))
-
-    return rendered_prompt
 
 
 async def render_neo4j_memory_summary_prompt(

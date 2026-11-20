@@ -20,6 +20,7 @@ from src.common.observability.runtime_metrics import (
     utc_timestamp,
 )
 from src.config import ProfileSettings
+from src.infrastructure.attachment_storage import AttachmentStorageManager
 from src.infrastructure.elasticsearch import ElasticsearchManager
 from src.infrastructure.memory_enterprise import MemoryEnterpriseManager
 from src.infrastructure.model_service import ModelServiceManager
@@ -38,6 +39,7 @@ class ProfileRuntime:
 
     def __init__(self, settings: ProfileSettings) -> None:
         self.settings = settings
+        self.attachment_storage = AttachmentStorageManager(settings)
         self.postgres = PostgresManager(settings)
         self.neo4j = Neo4jManager(settings)
         self.redis = RedisManager(settings)
@@ -185,6 +187,7 @@ class ProfileRuntime:
             self.redis.aclose(),
             self.elasticsearch.aclose(),
             self.model_service.aclose(),
+            self.attachment_storage.aclose(),
             self.scene_continuity.aclose(),
             self.task_bridge.aclose(),
             self.memory_enterprise.aclose(),

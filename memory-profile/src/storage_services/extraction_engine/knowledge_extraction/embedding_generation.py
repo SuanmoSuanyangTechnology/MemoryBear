@@ -8,7 +8,7 @@ import asyncio
 import logging
 from typing import Any, Dict, List, Tuple
 
-from src.models.message_models import DialogData
+from src.schemas.message_models import DialogData
 
 logger = logging.getLogger(__name__)
 

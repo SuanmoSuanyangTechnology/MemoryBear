@@ -7,8 +7,8 @@ Predicate filtering against the ontology whitelist is performed in ``parse_respo
 import logging
 from typing import Any
 
-from src.common.enums import TripletPredicate
-from src.models.triplet_models import TripletExtractionResponse
+from src.storage_services.extraction_engine.enums import TripletPredicate
+from src.schemas.triplet_models import TripletExtractionResponse
 from src.storage_services.extraction_engine.deduplication.deduped_and_disamb import (
     _USER_PLACEHOLDER_NAMES,
 )

@@ -1082,6 +1082,25 @@ wheels = [
 ]
 
 [[package]]
+name = "mem-storage-core"
+version = "0.1.0"
+source = { directory = "../packages/storage-core" }
+dependencies = [
+    { name = "aiofiles" },
+    { name = "boto3" },
+    { name = "oss2" },
+    { name = "pydantic" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "aiofiles", specifier = ">=23,<26" },
+    { name = "boto3", specifier = ">=1.35,<2" },
+    { name = "oss2", specifier = ">=2.19,<3" },
+    { name = "pydantic", specifier = ">=2.12,<3" },
+]
+
+[[package]]
 name = "memory-contracts"
 version = "0.1.0"
 source = { directory = "../packages/memory-contracts" }
@@ -1091,14 +1110,6 @@ name = "memory-profile"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
-    { name = "xlrd" },
-    { name = "python-calamine" },
-    { name = "python-multipart" },
-    { name = "langchain" },
-    { name = "langgraph-prebuilt" },
-    { name = "owlready2" },
-    { name = "pandas" },
-    { name = "rdflib" },
     { name = "aiofiles" },
     { name = "alembic" },
     { name = "asyncpg" },
@@ -1112,29 +1123,36 @@ dependencies = [
     { name = "fastapi" },
     { name = "jinja2" },
     { name = "json-repair" },
+    { name = "langchain" },
     { name = "langchain-core" },
     { name = "langchain-openai" },
+    { name = "langgraph-prebuilt" },
     { name = "langid" },
+    { name = "mem-storage-core" },
     { name = "memory-contracts" },
     { name = "neo4j" },
     { name = "numpy" },
     { name = "olefile" },
     { name = "openpyxl" },
     { name = "oss2" },
+    { name = "pandas" },
     { name = "psutil" },
     { name = "pydantic" },
     { name = "pydantic-settings" },
     { name = "pypdf2" },
+    { name = "python-calamine" },
     { name = "python-docx" },
     { name = "python-dotenv" },
     { name = "python-magic", marker = "sys_platform != 'win32'" },
     { name = "python-magic-bin", marker = "sys_platform == 'win32'" },
+    { name = "python-multipart" },
     { name = "redbear-model", extra = ["runtime"] },
     { name = "redis" },
     { name = "sqlalchemy", extra = ["asyncio"] },
     { name = "starlette" },
     { name = "task-bridge-sdk", extra = ["celery"] },
     { name = "uvicorn", extra = ["standard"] },
+    { name = "xlrd" },
     { name = "xxhash" },
     { name = "zttp" },
 ]
@@ -1149,14 +1167,6 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "xlrd", specifier = "==2.0.2" },
-    { name = "python-calamine", specifier = ">=0.4.0" },
-    { name = "python-multipart", specifier = ">=0.0.20" },
-    { name = "langchain", specifier = "==1.2.10" },
-    { name = "langgraph-prebuilt", specifier = "==1.0.8" },
-    { name = "owlready2", specifier = "==0.50" },
-    { name = "pandas", specifier = "==2.3.3" },
-    { name = "rdflib", specifier = "==7.6.0" },
     { name = "aiofiles", specifier = "==25.1.0" },
     { name = "alembic", specifier = "==1.20.0" },
     { name = "asyncpg", specifier = "==0.32.0" },
@@ -1170,29 +1180,36 @@ requires-dist = [
     { name = "fastapi", specifier = "==0.156.4" },
     { name = "jinja2", specifier = "==3.1.6" },
     { name = "json-repair", specifier = "==0.64.2" },
+    { name = "langchain", specifier = "==1.2.10" },
     { name = "langchain-core", specifier = "==1.6.12" },
     { name = "langchain-openai", specifier = "==1.7.2" },
+    { name = "langgraph-prebuilt", specifier = "==1.0.8" },
     { name = "langid", specifier = "==1.1.6" },
+    { name = "mem-storage-core", directory = "../packages/storage-core" },
     { name = "memory-contracts", directory = "../packages/memory-contracts" },
     { name = "neo4j", specifier = "==6.4.0" },
     { name = "numpy", specifier = "==1.26.4" },
     { name = "olefile", specifier = "==0.47" },
     { name = "openpyxl", specifier = "==3.1.5" },
     { name = "oss2", specifier = "==2.19.1" },
+    { name = "pandas", specifier = "==2.3.3" },
     { name = "psutil", specifier = "==7.2.2" },
     { name = "pydantic", specifier = "==2.14.1" },
     { name = "pydantic-settings", specifier = "==2.16.1" },
     { name = "pypdf2", specifier = "==3.0.1" },
+    { name = "python-calamine", specifier = ">=0.4.0" },
     { name = "python-docx", specifier = "==1.2.0" },
     { name = "python-dotenv", specifier = "==1.2.4" },
     { name = "python-magic", marker = "sys_platform != 'win32'", specifier = "==0.4.27" },
     { name = "python-magic-bin", marker = "sys_platform == 'win32'", specifier = "==0.4.14" },
+    { name = "python-multipart", specifier = ">=0.0.20" },
     { name = "redbear-model", extras = ["runtime"], directory = "../packages/redbear-model" },
     { name = "redis", specifier = "==8.1.0" },
     { name = "sqlalchemy", extras = ["asyncio"], specifier = "==2.1.5" },
     { name = "starlette", specifier = "==1.10.0" },
     { name = "task-bridge-sdk", extras = ["celery", "mem-router"], directory = "../packages/task-bridge-sdk" },
     { name = "uvicorn", extras = ["standard"], specifier = "==0.54.0" },
+    { name = "xlrd", specifier = "==2.0.2" },
     { name = "xxhash", specifier = "==4.0.2" },
     { name = "zttp", specifier = "==0.0.35" },
 ]
@@ -1360,12 +1377,6 @@ dependencies = [
     { name = "six" },
 ]
 sdist = { url = "https://mirrors.cloud.tencent.com/pypi/packages/df/b5/f2cb1950dda46ac2284d6c950489fdacd0e743c2d79a347924d3cc44b86f/oss2-2.19.1.tar.gz", hash = "sha256:a8ab9ee7eb99e88a7e1382edc6ea641d219d585a7e074e3776e9dec9473e59c1" }
-
-[[package]]
-name = "owlready2"
-version = "0.50"
-source = { registry = "https://mirrors.cloud.tencent.com/pypi/simple" }
-sdist = { url = "https://mirrors.cloud.tencent.com/pypi/packages/a4/67/6fb3a628889d97f8a3d3c64d4597f0637db61a1856c835fe7c65d8e89658/owlready2-0.50.tar.gz", hash = "sha256:7be74c53a35497df138c8223dddcf65510def9b38494ae1fac4aa2a61c4677eb" }
 
 [[package]]
 name = "packaging"
@@ -1569,15 +1580,6 @@ wheels = [
 ]
 
 [[package]]
-name = "pyparsing"
-version = "3.3.2"
-source = { registry = "https://mirrors.cloud.tencent.com/pypi/simple" }
-sdist = { url = "https://mirrors.cloud.tencent.com/pypi/packages/f3/91/9c6ee907786a473bf81c5f53cf703ba0957b23ab84c264080fb5a450416f/pyparsing-3.3.2.tar.gz", hash = "sha256:c777f4d763f140633dcb6d8a3eda953bf7a214dc4eff598413c070bcdc117cbc" }
-wheels = [
-    { url = "https://mirrors.cloud.tencent.com/pypi/packages/10/bd/c038d7cc38edc1aa5bf91ab8068b63d4308c66c4c8bb3cbba7dfbc049f9c/pyparsing-3.3.2-py3-none-any.whl", hash = "sha256:850ba148bd908d7e2411587e247a1e4f0327839c40e2e5e6d05a007ecc69911d" },
-]
-
-[[package]]
 name = "pypdf2"
 version = "3.0.1"
 source = { registry = "https://mirrors.cloud.tencent.com/pypi/simple" }
@@ -1613,6 +1615,28 @@ dependencies = [
 sdist = { url = "https://mirrors.cloud.tencent.com/pypi/packages/43/7c/d36d04db312ecf4298932ef77e6e4a9e8ad017906e24e34f0b0c361a2473/pytest_asyncio-1.4.0.tar.gz", hash = "sha256:c6c0d2259945122819f171a32ecea2c349ead889ee28176caaf492143424be42" }
 wheels = [
     { url = "https://mirrors.cloud.tencent.com/pypi/packages/03/e2/08a497ef684b88559c9cc5f4ad53a37e7b99e727094a86d6ea32536d5d3c/pytest_asyncio-1.4.0-py3-none-any.whl", hash = "sha256:933ca923a23075a87fb7070c0ec272a6848489824d887c85c812670932835aa1" },
+]
+
+[[package]]
+name = "python-calamine"
+version = "0.6.2"
+source = { registry = "https://mirrors.cloud.tencent.com/pypi/simple" }
+sdist = { url = "https://mirrors.cloud.tencent.com/pypi/packages/01/18/e1e53ade001b30a3c6642d876e5defe8431da8c31fb7798909e6c8ab8c34/python_calamine-0.6.2.tar.gz", hash = "sha256:2c90e5224c5e92db9fcd8f22b6085ce63b935cfe7a893ac9a1c3c56793bafd9d" }
+wheels = [
+    { url = "https://mirrors.cloud.tencent.com/pypi/packages/7a/ec/e111c1a3a4c138ebc41e416e33730ee6d7c54e714af21c2a4e59b41715a5/python_calamine-0.6.2-cp312-cp312-macosx_10_12_x86_64.whl", hash = "sha256:857e4cddadba9b55c76dc583c58c5dc101a6cd5320190c10f8b2ab98d66c9040" },
+    { url = "https://mirrors.cloud.tencent.com/pypi/packages/53/26/fe4c2138ff21542e2f1130a4d83c330d7f9486b62775196e998b88a03de6/python_calamine-0.6.2-cp312-cp312-macosx_11_0_arm64.whl", hash = "sha256:cd89d6a53e4b22328cd685fc054c31d359cb3ae67bd24bc57e1c1db62a4cfc97" },
+    { url = "https://mirrors.cloud.tencent.com/pypi/packages/6a/b0/bfeaf45ac5e2f6553723dd2fbe127d1d17c6f26496db5781de42a933776a/python_calamine-0.6.2-cp312-cp312-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:4d6c9af39db39e0c70710ae79cd1b5d980f9c0aea55fc16d194460c1561a0c6a" },
+    { url = "https://mirrors.cloud.tencent.com/pypi/packages/fe/6e/81106aa80609075015d400584030605b05f5e12931717160dcc58fdc4980/python_calamine-0.6.2-cp312-cp312-manylinux_2_17_armv7l.manylinux2014_armv7l.whl", hash = "sha256:9a2382dbc410dd48c99d89ee460662cc70892fe1b2901ab982604b923e8eb8f6" },
+    { url = "https://mirrors.cloud.tencent.com/pypi/packages/4d/ba/6311b24f9889246be63b664630c5601039ef771f7ed04c8f51aace39b7a9/python_calamine-0.6.2-cp312-cp312-manylinux_2_17_ppc64le.manylinux2014_ppc64le.whl", hash = "sha256:3ebb93255709874ede5b5e62828cb5758e60097e5390b6c9a3eb7751b617b12e" },
+    { url = "https://mirrors.cloud.tencent.com/pypi/packages/23/e4/027a1b046d30768872307ebe808dc4cdc5357295cdcda98b30b3ea924904/python_calamine-0.6.2-cp312-cp312-manylinux_2_17_s390x.manylinux2014_s390x.whl", hash = "sha256:837bca19bd945cb83aded433f4cf76e80d70a5400404d876400ca7e88e5ea311" },
+    { url = "https://mirrors.cloud.tencent.com/pypi/packages/5c/4d/da8716a1b3a66938aaabe36873f6fa210fa063bab1b20c2ec236013de6b3/python_calamine-0.6.2-cp312-cp312-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:723990a47668cb819f307ccc634741370d3cd3804a0ee8cda392a522ae6d5016" },
+    { url = "https://mirrors.cloud.tencent.com/pypi/packages/36/40/9521e8da5496cbc4b18027626a40018301f546b3e9802ca2f3a6cb5b4739/python_calamine-0.6.2-cp312-cp312-manylinux_2_5_i686.manylinux1_i686.whl", hash = "sha256:b067630d693e1d7de41e3d44a99c7dd3feebb52db8dda8636ac3f70d8b6a4ad6" },
+    { url = "https://mirrors.cloud.tencent.com/pypi/packages/cd/b0/7a63963512c5ba7e9539b7452e2b1561625e63e4e29c044e487e2e93dcbe/python_calamine-0.6.2-cp312-cp312-musllinux_1_1_aarch64.whl", hash = "sha256:6ab09c9da53a2b33633e9f940aed11c08e083810a0fd6885826cdc52ba4f86a5" },
+    { url = "https://mirrors.cloud.tencent.com/pypi/packages/22/81/e2bc38a5cf9629f656adcdabe8e134028f60c236e4bb96375dda90db3fdd/python_calamine-0.6.2-cp312-cp312-musllinux_1_1_armv7l.whl", hash = "sha256:ae08e1308a0d0c6b8b4cc0a039ed8a85fc9ee2f8a3ca9ea57b1af9f97ed68fe4" },
+    { url = "https://mirrors.cloud.tencent.com/pypi/packages/b1/ea/513117015fd5903ca6dde9c8fb8502af60af6965642f4e3311623943e673/python_calamine-0.6.2-cp312-cp312-musllinux_1_1_x86_64.whl", hash = "sha256:c441a20c7aff0e904ca01b5cdc1e5be2c6d4a41a24a0ea4d5ea6d211343bb95f" },
+    { url = "https://mirrors.cloud.tencent.com/pypi/packages/a2/14/8846478dacf31535f5f15448ade3bc688b51f3183f1b52844451aa27b0e6/python_calamine-0.6.2-cp312-cp312-win32.whl", hash = "sha256:39cae8e66f8bce499f5f965f4575ddf61e30184cc97f02e1c7031a57abe0903b" },
+    { url = "https://mirrors.cloud.tencent.com/pypi/packages/bb/e2/2d2dcf4ec7e5ec08e33bf966ab010a7be178a4b623bd5f7601d47f2c734c/python_calamine-0.6.2-cp312-cp312-win_amd64.whl", hash = "sha256:1617efa24532f2420934a8cf77e6d33ff1740cae1d39355cab4f4cf141fdab49" },
+    { url = "https://mirrors.cloud.tencent.com/pypi/packages/f1/eb/2f50f3395c0435e6186cab56c36d04c06581ba827264bca1f1acae523aa3/python_calamine-0.6.2-cp312-cp312-win_arm64.whl", hash = "sha256:c2b378db494740e540e8157a7e5fe61dadae69ad2d988a7c80f9583f434acf07" },
 ]
 
 [[package]]
@@ -1682,6 +1706,15 @@ wheels = [
 ]
 
 [[package]]
+name = "python-multipart"
+version = "0.0.22"
+source = { registry = "https://mirrors.cloud.tencent.com/pypi/simple" }
+sdist = { url = "https://mirrors.cloud.tencent.com/pypi/packages/94/01/979e98d542a70714b0cb2b6728ed0b7c46792b695e3eaec3e20711271ca3/python_multipart-0.0.22.tar.gz", hash = "sha256:7340bef99a7e0032613f56dc36027b959fd3b30a787ed62d310e951f7c3a3a58" }
+wheels = [
+    { url = "https://mirrors.cloud.tencent.com/pypi/packages/1b/d0/397f9626e711ff749a95d96b7af99b9c566a9bb5129b8e4c10fc4d100304/python_multipart-0.0.22-py3-none-any.whl", hash = "sha256:2b2cd894c83d21bf49d702499531c7bafd057d730c201782048f7945d82de155" },
+]
+
+[[package]]
 name = "pytz"
 version = "2026.5"
 source = { registry = "https://mirrors.cloud.tencent.com/pypi/simple" }
@@ -1706,18 +1739,6 @@ wheels = [
     { url = "https://mirrors.cloud.tencent.com/pypi/packages/74/93/7baea19427dcfbe1e5a372d81473250b379f04b1bd3c4c5ff825e2327202/pyyaml-6.0.3-cp312-cp312-win32.whl", hash = "sha256:96b533f0e99f6579b3d4d4995707cf36df9100d67e0c8303a0c55b27b5f99bc5" },
     { url = "https://mirrors.cloud.tencent.com/pypi/packages/86/bf/899e81e4cce32febab4fb42bb97dcdf66bc135272882d1987881a4b519e9/pyyaml-6.0.3-cp312-cp312-win_amd64.whl", hash = "sha256:5fcd34e47f6e0b794d17de1b4ff496c00986e1c83f7ab2fb8fcfe9616ff7477b" },
     { url = "https://mirrors.cloud.tencent.com/pypi/packages/1a/08/67bd04656199bbb51dbed1439b7f27601dfb576fb864099c7ef0c3e55531/pyyaml-6.0.3-cp312-cp312-win_arm64.whl", hash = "sha256:64386e5e707d03a7e172c0701abfb7e10f0fb753ee1d773128192742712a98fd" },
-]
-
-[[package]]
-name = "rdflib"
-version = "7.6.0"
-source = { registry = "https://mirrors.cloud.tencent.com/pypi/simple" }
-dependencies = [
-    { name = "pyparsing" },
-]
-sdist = { url = "https://mirrors.cloud.tencent.com/pypi/packages/98/f5/18bb77b7af9526add0c727a3b2048959847dc5fb030913e2918bf384fec3/rdflib-7.6.0.tar.gz", hash = "sha256:6c831288d5e4a5a7ece85d0ccde9877d512a3d0f02d7c06455d00d6d0ea379df" }
-wheels = [
-    { url = "https://mirrors.cloud.tencent.com/pypi/packages/10/c2/6604a71269e0c1bd75656d5a001432d16f2cc5b8c057140ec797155c295e/rdflib-7.6.0-py3-none-any.whl", hash = "sha256:30c0a3ebf4c0e09215f066be7246794b6492e054e782d7ac2a34c9f70a15e0dd" },
 ]
 
 [[package]]
@@ -2209,6 +2230,15 @@ wheels = [
 ]
 
 [[package]]
+name = "xlrd"
+version = "2.0.2"
+source = { registry = "https://mirrors.cloud.tencent.com/pypi/simple" }
+sdist = { url = "https://mirrors.cloud.tencent.com/pypi/packages/07/5a/377161c2d3538d1990d7af382c79f3b2372e880b65de21b01b1a2b78691e/xlrd-2.0.2.tar.gz", hash = "sha256:08b5e25de58f21ce71dc7db3b3b8106c1fa776f3024c54e45b45b374e89234c9" }
+wheels = [
+    { url = "https://mirrors.cloud.tencent.com/pypi/packages/1a/62/c8d562e7766786ba6587d09c5a8ba9f718ed3fa8af7f4553e8f91c36f302/xlrd-2.0.2-py2.py3-none-any.whl", hash = "sha256:ea762c3d29f4cca48d82df517b6d89fbce4db3107f9d78713e48cd321d5c9aa9" },
+]
+
+[[package]]
 name = "xxhash"
 version = "4.0.2"
 source = { registry = "https://mirrors.cloud.tencent.com/pypi/simple" }
@@ -2320,44 +2350,4 @@ wheels = [
     { url = "https://mirrors.cloud.tencent.com/pypi/packages/d2/4a/9d32f9a5dc0a901de28203498442174678e86d7558aa00d3f35e73f16ce1/zttp-0.0.35-cp312-cp312-musllinux_1_2_x86_64.whl", hash = "sha256:c4aee00b93fd2078ec69788b40bfa7ea315280b29eae2405dc590e5fe5f09231" },
     { url = "https://mirrors.cloud.tencent.com/pypi/packages/87/e9/0d97af77b8299b5b71b457a7a9c36063e1b7ebbbda58df9cb5f0bfd9e864/zttp-0.0.35-cp312-cp312-win_amd64.whl", hash = "sha256:86fb9ca81047926756b4962aa07cb9d7123e629739db96eeb519c92f44ba49e7" },
     { url = "https://mirrors.cloud.tencent.com/pypi/packages/0c/99/b5951a7f4ab5744b8838fae517d133b7844cce671b39c5cb7a167e7f6b84/zttp-0.0.35-cp312-cp312-win_arm64.whl", hash = "sha256:c7e14124caa17b6d042a99596196435e0001233def0f4e6b9313d6cf9cbf874c" },
-]
-
-[[package]]
-name = "python-multipart"
-version = "0.0.22"
-source = { registry = "https://mirrors.cloud.tencent.com/pypi/simple" }
-sdist = { url = "https://mirrors.cloud.tencent.com/pypi/packages/94/01/979e98d542a70714b0cb2b6728ed0b7c46792b695e3eaec3e20711271ca3/python_multipart-0.0.22.tar.gz", hash = "sha256:7340bef99a7e0032613f56dc36027b959fd3b30a787ed62d310e951f7c3a3a58" }
-wheels = [
-    { url = "https://mirrors.cloud.tencent.com/pypi/packages/1b/d0/397f9626e711ff749a95d96b7af99b9c566a9bb5129b8e4c10fc4d100304/python_multipart-0.0.22-py3-none-any.whl", hash = "sha256:2b2cd894c83d21bf49d702499531c7bafd057d730c201782048f7945d82de155" },
-]
-
-[[package]]
-name = "python-calamine"
-version = "0.6.2"
-source = { registry = "https://mirrors.cloud.tencent.com/pypi/simple" }
-sdist = { url = "https://mirrors.cloud.tencent.com/pypi/packages/01/18/e1e53ade001b30a3c6642d876e5defe8431da8c31fb7798909e6c8ab8c34/python_calamine-0.6.2.tar.gz", hash = "sha256:2c90e5224c5e92db9fcd8f22b6085ce63b935cfe7a893ac9a1c3c56793bafd9d" }
-wheels = [
-    { url = "https://mirrors.cloud.tencent.com/pypi/packages/7a/ec/e111c1a3a4c138ebc41e416e33730ee6d7c54e714af21c2a4e59b41715a5/python_calamine-0.6.2-cp312-cp312-macosx_10_12_x86_64.whl", hash = "sha256:857e4cddadba9b55c76dc583c58c5dc101a6cd5320190c10f8b2ab98d66c9040" },
-    { url = "https://mirrors.cloud.tencent.com/pypi/packages/53/26/fe4c2138ff21542e2f1130a4d83c330d7f9486b62775196e998b88a03de6/python_calamine-0.6.2-cp312-cp312-macosx_11_0_arm64.whl", hash = "sha256:cd89d6a53e4b22328cd685fc054c31d359cb3ae67bd24bc57e1c1db62a4cfc97" },
-    { url = "https://mirrors.cloud.tencent.com/pypi/packages/6a/b0/bfeaf45ac5e2f6553723dd2fbe127d1d17c6f26496db5781de42a933776a/python_calamine-0.6.2-cp312-cp312-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:4d6c9af39db39e0c70710ae79cd1b5d980f9c0aea55fc16d194460c1561a0c6a" },
-    { url = "https://mirrors.cloud.tencent.com/pypi/packages/fe/6e/81106aa80609075015d400584030605b05f5e12931717160dcc58fdc4980/python_calamine-0.6.2-cp312-cp312-manylinux_2_17_armv7l.manylinux2014_armv7l.whl", hash = "sha256:9a2382dbc410dd48c99d89ee460662cc70892fe1b2901ab982604b923e8eb8f6" },
-    { url = "https://mirrors.cloud.tencent.com/pypi/packages/4d/ba/6311b24f9889246be63b664630c5601039ef771f7ed04c8f51aace39b7a9/python_calamine-0.6.2-cp312-cp312-manylinux_2_17_ppc64le.manylinux2014_ppc64le.whl", hash = "sha256:3ebb93255709874ede5b5e62828cb5758e60097e5390b6c9a3eb7751b617b12e" },
-    { url = "https://mirrors.cloud.tencent.com/pypi/packages/23/e4/027a1b046d30768872307ebe808dc4cdc5357295cdcda98b30b3ea924904/python_calamine-0.6.2-cp312-cp312-manylinux_2_17_s390x.manylinux2014_s390x.whl", hash = "sha256:837bca19bd945cb83aded433f4cf76e80d70a5400404d876400ca7e88e5ea311" },
-    { url = "https://mirrors.cloud.tencent.com/pypi/packages/5c/4d/da8716a1b3a66938aaabe36873f6fa210fa063bab1b20c2ec236013de6b3/python_calamine-0.6.2-cp312-cp312-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:723990a47668cb819f307ccc634741370d3cd3804a0ee8cda392a522ae6d5016" },
-    { url = "https://mirrors.cloud.tencent.com/pypi/packages/36/40/9521e8da5496cbc4b18027626a40018301f546b3e9802ca2f3a6cb5b4739/python_calamine-0.6.2-cp312-cp312-manylinux_2_5_i686.manylinux1_i686.whl", hash = "sha256:b067630d693e1d7de41e3d44a99c7dd3feebb52db8dda8636ac3f70d8b6a4ad6" },
-    { url = "https://mirrors.cloud.tencent.com/pypi/packages/cd/b0/7a63963512c5ba7e9539b7452e2b1561625e63e4e29c044e487e2e93dcbe/python_calamine-0.6.2-cp312-cp312-musllinux_1_1_aarch64.whl", hash = "sha256:6ab09c9da53a2b33633e9f940aed11c08e083810a0fd6885826cdc52ba4f86a5" },
-    { url = "https://mirrors.cloud.tencent.com/pypi/packages/22/81/e2bc38a5cf9629f656adcdabe8e134028f60c236e4bb96375dda90db3fdd/python_calamine-0.6.2-cp312-cp312-musllinux_1_1_armv7l.whl", hash = "sha256:ae08e1308a0d0c6b8b4cc0a039ed8a85fc9ee2f8a3ca9ea57b1af9f97ed68fe4" },
-    { url = "https://mirrors.cloud.tencent.com/pypi/packages/b1/ea/513117015fd5903ca6dde9c8fb8502af60af6965642f4e3311623943e673/python_calamine-0.6.2-cp312-cp312-musllinux_1_1_x86_64.whl", hash = "sha256:c441a20c7aff0e904ca01b5cdc1e5be2c6d4a41a24a0ea4d5ea6d211343bb95f" },
-    { url = "https://mirrors.cloud.tencent.com/pypi/packages/a2/14/8846478dacf31535f5f15448ade3bc688b51f3183f1b52844451aa27b0e6/python_calamine-0.6.2-cp312-cp312-win32.whl", hash = "sha256:39cae8e66f8bce499f5f965f4575ddf61e30184cc97f02e1c7031a57abe0903b" },
-    { url = "https://mirrors.cloud.tencent.com/pypi/packages/bb/e2/2d2dcf4ec7e5ec08e33bf966ab010a7be178a4b623bd5f7601d47f2c734c/python_calamine-0.6.2-cp312-cp312-win_amd64.whl", hash = "sha256:1617efa24532f2420934a8cf77e6d33ff1740cae1d39355cab4f4cf141fdab49" },
-    { url = "https://mirrors.cloud.tencent.com/pypi/packages/f1/eb/2f50f3395c0435e6186cab56c36d04c06581ba827264bca1f1acae523aa3/python_calamine-0.6.2-cp312-cp312-win_arm64.whl", hash = "sha256:c2b378db494740e540e8157a7e5fe61dadae69ad2d988a7c80f9583f434acf07" },
-]
-
-[[package]]
-name = "xlrd"
-version = "2.0.2"
-source = { registry = "https://mirrors.cloud.tencent.com/pypi/simple" }
-sdist = { url = "https://mirrors.cloud.tencent.com/pypi/packages/07/5a/377161c2d3538d1990d7af382c79f3b2372e880b65de21b01b1a2b78691e/xlrd-2.0.2.tar.gz", hash = "sha256:08b5e25de58f21ce71dc7db3b3b8106c1fa776f3024c54e45b45b374e89234c9" }
-wheels = [
-    { url = "https://mirrors.cloud.tencent.com/pypi/packages/1a/62/c8d562e7766786ba6587d09c5a8ba9f718ed3fa8af7f4553e8f91c36f302/xlrd-2.0.2-py2.py3-none-any.whl", hash = "sha256:ea762c3d29f4cca48d82df517b6d89fbce4db3107f9d78713e48cd321d5c9aa9" },
 ]

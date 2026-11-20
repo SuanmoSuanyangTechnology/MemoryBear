@@ -10,12 +10,12 @@ from datetime import datetime
 from typing import Any, Dict
 
 from src.common.datetime_utils import utcnow_naive
-from src.models.graph_models import (
+from src.schemas.graph_models import (
     EntityEntityEdge,
     ExtractedEntityNode,
     StatementEntityEdge,
 )
-from src.models.graph_models import ExtractedEntityNode
+from src.schemas.graph_models import ExtractedEntityNode
 from src.common.data.ontology import get_type_id
 
 

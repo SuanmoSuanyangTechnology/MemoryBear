@@ -20,7 +20,7 @@ def get_pipeline_config(memory_config: MemoryConfig):
         ExtractionPipelineConfig with deduplication, statement extraction,
         and forgetting engine settings.
     """
-    from src.models.variate_config import (
+    from src.schemas.variate_config import (
         DedupConfig,
         ExtractionPipelineConfig,
         ForgettingEngineConfig,

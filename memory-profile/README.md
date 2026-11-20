@@ -244,7 +244,7 @@ Generation is a later, explicitly scoped extension over the read service:
   timeouts follow the existing client configuration without a per-route override.
 - The complete extraction engine keeps `steps`, `knowledge_extraction`,
   `data_preprocessing` and `deduplication` under `src/storage_services/extraction_engine`.
-  Engine data structures live directly under `src/models/`; runtime
+  Engine data structures live directly under `src/schemas/`; runtime
   configuration is defined in `src/schemas/memory_config.py` and assembled
   in `src/services/memory_config/service.py`. Utilities retain their API subdirectories under `src/common/`; shared date helpers
   live in `src/common/datetime_utils.py`. The chunker client lives in
@@ -254,9 +254,11 @@ Generation is a later, explicitly scoped extension over the read service:
   orchestration is `MemoryStorageService._run_pilot_extraction`, with no
   `runner.py` or extraction subpackage under `modules/memory_storage`.
   Statement classification remains in its original extraction step; pruning HTTP
-  calls live in `src/services/extract_pruning_client.py`. Single-source storage backend files retain the complete API implementation,
-  including upload/delete and original directory/bucket initialization behavior;
-  migrated interface code continues to use its existing storage calls.
+  calls live in `src/services/extract_pruning_client.py`. Attachment backends reuse `packages/storage-core` (`mem-storage-core`).
+  `src/infrastructure/attachment_storage.py` only maps service settings and manages
+  the shared client lifecycle; no backend implementation is copied locally.
+  Chunker defaults live in `storage_services/extraction_engine/data_preprocessing/config_utils.py`;
+  extraction enums live in `storage_services/extraction_engine/enums.py`.
 - Extraction, attachment storage and trial history configuration is defined in
   `src/config.py` and read through the existing `src/bootstrap.py` loader.
   Environment variable names, defaults, pruning normalization and timeout
@@ -269,10 +271,12 @@ Generation is a later, explicitly scoped extension over the read service:
   handlers; template details use DEBUG.
   No separate prompt/template/timing log files are created. Pilot SSE retains
   `time_log` as null; extraction result files remain unchanged.
-- The migrated ontology and tabular-input capabilities use the API's locked
-  versions of Owlready2, RDFLib and pandas. The Docker builder includes native
+- Tabular-input processing uses the API's locked pandas version. Unused ontology-class
+  generation and its dedicated validator, schema and prompts are removed. OWL
+  import/export and semantic validation are also removed, along with Owlready2
+  and RDFLib dependencies. Ontology type merging used by extraction is retained. The Docker builder includes native
   build tools; the runtime includes libmagic for attachment type detection.
-  Java is not installed because the migrated interfaces do not invoke OWL reasoning.
+  Java is not installed; OWL reasoning is not part of this service.
   Deprecated emotion extraction stays unregistered; the old placeholder
   `data_chunker.py` is replaced by the actual `data_preprocessing/chunker.py`.
 
@@ -290,8 +294,8 @@ adaptation live in `src/storage/outbox/`; the unchanged graph-deletion helpers
 live in `src/storage/custom/end_user_delete.py`. PostgreSQL event persistence and
 manual-delete auditing remain in `src/repositories/memory_storage.py`. The former
 `src/common/storage_contracts.py` and `src/common/outbox/` are removed. Attachment
-backends remain under `src/infrastructure/file_storage/`, a separate concern from
-the graph/document storage layer.
+backends reuse `packages/storage-core`, a separate concern from the graph/document
+storage layer. `src/models/` contains database mappings only.
 
 ## Source layout
 

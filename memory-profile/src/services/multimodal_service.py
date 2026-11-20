@@ -35,7 +35,7 @@ from src.bootstrap import get_settings
 from src.common.errors import BizCode, ProfileError
 from src.common.text_sanitize import sanitize_text
 from src.common.observability.logging import get_logger
-from src.infrastructure.file_storage import FileStorageService, LocalStorage
+from mem_storage import LocalStorage
 from src.services.file_content_service import extract_permanent_file_id
 from src.schemas.memory_storage import FileInput, FileType, FileUploadConfig, TransferMethod
 
@@ -540,8 +540,9 @@ class MultimodalService:
         input_modalities (list): Input modality configuration of the model.
     """
 
-    def __init__(self, repository, model_view=None):
+    def __init__(self, repository, model_view=None, *, attachment_storage):
         self.repository = repository
+        self.attachment_storage = attachment_storage
         self.model_view = model_view
         self.provider = model_view.provider.lower() if model_view else "openai"
         self.input_modalities = list(model_view.input_modalities or []) if model_view else []
@@ -584,7 +585,7 @@ class MultimodalService:
             if file_size <= 0 or file_size > get_settings().max_file_size:
                 raise _file_error("文件大小不在允许范围内", BizCode.FILE_READ_ERROR)
 
-            content = await FileStorageService().download_file(metadata.file_key)
+            content = await self.attachment_storage.backend.download(metadata.file_key)
             if len(content) != file_size:
                 logger.error(
                     "本地文件大小与元数据不一致",
@@ -878,13 +879,13 @@ class MultimodalService:
         返回 None，由调用方给出管理员提示。远程 URL 不做可达性判断，模型能否实际
         拉取交由模型侧处理。
         """
-        storage = FileStorageService().storage
+        storage = self.attachment_storage.backend
         if isinstance(storage, LocalStorage):
             return None
         # 铸预签名 URL 前先做归属/租户范围校验。
         metadata = await self._get_local_file_metadata(file.upload_file_id, workspace_id)
         # 不传 file_name：避免强制 Content-Disposition: attachment。
-        return await storage.get_url(metadata.file_key, expires=86400)
+        return await storage.get_signed_url(metadata.file_key, expires=86400)
 
     async def get_file_url(self, file: FileInput) -> str:
         """

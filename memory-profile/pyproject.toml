@@ -13,8 +13,6 @@ dependencies = [
     "langchain==1.2.10",
     "langgraph-prebuilt==1.0.8",
     "pandas==2.3.3",
-    "owlready2==0.50",
-    "rdflib==7.6.0",
     "langid==1.1.6",
     "aiofiles==25.1.0",
     "boto3==1.42.60",
@@ -45,6 +43,7 @@ dependencies = [
     "langchain-core==1.6.12",
     "langchain-openai==1.7.2",
     "memory-contracts",
+    "mem-storage-core",
     "jinja2==3.1.6",
     "neo4j==6.4.0",
     "psutil==7.2.2",
@@ -70,6 +69,7 @@ dependencies = [
 auth-sdk = { path = "../packages/auth-sdk" }
 error-core = { path = "../packages/error-core" }
 memory-contracts = { path = "../packages/memory-contracts" }
+mem-storage-core = { path = "../packages/storage-core" }
 redbear-model = { path = "../packages/redbear-model" }
 task-bridge-sdk = { path = "../packages/task-bridge-sdk" }
 
@@ -123,33 +123,22 @@ ban-relative-imports = "all"
 "src/common/name_similarity_utils.py" = ["UP006", "UP035", "UP045"]
 "src/common/prompt/prompt_utils.py" = ["E501"]
 "src/common/sse_utils.py" = ["I001", "UP006", "UP035"]
-"src/common/validation/ontology_validator.py" = ["E501", "I001", "UP006", "UP035"]
-"src/common/validation/owl_validator.py" = [
-    "E501", "F401", "F841", "I001", "UP006", "UP015", "UP035", "UP045",
-]
 "src/config.py" = ["E501"]
 "src/emotion/emotion_buckets.py" = ["E501", "UP035", "UP045"]
-"src/infrastructure/file_storage/base.py" = ["UP035", "UP045"]
-"src/infrastructure/file_storage/factory.py" = ["F401", "UP045"]
-"src/infrastructure/file_storage/local.py" = ["B904", "I001", "UP035", "UP045"]
-"src/infrastructure/file_storage/minio.py" = ["B904", "E501", "I001", "UP035"]
-"src/infrastructure/file_storage/oss.py" = ["B904", "E501", "E722", "UP035", "UP045"]
-"src/infrastructure/file_storage/s3.py" = ["B904", "E501", "I001", "UP035", "UP045"]
 "src/infrastructure/redis_lock.py" = ["I001"]
-"src/models/base_response.py" = ["I001"]
-"src/models/config_models.py" = ["E501", "I001", "UP006", "UP035", "UP045"]
-"src/models/dedup_models.py" = ["E501", "I001", "UP045"]
-"src/models/emotion_models.py" = ["I001", "UP006", "UP035", "UP045"]
-"src/models/event_category_models.py" = ["UP006", "UP009", "UP035", "UP045"]
-"src/models/graph_models.py" = ["E501", "I001", "UP006", "UP017", "UP035", "UP045"]
-"src/models/message_models.py" = ["E501", "I001", "UP006", "UP035", "UP045"]
-"src/models/ontology_extraction_models.py" = ["UP006", "UP009", "UP035"]
-"src/models/ontology_scenario_models.py" = ["UP006", "UP035", "UP045"]
+"src/schemas/base_response.py" = ["I001"]
+"src/schemas/config_models.py" = ["E501", "I001", "UP006", "UP035", "UP045"]
+"src/schemas/dedup_models.py" = ["E501", "I001", "UP045"]
+"src/schemas/emotion_models.py" = ["I001", "UP006", "UP035", "UP045"]
+"src/schemas/event_category_models.py" = ["UP006", "UP009", "UP035", "UP045"]
+"src/schemas/graph_models.py" = ["E501", "I001", "UP006", "UP017", "UP035", "UP045"]
+"src/schemas/message_models.py" = ["E501", "I001", "UP006", "UP035", "UP045"]
+"src/schemas/ontology_extraction_models.py" = ["UP006", "UP009", "UP035"]
 "src/models/references/__init__.py" = ["E501", "I001"]
 "src/models/references/file_metadata_model.py" = ["E501", "F401", "I001"]
 "src/models/references/memory_generation_model.py" = ["E501"]
-"src/models/triplet_models.py" = ["E501", "UP006", "UP035", "UP045"]
-"src/models/variate_config.py" = ["E501", "I001", "UP045"]
+"src/schemas/triplet_models.py" = ["E501", "UP006", "UP035", "UP045"]
+"src/schemas/variate_config.py" = ["E501", "I001", "UP045"]
 "src/modules/implicit_memory/handler.py" = ["E501"]
 "src/modules/implicit_memory/routes.py" = ["E501"]
 "src/modules/memory_storage/handler.py" = ["E501", "I001"]
@@ -213,9 +202,6 @@ ban-relative-imports = "all"
 "src/storage_services/extraction_engine/knowledge_extraction/memory_summary.py" = [
     "E501", "F401", "I001", "UP006", "UP035", "UP045",
 ]
-"src/storage_services/extraction_engine/knowledge_extraction/ontology_extraction.py" = [
-    "ASYNC109", "E501", "F401", "I001", "UP006", "UP035", "UP041", "UP045",
-]
 "src/storage_services/extraction_engine/knowledge_extraction/triplet_extraction.py" = [
     "E501", "I001", "UP006", "UP035",
 ]
@@ -241,6 +227,9 @@ ban-relative-imports = "all"
     "B905", "E501", "I001", "UP006", "UP035",
 ]
 "src/storage_services/extraction_engine/steps/triplet_step.py" = ["E501", "I001"]
+
+
+
 
 # Resolve through the mirror so re-locks keep every lock URL on it.
 [[tool.uv.index]]
