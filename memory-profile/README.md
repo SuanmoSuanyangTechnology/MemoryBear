@@ -263,12 +263,12 @@ Generation is a later, explicitly scoped extension over the read service:
   clamping match the API implementation. `MEMORY_OUTPUT_DIR`
   defaults to `logs/memory-output`; output path helpers live in `src/config.py`,
   and trial results remain in that directory as in the API.
-- `src/logging_config.py` preserves the API memory logging implementation;
-  `src/common/log/logging_utils.py` re-exports its prompt/template/timing helpers.
-  `src/sensitive_filter.py` preserves the API redaction support. These use
-  service-owned settings and the existing trace context; process startup still
-  uses the existing observability logger. `LOG_LEVEL`/`LOG_FORMAT` for the migrated
-  helpers are separate from the process `PROFILE_LOG_LEVEL`/`PROFILE_LOG_FORMAT`.
+- Migrated business, prompt, template and timing logs use
+  `src/common/observability/logging.py`, controlled by `PROFILE_LOG_LEVEL` and
+  `PROFILE_LOG_FORMAT`. Callers use `get_logger()` directly without file
+  handlers; template details use DEBUG.
+  No separate prompt/template/timing log files are created. Pilot SSE retains
+  `time_log` as null; extraction result files remain unchanged.
 - The migrated ontology and tabular-input capabilities use the API's locked
   versions of Owlready2, RDFLib and pandas. The Docker builder includes native
   build tools; the runtime includes libmagic for attachment type detection.

@@ -5,7 +5,7 @@ from typing import Any, List, Optional, Tuple
 from uuid import uuid4
 
 from src.common.datetime_utils import utcnow_naive
-from src.logging_config import get_memory_logger
+from src.common.observability.logging import get_logger
 
 from src.models.base_response import RobustLLMResponse
 from src.models.graph_models import MemorySummaryNode
@@ -15,7 +15,7 @@ from src.common.prompt.prompt_utils import render_neo4j_memory_summary_prompt
 from src.common.language_utils import validate_language  # 使用集中化的语言校验
 from pydantic import Field
 
-logger = get_memory_logger(__name__)
+logger = get_logger(f"memory.{__name__}")
 
 
 class MemorySummaryResponse(RobustLLMResponse):

@@ -125,31 +125,6 @@ class ProfileSettings(BaseSettings):
     trial_run_chat_history_rounds: int = Field(20, validation_alias="TRIAL_RUN_CHAT_HISTORY_ROUNDS")
     memory_output_dir: str = Field("logs/memory-output", validation_alias="MEMORY_OUTPUT_DIR")
 
-    # API-compatible memory logging; PROFILE_LOG_* continues to configure the service root logger.
-    memory_log_level: str = Field("INFO", validation_alias="LOG_LEVEL")
-    memory_log_format: str = Field("%(asctime)s - [%(trace_id)s] -%(name)s - %(levelname)s - %(message)s", validation_alias="LOG_FORMAT")
-    log_file_path: str = Field("logs/app.log", validation_alias="LOG_FILE_PATH")
-    log_max_size: int = Field(10485760, validation_alias="LOG_MAX_SIZE")
-    log_to_console: bool = Field(True, validation_alias="LOG_TO_CONSOLE")
-    log_to_file: bool = Field(True, validation_alias="LOG_TO_FILE")
-    prompt_log_level: str = Field("INFO", validation_alias="PROMPT_LOG_LEVEL")
-    enable_template_logging: bool = Field(False, validation_alias="ENABLE_TEMPLATE_LOGGING")
-    timing_log_file: str = Field("logs/time.log", validation_alias="TIMING_LOG_FILE")
-    timing_log_to_console: bool = Field(True, validation_alias="TIMING_LOG_TO_CONSOLE")
-    agent_log_file: str = Field("logs/agent_service.log", validation_alias="AGENT_LOG_FILE")
-    agent_log_max_size: int = Field(5242880, validation_alias="AGENT_LOG_MAX_SIZE")
-    agent_log_backup_count: int = Field(20, validation_alias="AGENT_LOG_BACKUP_COUNT")
-    enable_sensitive_data_filter: bool = Field(True, validation_alias="ENABLE_SENSITIVE_DATA_FILTER")
-
-    @field_validator(
-        "log_to_console", "log_to_file", "enable_template_logging",
-        "timing_log_to_console", "enable_sensitive_data_filter", mode="before"
-    )
-    @classmethod
-    def normalize_memory_logging_boolean(cls, value: object) -> object:
-        return value.lower() == "true" if isinstance(value, str) else value
-
-
     @field_validator(
         "extract_pruning_url", "extract_pruning_api_key", "extract_pruning_model", mode="before"
     )

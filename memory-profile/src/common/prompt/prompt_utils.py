@@ -4,7 +4,10 @@ from typing import Any as OntologyTypeList
 
 from jinja2 import Environment, FileSystemLoader
 
-from src.common.log.logging_utils import log_prompt_rendering, log_template_rendering
+from src.common.observability.logging import get_logger
+
+prompt_logger = get_logger("memory.prompts")
+template_logger = get_logger("memory.templates")
 
 # Setup Jinja2 environment
 # Resolve templates from src/prompt/extraction_engine/.
@@ -63,19 +66,16 @@ async def render_statement_extraction_prompt(
         language=language,
     )
     # 记录渲染结果到提示日志（与示例日志结构一致）
-    log_prompt_rendering("statement extraction", rendered_prompt)
+    prompt_logger.info("\n=== RENDERED %s PROMPT ===\n%s\n%s\n", ("statement extraction").upper(), rendered_prompt, "=" * 50)
     # 可选：记录模板渲染信息
-    log_template_rendering(
-        "extract_statement_temporal.jinja2",
-        {
+    template_logger.debug("Rendering template: %s with context keys: %s", "extract_statement_temporal.jinja2", list(({
             "inputs": "chunk",
             "definitions": "LABEL_DEFINITIONS",
             "json_schema": "StatementExtractionResponse.schema",
             "granularity": "int|None",
             "include_dialogue_context": include_dialogue_context,
             "dialogue_context_len": (len(ctx) if isinstance(ctx, str) else 0),
-        },
-    )
+        }).keys()))
 
     return rendered_prompt
 
@@ -95,7 +95,7 @@ async def render_statement_classification_fallback_prompt(
         input_json=json.dumps(input_json, ensure_ascii=False),
         language=language,
     )
-    log_prompt_rendering("statement classification fallback", rendered_prompt)
+    prompt_logger.info("\n=== RENDERED %s PROMPT ===\n%s\n%s\n", ("statement classification fallback").upper(), rendered_prompt, "=" * 50)
     return rendered_prompt
 
 
@@ -172,11 +172,9 @@ async def render_triplet_extraction_prompt(
         has_unsolved_reference=has_unsolved_reference,
     )
     # 记录渲染结果到提示日志（与示例日志结构一致）
-    log_prompt_rendering("triplet extraction", rendered_prompt)
+    prompt_logger.info("\n=== RENDERED %s PROMPT ===\n%s\n%s\n", ("triplet extraction").upper(), rendered_prompt, "=" * 50)
     # 可选：记录模板渲染信息
-    log_template_rendering(
-        "extract_triplet.jinja2",
-        {
+    template_logger.debug("Rendering template: %s with context keys: %s", "extract_triplet.jinja2", list(({
             "statement": "str",
             "chunk_content": "str",
             "json_schema": "TripletExtractionResponse.schema",
@@ -185,8 +183,7 @@ async def render_triplet_extraction_prompt(
             "ontology_types": bool(ontology_type_section),
             "ontology_type_count": len(ontology_type_names),
             "type_hierarchy_hints_count": len(type_hierarchy_hints),
-        },
-    )
+        }).keys()))
 
     return rendered_prompt
 
@@ -262,16 +259,13 @@ async def render_memory_summary_prompt(  # 只提供给RAG存储使用
         max_words=max_words,
         language=language,
     )
-    log_prompt_rendering("memory summary", rendered_prompt)
-    log_template_rendering(
-        "memory_summary.jinja2",
-        {
+    prompt_logger.info("\n=== RENDERED %s PROMPT ===\n%s\n%s\n", ("memory summary").upper(), rendered_prompt, "=" * 50)
+    template_logger.debug("Rendering template: %s with context keys: %s", "memory_summary.jinja2", list(({
             "chunk_texts_len": len(chunk_texts or ""),
             "max_words": max_words,
             "json_schema": "MemorySummaryResponse.schema",
             "language": language,
-        },
-    )
+        }).keys()))
     return rendered_prompt
 
 
@@ -301,16 +295,13 @@ async def render_emotion_extraction_prompt(
     )
 
     # 记录渲染结果到提示日志
-    log_prompt_rendering("emotion extraction", rendered_prompt)
+    prompt_logger.info("\n=== RENDERED %s PROMPT ===\n%s\n%s\n", ("emotion extraction").upper(), rendered_prompt, "=" * 50)
     # 可选：记录模板渲染信息
-    log_template_rendering(
-        "extract_emotion.jinja2",
-        {
+    template_logger.debug("Rendering template: %s with context keys: %s", "extract_emotion.jinja2", list(({
             "statement": "str",
             "extract_keywords": extract_keywords,
             "enable_subject": enable_subject,
-        },
-    )
+        }).keys()))
 
     return rendered_prompt
 
@@ -330,12 +321,9 @@ async def render_episodic_title_and_type_prompt(content: str, language: str = "z
     rendered_prompt = template.render(content=content, language=language)
 
     # 记录渲染结果到提示日志
-    log_prompt_rendering("episodic title and type classification", rendered_prompt)
+    prompt_logger.info("\n=== RENDERED %s PROMPT ===\n%s\n%s\n", ("episodic title and type classification").upper(), rendered_prompt, "=" * 50)
     # 可选：记录模板渲染信息
-    log_template_rendering(
-        "episodic_type_classification.jinja2",
-        {"content_len": len(content) if content else 0, "language": language},
-    )
+    template_logger.debug("Rendering template: %s with context keys: %s", "episodic_type_classification.jinja2", list(({"content_len": len(content) if content else 0, "language": language}).keys()))
 
     return rendered_prompt
 
@@ -370,18 +358,15 @@ async def render_ontology_extraction_prompt(
     )
 
     # 记录渲染结果到提示日志
-    log_prompt_rendering("ontology extraction", rendered_prompt)
+    prompt_logger.info("\n=== RENDERED %s PROMPT ===\n%s\n%s\n", ("ontology extraction").upper(), rendered_prompt, "=" * 50)
     # 可选：记录模板渲染信息
-    log_template_rendering(
-        "extract_ontology.jinja2",
-        {
+    template_logger.debug("Rendering template: %s with context keys: %s", "extract_ontology.jinja2", list(({
             "scenario_len": len(scenario) if scenario else 0,
             "domain": domain,
             "max_classes": max_classes,
             "json_schema": "OntologyExtractionResponse.schema",
             "language": language,
-        },
-    )
+        }).keys()))
 
     return rendered_prompt
 
@@ -410,13 +395,10 @@ async def render_neo4j_memory_summary_prompt(
         max_words=max_words,
         language=language,
     )
-    log_prompt_rendering("neo4j memory summary (title+type+summary)", rendered_prompt)
-    log_template_rendering(
-        "neo4j_memory_summary.jinja2",
-        {
+    prompt_logger.info("\n=== RENDERED %s PROMPT ===\n%s\n%s\n", ("neo4j memory summary (title+type+summary)").upper(), rendered_prompt, "=" * 50)
+    template_logger.debug("Rendering template: %s with context keys: %s", "neo4j_memory_summary.jinja2", list(({
             "chunk_texts_len": len(chunk_texts or ""),
             "max_words": max_words,
             "language": language,
-        },
-    )
+        }).keys()))
     return rendered_prompt

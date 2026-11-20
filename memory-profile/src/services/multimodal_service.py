@@ -34,12 +34,12 @@ from redbear_model.contracts import Modality
 from src.bootstrap import get_settings
 from src.common.errors import BizCode, ProfileError
 from src.common.text_sanitize import sanitize_text
-from src.logging_config import get_business_logger
+from src.common.observability.logging import get_logger
 from src.infrastructure.file_storage import FileStorageService, LocalStorage
 from src.services.file_content_service import extract_permanent_file_id
 from src.schemas.memory_storage import FileInput, FileType, FileUploadConfig, TransferMethod
 
-logger = get_business_logger()
+logger = get_logger("business")
 
 TEXT_MIME = ["text/plain", "text/x-markdown"]
 PDF_MIME = ["application/pdf"]

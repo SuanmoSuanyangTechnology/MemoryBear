@@ -948,10 +948,7 @@ class MemoryStorageService:
             ValueError: 当配置无效或参数缺失时
             RuntimeError: 当管线执行失败时
         """
-        from pathlib import Path
         from src.bootstrap import get_settings
-
-        project_root = str(Path(__file__).resolve().parents[2])
 
         try:
             # 发出初始进度事件
@@ -1078,7 +1075,7 @@ class MemoryStorageService:
             # 步骤 6: 组装结果（试运行不做额外覆盖率后处理）
             result_data = {
                 "config_id": cid,
-                "time_log": os.path.join(project_root, "logs", "time.log"),
+                "time_log": None,
                 "extracted_result": extracted_result,
             }
 
@@ -2030,18 +2027,15 @@ class MemoryStorageService:
             language: 语言类型 ("zh" | "en")
         """
         from src.common.datetime_utils import ensure_dialog_at, utcnow_naive
-        from src.logging_config import log_time
+        from src.common.observability.logging import get_logger
         from src.models.message_models import ConversationContext, ConversationMessage, DialogData
         from src.storage_services.extraction_engine.pipeline_help import (
             _write_extracted_result_summary, export_test_input_doc,
         )
 
-        log_file = get_settings().get_memory_output_path("time.log")
-        os.makedirs(os.path.dirname(log_file), exist_ok=True)
-
+        timing_logger = get_logger("memory.timing")
         timestamp = utcnow_naive().strftime("%Y-%m-%d %H:%M:%S")
-        with open(log_file, "a", encoding="utf-8") as f:
-            f.write(f"\n=== Pilot Run Started: {timestamp} ===\n")
+        logger.info(f"=== Pilot Run Started: {timestamp} ===")
 
         # 统一使用 emit，避免到处判断 callback 是否为 None
         emit: ProgressCallback = progress_callback or _noop_progress
@@ -2059,7 +2053,7 @@ class MemoryStorageService:
                 {"perceptual_nodes": _collect_perceptual_nodes_data(perceptual_snapshots)},
             )
             await emit("perceptual_complete", "感知记忆提取完成", {"count": len(perceptual_snapshots)})
-            log_time("Perceptual Snapshot Generation", time.time() - step_start, log_file)
+            timing_logger.info("✓ %s: %.2fs", "Perceptual Snapshot Generation", time.time() - step_start)
 
             # 将 file_summary 注入回对应 message.content（对齐 WritePipeline._preprocess_files）
             message_content_map: dict[int, str] = {}
@@ -2117,7 +2111,7 @@ class MemoryStorageService:
 
             # ── 步骤 2.2: 语义分块 ────────────────────────────────────────────
             chunked_dialogs = await _run_chunking(pruned_dialogs, memory_config, llm_client, emit)
-            log_time("Data Loading & Chunking", time.time() - step_start, log_file)
+            timing_logger.info("✓ %s: %.2fs", "Data Loading & Chunking", time.time() - step_start)
 
             # ── 步骤 3: 萃取 ──────────────────────────────────────────────────
             step_start = time.time()
@@ -2140,7 +2134,7 @@ class MemoryStorageService:
                 embedder_client=Embedder(),
             ).run(chunked_dialogs)
 
-            log_time("Extraction Pipeline", time.time() - step_start, log_file)
+            timing_logger.info("✓ %s: %.2fs", "Extraction Pipeline", time.time() - step_start)
 
             # ── 步骤 4: 输出结果文件 ──────────────────────────────────────────
             await emit("generating_results", "正在生成结果...", None)
@@ -2169,9 +2163,8 @@ class MemoryStorageService:
             raise
 
         total_time = time.time() - pipeline_start
-        log_time("TOTAL PILOT RUN TIME", total_time, log_file)
-        with open(log_file, "a", encoding="utf-8") as f:
-            f.write(f"=== Pilot Run Completed: {utcnow_naive().strftime('%Y-%m-%d %H:%M:%S')} ===\n\n")
+        timing_logger.info("✓ %s: %.2fs", "TOTAL PILOT RUN TIME", total_time)
+        logger.info(f"=== Pilot Run Completed: {utcnow_naive().strftime('%Y-%m-%d %H:%M:%S')} ===")
         logger.info(f"Pilot run complete. Total time: {total_time:.2f}s")
 
     def _convert_emotion_types(self, obj: Any) -> Any:

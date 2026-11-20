@@ -22,13 +22,12 @@ from src.models.message_models import (
     ConversationContext,
 )
 from src.models.config_models import PruningConfig
-from src.common.prompt.prompt_utils import (
-    prompt_env,
-    log_prompt_rendering,
-    log_template_rendering,
-)
+from src.common.prompt.prompt_utils import prompt_env
+from src.common.observability.logging import get_logger
 
 logger = logging.getLogger(__name__)
+prompt_logger = get_logger("memory.prompts")
+template_logger = get_logger("memory.templates")
 
 
 def message_has_files(message: "ConversationMessage") -> bool:
@@ -178,8 +177,8 @@ class SemanticPruner:
             dialog_text=dialog_text,
             language=self.language,
         )
-        log_template_rendering("extract_pruning.jinja2", {"language": self.language})
-        log_prompt_rendering("pruning-assistant-hint", rendered)
+        template_logger.debug("Rendering template: %s with context keys: %s", "extract_pruning.jinja2", ["language"])
+        prompt_logger.info("\n=== RENDERED PRUNING-ASSISTANT-HINT PROMPT ===\n%s\n%s\n", rendered, "=" * 50)
 
         if not self.llm_client:
             raise RuntimeError("llm_client 未配置；请配置 LLM 以进行剪枝。")
