@@ -157,7 +157,8 @@ def get_end_user_info(
     # Top level: other_name is always returned, aliases only when it has
     # values. meta_data contains the display projection of the 13 shared
     # level-2 keys (at most 10 entries per key) plus domain-specific info.
-    raw_meta = info_record.meta_data if isinstance(info_record.meta_data, dict) else {}
+    # 用户信息展示只读新列；NULL / {} 均不回退历史旧列。
+    raw_meta = info_record.meta_data_new if isinstance(info_record.meta_data_new, dict) else {}
 
     selected_top: dict[str, Any] = {"other_name": info_record.other_name}
     if info_record.aliases:

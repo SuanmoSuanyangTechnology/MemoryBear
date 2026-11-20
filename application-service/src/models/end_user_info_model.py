@@ -19,6 +19,7 @@ class EndUserInfo(Base):
     other_name = Column(String, nullable=False, comment="关联的用户名称")
     aliases = Column(ARRAY(String), nullable=True, comment="用户别名列表（字符串数组）")
     meta_data = Column(JSONB, nullable=True, comment="用户相关的扩展信息（JSON格式）")
+    meta_data_new = Column(JSONB, nullable=True, comment="新结构画像；NULL 表示尚未迁移/生成")
     created_at = Column(DateTime, default=utcnow_naive, comment="创建时间")
     updated_at = Column(DateTime, default=utcnow_naive, onupdate=utcnow_naive, comment="更新时间")
 

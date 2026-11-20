@@ -3573,6 +3573,12 @@ def do_layer2_reflection(self, end_user_id: str | None = None, config_id: str = 
         from app.services.memory_reflection_service import WorkspaceAppService
         from app.core.memory.memory_service import MemoryService
 
+        from app.core.memory.storage_services.reflection_engine.deterministic.metadata_migration import (
+            read_metadata_baseline,
+        )
+        if read_metadata_baseline(end_user_id) is None:
+            return {"status": "skipped", "reason": "inactive_or_missing_info"}
+
         # 步骤1 执行前再判一次是否真的要反思：
         #   任务从 scan 派发到这里可能排队了一段时间，期间该用户可能已被别的
         #   反思任务处理过（reflection_time 已更新），这里复判避免重复反思。
@@ -3597,6 +3603,9 @@ def do_layer2_reflection(self, end_user_id: str | None = None, config_id: str = 
             if not await asyncio.to_thread(write_lock.acquire):
                 logger.warning(f"反思高频do 获取写锁超时，跳过 user={end_user_id}")
                 return {"status": "lock_timeout"}
+        else:
+            logger.warning("反思高频do 用户写锁不可用，跳过 user=%s", end_user_id)
+            return {"status": "lock_unavailable"}
         try:
             # 步骤2.5 double-check：拿到写锁后再复查一次是否仍需反思。
             #   并发下（concurrency>1 或多 worker 副本）另一个 do 可能在我们抢锁
@@ -3623,7 +3632,11 @@ def do_layer2_reflection(self, end_user_id: str | None = None, config_id: str = 
                 end_user_id=end_user_id,
                 workspace_id=workspace_id,
             )
-            r = await memory_service.run_reflection_layer2()
+            from app.core.memory.storage_services.reflection_engine.deterministic.metadata_migration import (
+                metadata_reflection_lock,
+            )
+            with metadata_reflection_lock(write_lock):
+                r = await memory_service.run_reflection_layer2()
 
             completion = rr.completion_of_layer2(r)
             progressed = rr.progressed_layer2(r)

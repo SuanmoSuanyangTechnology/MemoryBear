@@ -50,4 +50,5 @@ class EndUserInfo(Base):
     id = Column(UUID(as_uuid=True), primary_key=True)
     end_user_id = Column(UUID(as_uuid=True), nullable=False)
     meta_data = Column(JSONB, nullable=True)
+    meta_data_new = Column(JSONB, nullable=True)
     updated_at = Column(DateTime, nullable=True)

@@ -32,6 +32,10 @@ class PromptCatalog(Protocol):
 
     def tag_filter_user(self, tags: list[str]) -> str: ...
 
+    def metadata_migration(
+        self, *, entity_id: str, language: str, input_json: dict[str, object]
+    ) -> str: ...
+
     def interest_filter(
         self,
         candidates: list[dict[str, object]],

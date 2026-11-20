@@ -20,6 +20,7 @@ from src.runtime import JobsRuntime, get_runtime
 
 if TYPE_CHECKING:
     from src.composition.interest import InterestWiring
+    from src.composition.metadata_migration import MetadataMigrationWiring
     from src.composition.profile_cache import ProfileCacheWiring
 
 
@@ -30,6 +31,7 @@ class Container:
         # Supplied by the registry at runtime; annotated so callers stay typed.
         profile_cache: ProfileCacheWiring
         interest: InterestWiring
+        metadata_migration: MetadataMigrationWiring
 
     def __init__(self, runtime: JobsRuntime) -> None:
         shared = build_shared_dependencies(runtime)

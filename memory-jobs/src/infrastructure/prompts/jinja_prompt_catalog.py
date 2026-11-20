@@ -5,6 +5,7 @@ from __future__ import annotations
 from src.prompts import (
     render_interest_filter_prompt,
     render_memory_insight_prompt,
+    render_metadata_migration_prompt,
     render_tag_filter_system_prompt,
     render_tag_filter_user_prompt,
     render_user_summary_prompt,
@@ -18,9 +19,7 @@ class JinjaPromptCatalog:
         fallback_statements: list[str],
         language: str,
     ) -> str:
-        return render_memory_insight_prompt(
-            metadata_input, fallback_statements, language
-        )
+        return render_memory_insight_prompt(metadata_input, fallback_statements, language)
 
     def user_summary(
         self,
@@ -44,6 +43,13 @@ class JinjaPromptCatalog:
 
     def tag_filter_user(self, tags: list[str]) -> str:
         return render_tag_filter_user_prompt(tags)
+
+    def metadata_migration(
+        self, *, entity_id: str, language: str, input_json: dict[str, object]
+    ) -> str:
+        return render_metadata_migration_prompt(
+            entity_id=entity_id, language=language, input_json=input_json
+        )
 
     def interest_filter(
         self,
