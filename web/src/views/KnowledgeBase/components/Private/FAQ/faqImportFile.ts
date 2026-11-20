@@ -77,12 +77,18 @@ function validate(records: FaqImportRawRecord[], isJson: boolean): FaqImportPars
   };
 }
 
-/** Recognize and skip the "question,answer" header; treat the rest as data. */
+/**
+ * Recognize and skip the "question,answer" header; treat the rest as data.
+ * Header matching is case-insensitive and tolerates trailing empty columns
+ * (e.g. `Question, Answer,`), as long as the first two cells are the expected
+ * question/answer headers.
+ */
 function fromRecords(records: FaqImportRawRecord[]): FaqImportParseResult {
   const first = records[0];
   const firstCell = toText(first?.cells[0]).toLowerCase();
   if (first && QUESTION_HEADERS.includes(firstCell)) {
-    if (first.cells.length !== 2 || !ANSWER_HEADERS.includes(toText(first.cells[1]).toLowerCase())) {
+    const secondCell = toText(first.cells[1]).toLowerCase();
+    if (!secondCell || !ANSWER_HEADERS.includes(secondCell)) {
       return fileImportError('badHeader', { line: first.line });
     }
     return validate(records.slice(1), false);
