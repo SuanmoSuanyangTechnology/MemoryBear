@@ -17,8 +17,10 @@ from src.models.references.memory_reembed_model import (
 )
 from src.models.references.memory_statistics_model import (
     Conversation,
+    DialogueEmotionRaw,
     ForgetAudit,
     ImplicitEmotionsStorage,
+    MemoryIncrement,
     MemoryMessage,
     MemoryPerceptual,
     ShortTermMemory,
@@ -28,6 +30,8 @@ from src.models.references.workspace_model import Workspace
 
 __all__ = [
     "Conversation",
+    "DialogueEmotionRaw",
+    "MemoryIncrement",
     "EndUser",
     "EndUserInfo",
     "MemoryConfigRow",

@@ -18,12 +18,14 @@ from src.common.responses import ApiResponse, legacy_fail_response
 from src.middleware.auth import MemoryPrincipal
 from src.runtime import ProfileRuntime
 from src.schemas.working_memory import (
+    ConversationDetailData,
     ConversationsData,
     MessagesData,
     PageInfo,
     SourceMessagesData,
     SourceStatItem,
 )
+from src.services.conversation_detail import ConversationDetailService
 from src.services.working_memory import WorkingMemoryService
 
 logger = logging.getLogger(__name__)
@@ -38,12 +40,24 @@ class WorkingMemoryHandler:
         *,
         service: WorkingMemoryService | None = None,
     ) -> None:
+        self.detail_service = ConversationDetailService(runtime) if runtime is not None else None
         if service is not None:
             self.service = service
         elif runtime is not None:
             self.service = WorkingMemoryService(runtime)
         else:
             raise ValueError("Either runtime or service must be provided")
+
+    async def get_detail(
+        self, context: MemoryPrincipal, end_user_id: str, conversation_id: str
+    ) -> ApiResponse[ConversationDetailData] | JSONResponse:
+        if self.detail_service is None:
+            raise RuntimeError("Conversation detail service requires runtime")
+        try:
+            data = await self.detail_service.detail(context, end_user_id, conversation_id)
+        except ProfileError as exc:
+            return legacy_fail_response(exc.code, exc.message, exc.detail)
+        return ApiResponse[ConversationDetailData](data=data, msg="get conversation detail success")
 
     async def get_conversations(
         self,

@@ -42,6 +42,10 @@ class TaskName(StrEnum):
     PROFILE_CACHE_SCAN = "memory_jobs.profile_cache.scan"
     METADATA_MIGRATION_SCAN = "memory_jobs.metadata_migration.scan"
     METADATA_MIGRATION_DO = "memory_jobs.metadata_migration.do"
+    RAG_PROFILE_GENERATE = "memory_jobs.dashboard.rag_profile_generate"
+    EMOTION_SUGGESTIONS_GENERATE = "memory_jobs.emotion.suggestions_generate"
+    FORGETTING_TRIGGER = "memory_jobs.forgetting.trigger"
+    WORKING_MEMORY_DETAIL_GENERATE = "memory_jobs.working_memory.detail_generate"
 
 
 class QueueName(StrEnum):

@@ -14,8 +14,17 @@ from contextlib import contextmanager
 from sqlalchemy.orm import Session, sessionmaker
 
 from src.application.ports.uow import Repositories
+from src.infrastructure.persistence.postgres.conversation_detail_repository import (
+    SqlAlchemyConversationDetailRepository,
+)
+from src.infrastructure.persistence.postgres.emotion_repository import (
+    SqlAlchemyEmotionSuggestionsRepository,
+)
 from src.infrastructure.persistence.postgres.end_user_repository import (
     SqlAlchemyEndUserDirectoryRepository,
+)
+from src.infrastructure.persistence.postgres.forgetting_repository import (
+    SqlAlchemyForgettingRepository,
 )
 from src.infrastructure.persistence.postgres.insight_repository import (
     SqlAlchemyMemoryInsightRepository,
@@ -29,8 +38,14 @@ from src.infrastructure.persistence.postgres.model_config_repository import (
 from src.infrastructure.persistence.postgres.profile_refresh_repository import (
     SqlAlchemyProfileRefreshReader,
 )
+from src.infrastructure.persistence.postgres.rag_profile_repository import (
+    SqlAlchemyRAGProfileRepository,
+)
 from src.infrastructure.persistence.postgres.summary_repository import (
     SqlAlchemyUserSummaryRepository,
+)
+from src.infrastructure.persistence.postgres.task_context_repository import (
+    SqlAlchemyTaskContextRepository,
 )
 from src.infrastructure.persistence.postgres.workspace_repository import (
     SqlAlchemyWorkspaceRepository,
@@ -78,4 +93,9 @@ class SqlAlchemyUnitOfWork:
             insights=SqlAlchemyMemoryInsightRepository(session),
             summaries=SqlAlchemyUserSummaryRepository(session),
             metadata_migration=SqlAlchemyMetadataMigrationRepository(session),
+            task_context=SqlAlchemyTaskContextRepository(session),
+            rag_profiles=SqlAlchemyRAGProfileRepository(session),
+            emotion_suggestions=SqlAlchemyEmotionSuggestionsRepository(session),
+            forgetting=SqlAlchemyForgettingRepository(session),
+            conversation_details=SqlAlchemyConversationDetailRepository(session),
         )

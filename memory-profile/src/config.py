@@ -245,7 +245,16 @@ class ProfileSettings(BaseSettings):
     )
     #: Which backend serves graph reads (``ELASTIC`` / ``NEO4J``); the ported
     #: storage ``BackendFactory`` matches this value directly, like the host.
-    memory_read_backend: str = Field("ELASTIC", validation_alias="MEMORY_READ_BACKEND")
+    memory_read_backend: Literal["ELASTIC", "NEO4J"] = Field(
+        "ELASTIC", validation_alias="MEMORY_READ_BACKEND"
+    )
+
+    @field_validator("memory_read_backend", mode="before")
+    @classmethod
+    def normalize_read_backend(cls, value: str) -> str:
+        normalized = value.strip().upper()
+        return "ELASTIC" if normalized == "ELASTICSEARCH" else normalized
+
     #: Allow the Elasticsearch index ensure step to rebuild a *newer* index from an
     #: older definition (host ``ES_ALLOW_DOWNGRADE``); off by default.
     es_allow_downgrade: bool = Field(False, validation_alias="ES_ALLOW_DOWNGRADE")
