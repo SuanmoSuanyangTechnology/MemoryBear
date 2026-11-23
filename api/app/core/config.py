@@ -582,6 +582,13 @@ class Settings:
     REDIS_DB_CELERY_BROKER: int = int(os.getenv("REDIS_DB_CELERY_BROKER", "3"))
     REDIS_DB_CELERY_BACKEND: int = int(os.getenv("REDIS_DB_CELERY_BACKEND", "4"))
 
+    # P1-W7 handover: application-service owns the workflow schedule scan once its
+    # worker/beat are deployed. Set false to drop the monolith beat entry (the
+    # task itself stays registered so an in-flight monolith worker can drain).
+    ENABLE_MONOLITH_WORKFLOW_SCAN: bool = (
+        os.getenv("ENABLE_MONOLITH_WORKFLOW_SCAN", "true").lower() == "true"
+    )
+
     # 通知中心配置
     NOTIFICATION_REDIS_DB: int = int(os.getenv("NOTIFICATION_REDIS_DB", "8"))
     NOTIFICATION_SCAN_INTERVAL_SECONDS: int = int(os.getenv("NOTIFICATION_SCAN_INTERVAL_SECONDS", "60"))

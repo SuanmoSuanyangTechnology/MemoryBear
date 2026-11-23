@@ -766,49 +766,6 @@ class AgentRunService:
             await db.refresh(new_msg)
             return _snapshot_message(new_msg)
 
-    async def _create_tts_file_metadata_async(
-            self,
-            *,
-            file_id: uuid.UUID,
-            tenant_id: Optional[uuid.UUID],
-            workspace_id: Optional[uuid.UUID],
-            file_key: str,
-            file_name: str,
-            file_ext: str,
-            content_type: str,
-    ) -> None:
-        async with get_async_db_context() as db:
-            db.add(
-                FileMetadata(
-                    id=file_id,
-                    tenant_id=tenant_id,
-                    workspace_id=workspace_id,
-                    file_key=file_key,
-                    file_name=file_name,
-                    file_ext=file_ext,
-                    file_size=0,
-                    content_type=content_type,
-                    status="pending",
-                )
-            )
-            await db.commit()
-
-    async def _update_tts_file_metadata_async(
-            self,
-            *,
-            file_id: uuid.UUID,
-            status: str,
-            file_size: Optional[int] = None,
-    ) -> None:
-        async with get_async_db_context() as db:
-            record = await db.get(FileMetadata, file_id)
-            if not record:
-                return
-            record.status = status
-            if file_size is not None:
-                record.file_size = file_size
-            await db.commit()
-
     async def _add_message_async(
             self,
             *,
@@ -3616,14 +3573,20 @@ class AgentRunService:
             tenant_id: Optional[uuid.UUID] = None,
             workspace_id: Optional[uuid.UUID] = None,
     ) -> Optional[str]:
-        """Register file metadata and return audio_url first; stream the audio content to storage in the background."""
+        """Register a pending record and return audio_url first; stream the audio content to storage in the background."""
         tts_config = features_config.get("text_to_speech", {})
         if not isinstance(tts_config, dict) or not tts_config.get("enabled"):
             return None
         if not text or not text.strip():
             return None
+        if tenant_id is None:
+            raise BusinessException(
+                "tenant context is required to register the TTS output",
+                BizCode.BAD_REQUEST,
+            )
 
-        from .file_storage_service import FileStorageService, generate_file_key
+        from ..integrations.file_service import get_file_service_client
+        from .file_storage_service import FileStorageService
 
         provider = api_key_config.get("provider", "openai")
         api_key = api_key_config.get("api_key")
@@ -3635,24 +3598,30 @@ class AgentRunService:
             isinstance(api_base, str) and "dashscope.aliyuncs.com" in api_base
         )
 
-        file_id = uuid.uuid4()
-        file_key = generate_file_key(tenant_id, workspace_id, file_id, file_ext)
-
-        # Write pending-status metadata first and return the URL immediately
-        await self._create_tts_file_metadata_async(
-            file_id=file_id,
-            tenant_id=tenant_id,
-            workspace_id=workspace_id,
-            file_key=file_key,
-            file_name=f"tts_{file_id}{file_ext}",
-            file_ext=file_ext,
-            content_type=content_type,
-        )
+        file_client = get_file_service_client()
+        try:
+            pending = await file_client.create_pending(
+                tenant_id=tenant_id,
+                workspace_id=workspace_id,
+                actor_id=None,
+                file_name=f"tts_{uuid.uuid4()}{file_ext}",
+                file_ext=file_ext,
+                content_type=content_type,
+            )
+        except BusinessException as e:
+            # TTS is optional: the file service is an independent failure domain,
+            # so a bookkeeping failure must not break the chat turn (same skip
+            # semantics as multi_agent_orchestrator TTS setup).
+            logger.warning(f"TTS 初始化失败（已跳过）: {e}")
+            return None
+        file_id = uuid.UUID(pending.file_id)
+        file_ext = pending.file_ext or file_ext
+        file_key = pending.file_key
 
         server_url = current_settings().file_local_server_url
-        audio_url = f"{server_url}/storage/permanent/{file_id}"
+        audio_url = f"{server_url}/storage/permanent/{pending.file_id}"
 
-        # Background task: stream-generate and write to storage, then update the status
+        # Background task: stream-generate and write to storage, then mark the record completed
         async def _stream_to_storage():
             try:
                 storage_service = FileStorageService()
@@ -3680,18 +3649,25 @@ class AgentRunService:
                     content_type=content_type,
                 )
 
-                await self._update_tts_file_metadata_async(
-                    file_id=file_id,
-                    status="completed",
-                    file_size=total_size,
+                await file_client.complete(
+                    tenant_id=tenant_id,
+                    workspace_id=workspace_id,
+                    actor_id=None,
+                    file_id=pending.file_id,
+                    size=total_size,
                 )
                 logger.debug(f"TTS 流式写入完成，provider={provider}, file_key={file_key}")
             except Exception as e:
                 logger.warning(f"TTS 流式写入失败: {e}")
-                await self._update_tts_file_metadata_async(
-                    file_id=file_id,
-                    status="failed",
-                )
+                try:
+                    await file_client.fail(
+                        tenant_id=tenant_id,
+                        workspace_id=workspace_id,
+                        actor_id=None,
+                        file_id=pending.file_id,
+                    )
+                except Exception as fail_exc:
+                    logger.warning(f"TTS 文件状态更新失败: {fail_exc}")
 
         asyncio.create_task(_stream_to_storage())
         return audio_url
@@ -3713,8 +3689,14 @@ class AgentRunService:
         tts_config = features_config.get("text_to_speech", {})
         if not isinstance(tts_config, dict) or not tts_config.get("enabled"):
             return None, None
+        if tenant_id is None:
+            raise BusinessException(
+                "tenant context is required to register the TTS output",
+                BizCode.BAD_REQUEST,
+            )
 
-        from .file_storage_service import FileStorageService, generate_file_key
+        from ..integrations.file_service import get_file_service_client
+        from .file_storage_service import FileStorageService
 
         provider = api_key_config.get("provider", "openai")
         api_key = api_key_config.get("api_key")
@@ -3726,21 +3708,28 @@ class AgentRunService:
             isinstance(api_base, str) and "dashscope.aliyuncs.com" in api_base
         )
 
-        file_id = uuid.uuid4()
-        file_key = generate_file_key(tenant_id, workspace_id, file_id, file_ext)
-
-        await self._create_tts_file_metadata_async(
-            file_id=file_id,
-            tenant_id=tenant_id,
-            workspace_id=workspace_id,
-            file_key=file_key,
-            file_name=f"tts_{file_id}{file_ext}",
-            file_ext=file_ext,
-            content_type=content_type,
-        )
+        file_client = get_file_service_client()
+        try:
+            pending = await file_client.create_pending(
+                tenant_id=tenant_id,
+                workspace_id=workspace_id,
+                actor_id=None,
+                file_name=f"tts_{uuid.uuid4()}{file_ext}",
+                file_ext=file_ext,
+                content_type=content_type,
+            )
+        except BusinessException as e:
+            # TTS is optional: the file service is an independent failure domain,
+            # so a bookkeeping failure must not break the chat turn (same skip
+            # semantics as multi_agent_orchestrator TTS setup).
+            logger.warning(f"TTS 初始化失败（已跳过）: {e}")
+            return None, None
+        file_id = uuid.UUID(pending.file_id)
+        file_ext = pending.file_ext or file_ext
+        file_key = pending.file_key
 
         server_url = current_settings().file_local_server_url
-        audio_url = f"{server_url}/storage/permanent/{file_id}"
+        audio_url = f"{server_url}/storage/permanent/{pending.file_id}"
 
         async def _run():
             try:
@@ -3767,18 +3756,25 @@ class AgentRunService:
                     stream=audio_stream,
                     content_type=content_type,
                 )
-                await self._update_tts_file_metadata_async(
-                    file_id=file_id,
-                    status="completed",
-                    file_size=total_size,
+                await file_client.complete(
+                    tenant_id=tenant_id,
+                    workspace_id=workspace_id,
+                    actor_id=None,
+                    file_id=pending.file_id,
+                    size=total_size,
                 )
                 logger.debug(f"TTS 流式合成完成，provider={provider}, file_key={file_key}")
             except Exception as e:
                 logger.warning(f"TTS 流式合成失败: {e}")
-                await self._update_tts_file_metadata_async(
-                    file_id=file_id,
-                    status="failed",
-                )
+                try:
+                    await file_client.fail(
+                        tenant_id=tenant_id,
+                        workspace_id=workspace_id,
+                        actor_id=None,
+                        file_id=pending.file_id,
+                    )
+                except Exception as fail_exc:
+                    logger.warning(f"TTS 文件状态更新失败: {fail_exc}")
 
         task = asyncio.create_task(_run())
         return audio_url, task

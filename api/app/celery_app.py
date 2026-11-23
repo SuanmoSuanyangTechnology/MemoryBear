@@ -132,8 +132,6 @@ celery_app.conf.update(
         'app.tasks.do_layer2_dedup_full_scan': {'queue': 'reflection_tasks'},
         'app.tasks.scan_reflection_retry': {'queue': 'periodic_tasks'},
         'app.tasks.regenerate_memory_cache': {'queue': 'periodic_tasks'},
-        # 网关告警评估（B9）：独立消费组读部署域用量流，喂宿主企业告警插件
-        'app.tasks.consume_model_gateway_alerts': {'queue': 'periodic_tasks'},
 
         # GDS 拓扑分数：scan 在 periodic 扫描，计算在 memory_heavy 执行
         'app.tasks.scan_gds_topology_score': {'queue': 'periodic_tasks'},
@@ -147,7 +145,7 @@ celery_app.conf.update(
 
         'app.tasks.draft_data_clean': {'queue': 'memory_tasks'},
         'app.tasks.scan_idle_conversations': {'queue': 'periodic_tasks'},
-        'app.tasks.scan_workflow_schedule_triggers': {'queue': 'periodic_tasks'},
+        'app.tasks.scan_workflow_schedule_triggers': {'queue': 'workflow_trigger_tasks'},
         'app.tasks.run_workflow_schedule_trigger': {'queue': 'workflow_trigger_tasks'},
 
         # Memory-heavy tasks → memory_heavy_tasks queue (prefork worker, CPU-bound + beat long tasks)
@@ -392,7 +390,7 @@ beat_schedule_config = {
     "scan-workflow-schedule-triggers": {
         "task": "app.tasks.scan_workflow_schedule_triggers",
         "schedule": 60.0,
-        "options": {"queue": "periodic_tasks"},
+        "options": {"queue": "workflow_trigger_tasks", "expires": 55},
     },
     "draft-data-clean": {
         "task": "app.tasks.draft_data_clean",
@@ -414,7 +412,18 @@ beat_schedule_config = {
     },
 }
 
-celery_app.conf.beat_schedule = beat_schedule_config
+
+def _apply_workflow_scan_gate(schedule: dict, enabled: bool) -> dict:
+    """Drop the monolith scan entry when the split service owns the schedule."""
+
+    if not enabled:
+        schedule.pop("scan-workflow-schedule-triggers", None)
+    return schedule
+
+
+celery_app.conf.beat_schedule = _apply_workflow_scan_gate(
+    beat_schedule_config, settings.ENABLE_MONOLITH_WORKFLOW_SCAN
+)
 
 if _HAS_AI_PERSONALITY:
     celery_app.conf.beat_schedule["extract-ai-personality"] = {
@@ -425,42 +434,6 @@ if _HAS_AI_PERSONALITY:
         ),
         "options": {"queue": "periodic_tasks"},
     }
-
-# 企业版订阅任务调度配置（_HAS_SUBSCRIPTION_TASKS 在上方路由注册处探测完成）
-# 可通过环境变量调整频率（默认保持原行为）：
-#   SUBSCRIPTION_STATE_BEAT_INTERVAL_MINUTES=N   → 状态变更主循环周期（默认 10；测试时可改成 1）
-#   SUBSCRIPTION_EMAIL_BEAT_INTERVAL_MINUTES=N   → 邮件提醒周期（默认 60；测试时可改成 1）
-_SUBSCRIPTION_STATE_BEAT_INTERVAL_MINUTES = int(os.getenv("SUBSCRIPTION_STATE_BEAT_INTERVAL_MINUTES", "10"))
-_SUBSCRIPTION_EMAIL_BEAT_INTERVAL_MINUTES = int(os.getenv("SUBSCRIPTION_EMAIL_BEAT_INTERVAL_MINUTES", "60"))
-
-# 状态变更任务（默认每 10 分钟一次 + 每天 2 点兜底）
-if _HAS_SUBSCRIPTION_TASKS:
-    celery_app.conf.beat_schedule.update({
-        # 主处理：每 N 分钟扫一次过期订阅（支持10万租户，concurrency=4可并行处理）
-        "process-expired-subscriptions": {
-            "task": "subscription.process_expired_subscriptions",
-            "schedule": crontab(minute=f"*/{_SUBSCRIPTION_STATE_BEAT_INTERVAL_MINUTES}"),
-            "options": {"queue": "subscription_state_tasks"},
-        },
-        # 兜底修复：每天北京凌晨 2:00（= UTC 18:00）再全量扫一次，
-        # 处理主循环因异常/重启/时钟漂移遗漏的租户
-        "process-expired-subscriptions-daily": {
-            "task": "subscription.process_expired_subscriptions",
-            "schedule": crontab(hour=18, minute=0),  # UTC 18:00 = CST 02:00
-            "options": {"queue": "subscription_state_tasks"},
-        },
-    })
-
-# 邮件提醒任务（默认每小时一次）
-if _HAS_SUBSCRIPTION_TASKS:
-    celery_app.conf.beat_schedule.update({
-        # 到期提醒：每 N 分钟投递一次；旧扫描任务超过 1 小时未被消费则过期丢弃
-        "subscription-expiration-reminder": {
-            "task": "subscription.expiration_reminder",
-            "schedule": timedelta(minutes=_SUBSCRIPTION_EMAIL_BEAT_INTERVAL_MINUTES),
-            "options": {"queue": "subscription_email_tasks", "expires": 3600},
-        },
-    })
 
 # 消息通知中心定时任务（每秒/每分钟扫描到期排期与到期下架）
 # 通过 settings 读取环境变量 NOTIFICATION_SCAN_INTERVAL_SECONDS（默认 60 秒）
@@ -478,58 +451,3 @@ class NoCatchupSchedule(schedule):
 # 用量事件消费（M4，spec §13.2）：消费端已迁入 model-service 进程内常驻任务（服务无 celery，
 # 多副本天然同组分摊），此处不再排期；任务壳与路由保留仅供手工兜底，G5 随壳删除。
 
-if _HAS_NOTIFICATION_TASKS:
-    celery_app.conf.beat_schedule.update({
-        # 扫描 scheduled + publish_at<=now，领取后投递 notification.publish
-        "notification-scan-scheduled": {
-            "task": "notification.scan_scheduled",
-            "schedule": NoCatchupSchedule(
-                run_every=timedelta(seconds=_NOTIFICATION_SCAN_INTERVAL_SECONDS)
-            ),
-            "options": {"queue": "notification_state_tasks", "expires": 120},
-        },
-        # 扫描 published + expire_at<=now，转为 expired
-        "notification-scan-expired": {
-            "task": "notification.scan_expired",
-            "schedule": NoCatchupSchedule(
-                run_every=timedelta(seconds=_NOTIFICATION_SCAN_INTERVAL_SECONDS)
-            ),
-            "options": {"queue": "notification_state_tasks", "expires": 120},
-        },
-        # 扫描 publishing 超时（publish_requested_at > 600s），回退 draft
-        "notification-scan-stuck-publishing": {
-            "task": "notification.scan_stuck_publishing",
-            "schedule": NoCatchupSchedule(
-                run_every=timedelta(seconds=_NOTIFICATION_SCAN_INTERVAL_SECONDS)
-            ),
-            "options": {"queue": "notification_state_tasks", "expires": 120},
-        },
-        # 每日凌晨 3:00 清理超过保留天数的通知及快照
-        "notification-cleanup-retention": {
-            "task": "notification.cleanup_retention",
-            "schedule": crontab(hour=3, minute=0),
-            "options": {"queue": "notification_state_tasks", "expires": 3600},
-        },
-        # 每 10 分钟采集租户企业余额；任务内部在无启用规则时直接跳过。
-        "notification-scan-enterprise-balance": {
-            "task": "notification.scan_enterprise_balance",
-            "schedule": NoCatchupSchedule(run_every=timedelta(minutes=10)),
-            "options": {"queue": "notification_state_tasks", "expires": 600},
-        },
-        "notification-scan-alert-emit-obligations": {
-            "task": "notification.scan_alert_emit_obligations",
-            "schedule": NoCatchupSchedule(
-                run_every=timedelta(seconds=_NOTIFICATION_SCAN_INTERVAL_SECONDS)
-            ),
-            "options": {"queue": "notification_state_tasks", "expires": 120},
-        },
-        # 网关告警评估（B9）：独立消费组读部署域用量流（服务侧调用终态），
-        # 交给宿主企业告警插件；社区版无 premium 时不排期（不进本块）。
-        "consume-model-gateway-alerts": {
-            "task": "app.tasks.consume_model_gateway_alerts",
-            "schedule": NoCatchupSchedule(
-                run_every=timedelta(seconds=settings.MODEL_USAGE_ALERT_INTERVAL_SECONDS)
-            ),
-            "options": {"queue": "periodic_tasks", "expires": 55},
-        },
-    })

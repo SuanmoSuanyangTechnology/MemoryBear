@@ -1,8 +1,9 @@
 """Handoffs integration for the Multi-Agent service.
 
-Covers only the ``test_handoff_routing`` decision path (debug endpoint) of the
-monolith's ``MultiAgentHandoffsService``; the run / stream / history methods
-remain in the monolith.
+Covers the ``test_handoff_routing`` decision path (debug endpoint) plus the
+process-local handoff history / clear operations of the monolith's
+``MultiAgentHandoffsService``. Run / stream are served by
+``MultiAgentService.run`` / ``run_stream`` in collaborative mode.
 """
 from __future__ import annotations
 
@@ -13,6 +14,7 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 from ..errors import BizCode, BusinessException, ResourceNotFoundException
+from ..utils.datetime_utils import to_iso_z
 from .agent_handoff import get_handoff_manager
 from .multi_agent_service import MultiAgentService
 
@@ -123,3 +125,36 @@ class MultiAgentHandoffsService:
             "handoff_suggestion": handoff_suggestion,
             "total_agents": len(sub_agents)
         }
+
+    def get_handoff_history(
+        self,
+        conversation_id: str,
+    ) -> dict[str, Any] | None:
+        """Return the in-memory handoff state for one conversation, or None."""
+        state = self.handoff_manager.get_state(conversation_id)
+        if not state:
+            return None
+
+        return {
+            "conversation_id": state.conversation_id,
+            "current_agent_id": state.current_agent_id,
+            "handoff_count": state.get_handoff_count(),
+            "handoff_history": [
+                {
+                    "from_agent": h.from_agent_id,
+                    "to_agent": h.to_agent_id,
+                    "reason": h.reason,
+                    "timestamp": to_iso_z(h.timestamp),
+                    "user_message": h.user_message,
+                    "context_summary": h.context_summary,
+                }
+                for h in state.handoff_history
+            ],
+            "created_at": to_iso_z(state.created_at),
+            "updated_at": to_iso_z(state.updated_at),
+        }
+
+    def clear_handoff_state(self, conversation_id: str) -> None:
+        """Drop the in-memory handoff state for one conversation."""
+        self.handoff_manager.clear_state(conversation_id)
+        logger.info("清除 handoff 状态: %s", conversation_id)
