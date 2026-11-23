@@ -15,13 +15,12 @@ Result application (both strategies terminate credentials):
   the gateway-authenticated identity headers, re-assert the client-facing
   origin as X-Forwarded-Proto / X-Forwarded-Host, write the audit event.
 
-KB public single-file download exemption: anonymous GET /api/files/{uuid36}
-(browser <img> rendering) skips authenticate in both strategies — sanitize the
-same namespace, inject the gateway-asserted X-KB-Source, then forward
-(UUID-capability public read, mirroring the monolith public=True proxy
-semantics; mirrors the kb whitelist in mem-knowledge src/auth.py). Requests
-carrying credentials never short-circuit — they run the full pipeline
-(declared identity must fail closed, never fall back to anonymous download).
+KB 公开例外：匿名 GET /api/files/{uuid36}（浏览器 <img> 渲染）以及 /v1 面
+（GET /v1/files/{uuid36} 与四个静态枚举）在两种策略下都跳过 authenticate——清洗
+同一命名空间，注入网关断言的 X-KB-Source（/api 注 in_api、/v1 注 ex_api）后转发
+（UUID 能力公开读，镜像单体 public=True 代理语义；镜像 mem-knowledge src/auth.py
+的 kb 白名单）。带凭据的请求绝不短路——一律走完整管线（已声明身份必须 fail-closed，
+绝不回落匿名下载）。
 
 App public conversation-share exemption: anonymous GET /api/apps/share/{token}
 (shared-link viewer landing page) skips authenticate the same way — sanitize
@@ -83,6 +82,27 @@ _KB_PUBLIC_DOWNLOAD_SOURCE = "in_api"
 
 def is_kb_public_file_download(path: str, method: str) -> bool:
     return method == "GET" and _KB_PUBLIC_FILE_DOWNLOAD_RE.fullmatch(path) is not None
+
+
+# KB 公开例外的 /v1 面（镜像单体 rag_api_* public=True 与 kb auth 白名单）：匿名
+# 单文件下载 + 四个静态枚举。与 /api 面同样精确匹配、仅 GET、带凭据不回落匿名。
+# 注入面标识 ex_api——kb get_public_file 接受 EXTERNAL_API/MANAGER_API，枚举端点
+# 不消费来源。不扩大不收紧：仅这五个 /v1 端点公开。
+_KB_PUBLIC_V1_FILE_DOWNLOAD_RE = re.compile(r"/v1/files/[0-9a-fA-F-]{36}")
+_KB_PUBLIC_V1_ENUM_PATHS = frozenset({
+    "/v1/knowledges/knowledgetype",
+    "/v1/knowledges/permissiontype",
+    "/v1/knowledges/parsertype",
+    "/v1/chunks/retrieve_type",
+})
+_KB_PUBLIC_V1_SOURCE = "ex_api"
+
+
+def is_kb_public_v1_endpoint(path: str, method: str) -> bool:
+    if method != "GET":
+        return False
+    return (_KB_PUBLIC_V1_FILE_DOWNLOAD_RE.fullmatch(path) is not None
+            or path in _KB_PUBLIC_V1_ENUM_PATHS)
 
 
 # App public conversation-share exemption (mirrors the split public path
@@ -235,6 +255,14 @@ class GatewayMiddleware(BaseHTTPMiddleware):
         ) and not _has_credentials(request):
             self._public_download_headers(request)
             return await call_next(request)
+        # KB /v1 公开例外（匿名单文件下载 + 静态枚举，镜像单体 rag_api_* public=True
+        # 契约）。与 /api 下载同样的约束：精确匹配、仅 GET、带凭据一律走管线。注入
+        # 外部面标识，使 kb 按 UUID 能力公开读。
+        if is_kb_public_v1_endpoint(
+            request.url.path, request.method
+        ) and not _has_credentials(request):
+            self._public_download_headers(request, _KB_PUBLIC_V1_SOURCE)
+            return await call_next(request)
         # App public conversation-share exemption: anonymous shared-link views
         # (no credentials) are forwarded with no identity injected; requests
         # carrying credentials always run the pipeline so a failing declared
@@ -328,15 +356,15 @@ class GatewayMiddleware(BaseHTTPMiddleware):
         request.scope["headers"] = [(k.lower().encode(), v.encode()) for k, v in headers.items()]
 
     @staticmethod
-    def _public_download_headers(request: Request) -> None:
-        """Header cleanup for the anonymous public-download exemption: the same
-        sanitization set as terminated requests, then the gateway-asserted
-        X-KB-Source. Without it, forged channel-2 headers
-        (X-KB-Actor/Tenant/Workspace/Source) would be trusted by kb as the
-        monolith identity and allow cross-workspace file reads; downstream then
-        only sees a trusted one-hop source marker and no forgeable identity."""
+    def _public_download_headers(
+        request: Request, source: str = _KB_PUBLIC_DOWNLOAD_SOURCE
+    ) -> None:
+        """匿名 KB 公开例外的请求头清洗：与终止请求相同的清洗集，然后注入网关断言的
+        X-KB-Source（/api 下载注 in_api、/v1 面注 ex_api）。否则伪造的通道 2 头
+        （X-KB-Actor/Tenant/Workspace/Source）会被 kb 当作单体身份信任，导致跨工作区
+        读文件；清洗后下游只看到可信的一跳来源标记，无可伪造身份。"""
         headers = _sanitize_headers(request.headers)
-        headers["x-kb-source"] = _KB_PUBLIC_DOWNLOAD_SOURCE
+        headers["x-kb-source"] = source
         request.scope["headers"] = [
             (k.lower().encode(), v.encode()) for k, v in headers.items()
         ]
