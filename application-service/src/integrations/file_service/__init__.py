@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from ...config import current_settings
-from .client import FileServiceClient, FileUploadResult
+from .client import FileBytes, FileServiceClient, FileUploadResult
 
 
 def get_file_service_client() -> FileServiceClient:
@@ -20,4 +20,9 @@ def get_file_service_client() -> FileServiceClient:
     )
 
 
-__all__ = ["FileServiceClient", "FileUploadResult", "get_file_service_client"]
+__all__ = [
+    "FileBytes",
+    "FileServiceClient",
+    "FileUploadResult",
+    "get_file_service_client",
+]

@@ -33,9 +33,12 @@ logger = logging.getLogger(__name__)
 
 _UPLOAD_PATH = "/internal/v1/files/upload"
 _PENDING_PATH = "/internal/v1/files/pending"
+_CONTENT_PATH = "/internal/v1/files/{file_id}/content"
 _UPLOAD_CHUNK_SIZE = 1024 * 1024
 _UNAVAILABLE_MSG = "File service is unavailable"
 _INVALID_RESPONSE_MSG = "File service returned an invalid response"
+_FILE_NOT_FOUND_MSG = "The file does not exist"
+_FILE_TOO_LARGE_MSG = "The file is too large"
 
 # Same filename escaping as the httpx multipart encoder (RFC 7578 / browser
 # form behavior): quotes, backslashes and control characters are percent-encoded.
@@ -66,6 +69,14 @@ class FileRecord:
     file_size: int
     content_type: str | None
     status: str
+
+
+@dataclass(frozen=True)
+class FileBytes:
+    """One completed file's raw bytes as served by the internal content endpoint."""
+
+    data: bytes
+    content_type: str | None
 
 
 def _format_form_param(name: str, value: str) -> str:
@@ -124,7 +135,7 @@ def _envelope_message(response: httpx.Response) -> str:
 def _raise_for_error_status(response: httpx.Response, fallback_msg: str) -> None:
     if response.status_code == 413:
         raise BusinessException(
-            _envelope_message(response) or "The file is too large",
+            _envelope_message(response) or _FILE_TOO_LARGE_MSG,
             BizCode.FILE_TOO_LARGE,
         )
     if response.status_code >= 500:
@@ -399,6 +410,65 @@ class FileServiceClient:
                 ),
             )
 
+    async def get_content(
+        self,
+        *,
+        tenant_id: uuid.UUID,
+        workspace_id: uuid.UUID | None,
+        actor_id: uuid.UUID | str | None,
+        file_id: str | uuid.UUID,
+        max_bytes: int | None = None,
+    ) -> FileBytes:
+        """Read one completed file's bytes from the internal content endpoint.
+
+        The endpoint answers raw bytes (not the project envelope); tenant scoping
+        and completed-status checks happen server-side and any miss is a 404.
+        ``max_bytes`` aborts the stream as soon as the limit is crossed so an
+        oversized file is never buffered whole.
+        """
+
+        self._ensure_configured()
+        async with self._new_client() as client:
+            try:
+                async with client.stream(
+                    "GET",
+                    _CONTENT_PATH.format(file_id=file_id),
+                    headers=self._headers(
+                        tenant_id=tenant_id,
+                        workspace_id=workspace_id,
+                        actor_id=actor_id,
+                    ),
+                ) as response:
+                    if response.status_code == 404:
+                        await response.aread()
+                        raise BusinessException(
+                            _envelope_message(response) or _FILE_NOT_FOUND_MSG,
+                            BizCode.FILE_NOT_FOUND,
+                        )
+                    if not response.is_success:
+                        await response.aread()
+                        _raise_for_error_status(response, "File download failed")
+                    chunks: list[bytes] = []
+                    total = 0
+                    async for chunk in response.aiter_bytes():
+                        total += len(chunk)
+                        if max_bytes is not None and total > max_bytes:
+                            raise BusinessException(
+                                _FILE_TOO_LARGE_MSG, BizCode.FILE_READ_ERROR
+                            )
+                        chunks.append(chunk)
+                    return FileBytes(
+                        data=b"".join(chunks),
+                        content_type=response.headers.get("content-type"),
+                    )
+            except (httpx.TimeoutException, httpx.TransportError) as exc:
+                logger.warning(
+                    f"File service content read failed: {type(exc).__name__}"
+                )
+                raise BusinessException(
+                    _UNAVAILABLE_MSG, BizCode.SERVICE_UNAVAILABLE, cause=exc
+                ) from exc
+
     async def _post(
         self,
         client: httpx.AsyncClient,
@@ -438,4 +508,4 @@ class FileServiceClient:
         return _parse_record_response(response, "File status update failed")
 
 
-__all__ = ["FileRecord", "FileServiceClient", "FileUploadResult"]
+__all__ = ["FileBytes", "FileRecord", "FileServiceClient", "FileUploadResult"]

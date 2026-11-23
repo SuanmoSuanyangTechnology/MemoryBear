@@ -20,13 +20,13 @@ class ServiceBase(DeclarativeBase):
 
 
 # Tables this service writes at runtime — the only DML targets allowed by
-# scripts/check_no_host_writes.py. 40 of the 46 mapped app-domain tables are
+# scripts/check_no_host_writes.py. 42 of the 46 mapped app-domain tables are
 # writable here (rows may be written by both sides during the coexistence
 # period; the write side follows the prefix routed to each backend). The other
-# six are read-only: `generic_files` (generic uploads stay on the monolith until
+# four are read-only: `generic_files` (generic uploads stay on the monolith until
 # the standalone file service lands), `agent_invocations`, `conversation_details`,
-# `mcp_markets`, `mcp_market_configs`, and `end_user_merge` (merge writes are
-# executed by the monolith; this service only reads the mapping to route users).
+# and `end_user_merge` (merge writes are executed by the monolith; this service
+# only reads the mapping to route users).
 SERVICE_WRITE_TABLES = frozenset(
     {
         # application
@@ -65,6 +65,9 @@ SERVICE_WRITE_TABLES = frozenset(
         "skill_packages",
         "skill_files",
         "skill_plugins",
+        # MCP market
+        "mcp_markets",
+        "mcp_market_configs",
         # annotation
         "app_annotations",
         "app_annotation_settings",

@@ -285,6 +285,34 @@ class MinerUTool(BuiltinTool):
                         "falling back to URL download", resolved_file_id, e,
                     )
 
+            # A URL minted by this service (sys.files permanent URLs, LLM-passed
+            # file_url values) is read through the internal channel; downloading it
+            # back over the public ingress would hairpin through the gateway.
+            if not file_content and isinstance(file_url, str):
+                from ...services.file_content_service import (
+                    FileReference,
+                    extract_permanent_file_id,
+                    read_file_content,
+                )
+
+                permanent_file_id = extract_permanent_file_id(
+                    file_url, trust_any_host=True
+                )
+                if permanent_file_id:
+                    content = await read_file_content(
+                        FileReference(url=file_url, name=file_name),
+                        workspace_id=self.get_runtime_context("workspace_id"),
+                        tenant_id=self._resolve_tenant_id(),
+                        max_bytes=_MAX_DOWNLOAD_BYTES,
+                    )
+                    file_content = content.data
+                    if not file_name:
+                        file_name = content.file_name or f"file_{permanent_file_id}"
+                    logger.info(
+                        "[MinerUTool] read %d bytes via the file-service internal "
+                        "API for url=%s", len(file_content), file_url,
+                    )
+
             # Require at least one of file_name / file_url / file_content / resolved_file_id
             if not (file_name or file_url or file_content or resolved_file_id):
                 raise ValueError(

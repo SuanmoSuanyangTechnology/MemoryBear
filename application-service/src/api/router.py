@@ -14,6 +14,8 @@ from .routes.end_users import router as end_users_router
 from .routes.health import router as health_router
 from .routes.human_intervention import router as human_intervention_router
 from .routes.human_intervention import v1_router as human_intervention_v1_router
+from .routes.mcp_market_configs import router as mcp_market_configs_router
+from .routes.mcp_markets import router as mcp_markets_router
 from .routes.messages import router as messages_router
 from .routes.messages import v1_router as messages_v1_router
 from .routes.metrics import router as metrics_router
@@ -24,6 +26,7 @@ from .routes.release_shares import router as release_shares_router
 from .routes.skills import router as skills_router
 from .routes.storage_share import router as storage_share_router
 from .routes.tools import router as tools_router
+from .routes.workflow_triggers import router as workflow_triggers_router
 
 from ..plugins import get_registered_routers
 
@@ -42,6 +45,8 @@ internal_v1_router.include_router(draft_run_router)
 internal_v1_router.include_router(end_users_router)
 internal_v1_router.include_router(human_intervention_router)
 internal_v1_router.include_router(human_intervention_v1_router)
+internal_v1_router.include_router(mcp_market_configs_router)
+internal_v1_router.include_router(mcp_markets_router)
 internal_v1_router.include_router(messages_router)
 internal_v1_router.include_router(messages_v1_router)
 internal_v1_router.include_router(metrics_router)
@@ -52,6 +57,7 @@ internal_v1_router.include_router(release_shares_router)
 internal_v1_router.include_router(skills_router)
 internal_v1_router.include_router(storage_share_router)
 internal_v1_router.include_router(tools_router)
+internal_v1_router.include_router(workflow_triggers_router)
 
 # Routers already attached by `mount_registered_routers` (idempotency guard).
 # APIRouter is not hashable, so remember identity rather than the object.

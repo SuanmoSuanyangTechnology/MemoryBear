@@ -63,7 +63,12 @@ from memorybear_grpc.metadata import traceparent_trace_id
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse
 
-from .anonymous import is_storage_public_read, is_storage_share_upload
+from .anonymous import (
+    is_license_status,
+    is_storage_public_read,
+    is_storage_share_upload,
+    is_workflow_webhook,
+)
 from .auth_strategy import AuthStrategy, load_strategy
 from .config import settings
 from .forward import TargetResolver
@@ -159,6 +164,7 @@ _STRIPPED_HEADER_PREFIXES = (
     "x-kb-",
     "x-model-",
     "x-app-",
+    "x-operator-",
     "x-forwarded-"
 )
 
@@ -261,6 +267,20 @@ class GatewayMiddleware(BaseHTTPMiddleware):
                 and not _has_credentials(request)):
             self._public_citation_download_headers(request)
             return await call_next(request)
+        # Workflow webhook entry: external systems post to the route key with
+        # no platform credential; the host route had no auth dependency either.
+        # Unconditional by contract -- a stray credential is ignored, and every
+        # identity header is stripped before forwarding.
+        if is_workflow_webhook(request.url.path, request.method):
+            self._anonymous_headers(request)
+            return await call_next(request)
+        # License status read: the console polls it even while other paths are
+        # rejected by the license middleware, so the path is whitelisted there
+        # and anonymous here (monolith parity: no auth dependency on the
+        # route). Unconditional; identity namespace stripped.
+        if is_license_status(request.url.path, request.method):
+            self._anonymous_headers(request)
+            return await call_next(request)
         # File-service public reads (permanent/public/signed URL/status/info):
         # the browser carries no platform credential; requests carrying one run
         # the full pipeline (declared identity fails closed, never falls back).
@@ -272,6 +292,15 @@ class GatewayMiddleware(BaseHTTPMiddleware):
         # token by contract; captured for the forwarder, same as /api/public/share.
         if is_storage_share_upload(request.url.path, request.method):
             self._public_share_api_headers(request)
+            return await call_next(request)
+        # Platform-admin passthrough (/sys): the gateway neither verifies nor
+        # terminates the credential - the platform-admin JWT rides Authorization
+        # verbatim to the target service, which verifies it itself. The origin
+        # pair is re-asserted and the forgeable identity namespace is stripped,
+        # exactly like the public share-view exemption.
+        route = request.state.target_route
+        if route is not None and route.auth_mode == "passthrough":
+            self._passthrough_headers(request)
             return await call_next(request)
         result = await strategy.authenticate(request, deps)
         if result.status_code is not None:
@@ -380,6 +409,19 @@ class GatewayMiddleware(BaseHTTPMiddleware):
         the client's share access token for the forwarder (it never rides the
         scope — same mechanics as the internal token), and re-assert the origin
         pair the split rebuilds public share URLs from."""
+        request.state.forward_authorization = request.headers.get("authorization")
+        headers = _sanitize_headers(request.headers)
+        headers["x-forwarded-proto"] = request.url.scheme
+        headers["x-forwarded-host"] = request.headers.get("host", "")
+        request.scope["headers"] = [(k.lower().encode(), v.encode()) for k, v in headers.items()]
+
+    @staticmethod
+    def _passthrough_headers(request: Request) -> None:
+        """Header cleanup for auth_mode=passthrough routes: capture the platform
+        admin credential for the forwarder (never rides the scope), strip the
+        gateway-managed identity namespace so forged X-User-* / X-Tenant-* /
+        X-Platform-* headers cannot reach the target, and re-assert the origin
+        pair from the gateway's own request view."""
         request.state.forward_authorization = request.headers.get("authorization")
         headers = _sanitize_headers(request.headers)
         headers["x-forwarded-proto"] = request.url.scheme

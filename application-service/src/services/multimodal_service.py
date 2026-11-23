@@ -45,7 +45,7 @@ from ..models.models_model import Modality
 from ..schemas.app_schema import FileInput, FileType, FileUploadConfig, TransferMethod
 from ..schemas.model_schema import ModelInfo
 from ..storage import LocalStorage
-from .file_content_service import extract_permanent_file_id
+from .file_content_service import FileReference, extract_permanent_file_id, read_file_content
 from .file_storage_service import FileStorageService
 
 logger = logging.getLogger(__name__)
@@ -225,16 +225,18 @@ def _requires_inline_bearer(file: FileInput) -> bool:
 
     Any of these conditions forces inlining:
     1. an explicitly local_file attachment;
-    2. the URL is a permanent download address minted by this service (whatever
-       transfer_method says);
-    3. the URL is unreachable from the model side (intranet/loopback) and a file ID allows
+    2. a local upload with only an upload_file_id (no URL yet): minting a permanent URL and
+       fetching it back over the public ingress would hairpin through the gateway;
+    3. the URL is a permanent download address minted by this service, including legacy
+       hosts (whatever transfer_method says);
+    4. the URL is unreachable from the model side (intranet/loopback) and a file ID allows
        fetching the bytes directly, bypassing HTTP.
     """
     if file.transfer_method == TransferMethod.LOCAL_FILE:
         return True
     if not file.url:
-        return False
-    if _built_permanent_file_id(file.url):
+        return bool(file.upload_file_id)
+    if _built_permanent_file_id(file.url, any_host=True):
         return True
     return bool(file.upload_file_id) and _model_cannot_reach_url(file.url)
 
@@ -372,6 +374,8 @@ class BedrockFormatStrategy(MultimodalFormatStrategy):
         if content is None:
             if not url:
                 return False, {"type": "text", "text": "[图片文件缺少可用内容]"}
+            if _built_permanent_file_id(url, any_host=True):
+                raise ValueError("本服务永久文件地址不允许在格式层回源下载")
             logger.info(f"下载并编码图片: {url}")
             async with httpx.AsyncClient(timeout=30.0) as client:
                 response = await client.get(url, follow_redirects=True)
@@ -464,6 +468,8 @@ class OpenAIFormatStrategy(MultimodalFormatStrategy):
             if audio_data is None:
                 if not url:
                     raise ValueError("音频文件缺少可用内容")
+                if _built_permanent_file_id(url, any_host=True):
+                    raise ValueError("本服务永久文件地址不允许在格式层回源下载")
                 async with httpx.AsyncClient(timeout=30.0) as client:
                     response = await client.get(url, follow_redirects=True)
                     response.raise_for_status()
@@ -630,8 +636,9 @@ class MultimodalService:
         - With an upload_file_id: a workspace/tenant-scoped query + direct storage read, which
           also backfills file name, size and MIME for downstream consumers such as perception
           memory;
-        - Otherwise only permanent URLs minted by this service are recognized and fetched over
-          HTTP by this service itself; the URL is never handed to the model, and arbitrary
+        - Otherwise only permanent URLs minted by this service are recognized and read through
+          the file-service internal API (falling back to the shared storage read), never by
+          re-entering the public ingress; the URL is never handed to the model, and arbitrary
           remote URLs are not accepted (avoiding SSRF).
         """
         existing_content = file.get_content()
@@ -664,25 +671,21 @@ class MultimodalService:
             )
             return file_size
 
-        if not _built_permanent_file_id(file.url):
+        if not _built_permanent_file_id(file.url, any_host=True):
             # Unreachable URL not minted by this service: do not self-fetch; let the strategy
             # layer degrade, avoiding SSRF.
             raise BusinessException("附件 URL 模型侧不可达且无法定位文件", BizCode.FILE_READ_ERROR)
 
-        try:
-            async with httpx.AsyncClient(timeout=30.0) as client:
-                response = await client.get(file.url, follow_redirects=True)
-                response.raise_for_status()
-                content = response.content
-        except Exception as exc:
-            logger.error(f"读取本服务附件 URL 失败: {exc}", exc_info=True)
-            raise BusinessException("文件读取失败", BizCode.FILE_READ_ERROR)
-
-        if len(content) > current_settings().max_file_size:
-            raise BusinessException("文件大小不在允许范围内", BizCode.FILE_READ_ERROR)
-
-        file.set_content(content)
-        return len(content)
+        tenant_id = getattr(self.model_view, "tenant_id", None) if self.model_view else None
+        content = await read_file_content(
+            FileReference(url=file.url, name=file.name),
+            workspace_id=workspace_id,
+            tenant_id=tenant_id,
+            db=self.db,
+            max_bytes=current_settings().max_file_size,
+        )
+        file.set_content(content.data)
+        return content.size
 
     async def process_files(
             self,
@@ -1000,6 +1003,8 @@ class MultimodalService:
         try:
             file_content = file.get_content()
             if not file_content:
+                if _built_permanent_file_id(file.url, any_host=True):
+                    raise ValueError("本服务永久文件地址不允许回源下载")
                 async with httpx.AsyncClient(timeout=30.0) as client:
                     response = await client.get(file.url, follow_redirects=True)
                     response.raise_for_status()
@@ -1038,6 +1043,8 @@ class MultimodalService:
         try:
             file_content = file.get_content()
             if not file_content:
+                if _built_permanent_file_id(file.url, any_host=True):
+                    raise ValueError("本服务永久文件地址不允许回源下载")
                 async with httpx.AsyncClient(timeout=30.0) as client:
                     response = await client.get(file.url, follow_redirects=True)
                     response.raise_for_status()

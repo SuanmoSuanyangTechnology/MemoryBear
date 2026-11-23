@@ -28,11 +28,18 @@ from src.forward import rewrite_internal_path  # noqa: E402
 # service-to-service API (called by application-service and the memory domain,
 # not the public edge); /internal/v1/app-categories is consumed internally by
 # the monolith only; /internal/v1/operator is the platform-admin BFF face,
-# authenticated by its own service credential.
+# authenticated by its own service credential. The v2 upload paths are the
+# memory domain's internal knowledge import; /internal/v1/invoke and
+# /internal/v1/platform are model-service runtime/platform-admin faces;
+# /internal/v1/{admin,catalog} are market-service admin/catalog faces — all
+# reached by sibling services, never by the edge.
 _EXEMPT_PREFIXES = (
     "/internal/v1/health", "/internal/v1/metrics", "/healthz", "/metrics",
     "/openapi.json", "/docs", "/redoc",
     "/internal/v1/files", "/internal/v1/app-categories", "/internal/v1/operator",
+    "/internal/v2/chunks", "/internal/v2/files",
+    "/internal/v1/invoke", "/internal/v1/platform",
+    "/internal/v1/admin", "/internal/v1/catalog",
 )
 
 

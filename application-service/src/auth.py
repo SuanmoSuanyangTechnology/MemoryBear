@@ -91,6 +91,15 @@ _PUBLIC_PATH_PATTERNS = (
         re.compile(r"^/internal/v1/storage/share/files$"),
         ("POST",),
     ),
+    # Workflow webhook: the contract carries no credential because the
+    # publisher hands this URL to external systems (the monolith route had no
+    # auth dependency either), so the gateway cannot assemble a principal. All
+    # webhook methods are accepted; the trigger's configured method gate
+    # applies inside the route. Single segment only, exact depth.
+    (
+        re.compile(r"^/internal/v1/workflows/triggers/webhook/[^/]+$"),
+        ("GET", "POST", "PUT", "PATCH", "DELETE", "HEAD"),
+    ),
 )
 
 
