@@ -7,6 +7,7 @@ import ToolIcon from '@/assets/images/tool/tool.svg';
 import { useTranslation } from 'react-i18next';
 
 import type { CustomToolItem, CustomToolModalRef, ToolItem } from '../types'
+import type { ToolDetail } from '../toolContract'
 import RbModal from '@/components/RbModal';
 import { parseSchema, addTool, updateTool } from '@/api/tools';
 import Table from '@/components/Table';
@@ -39,6 +40,18 @@ interface ParseSchemaData {
   operations: OperationItem[]
 }
 const authTypeList = ['none', 'api_key', 'basic_auth']
+
+// 详情接口返回的 schema_content 是 OpenAPI 文档对象，需转换成格式化后的 JSON 字符串回填表单
+const formatSchemaContent = (value: unknown): string => {
+  if (!value) return ''
+  if (typeof value === 'string') return value
+  try {
+    return JSON.stringify(value, null, 2)
+  } catch {
+    return ''
+  }
+}
+
 const CustomToolModal = forwardRef<CustomToolModalRef, CustomToolModalProps>(({
   refresh
 }, ref) => {
@@ -60,18 +73,20 @@ const CustomToolModal = forwardRef<CustomToolModalRef, CustomToolModalProps>(({
     setParseSchemaData({} as ParseSchemaData)
   };
 
-  const handleOpen = (data?: ToolItem) => {
+  const handleOpen = (data?: ToolItem | ToolDetail) => {
     if (data?.id) {
-      const { config_data, ...rest  } = data
+      const { config_data = {}, ...rest } = data
+      const custom_config = (data as ToolDetail).custom_config ?? {}
+      const schemaContent = formatSchemaContent((config_data as ToolItem['config_data']).schema_content ?? custom_config.schema_content)
       form.setFieldsValue({
         ...rest,
         icon: data.icon
           ? { uid: data.icon, name: 'icon', status: 'done', url: data.icon }
           : undefined,
-        config: {...config_data}
+        config: {...config_data, ...custom_config, schema_content: schemaContent}
       })
       setEditVo(data)
-      formatSchema(config_data.schema_content)
+      formatSchema(schemaContent)
     } else {
       form.resetFields();
     }

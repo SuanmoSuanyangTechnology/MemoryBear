@@ -40,14 +40,21 @@ class TaskName(StrEnum):
     INTEREST_DISTRIBUTION_INIT_FOR_USERS = "memory_jobs.interest_distribution.init_for_users"
     #: Periodic sweep that dispatches stale profile-cache units.
     PROFILE_CACHE_SCAN = "memory_jobs.profile_cache.scan"
+    METADATA_MIGRATION_SCAN = "memory_jobs.metadata_migration.scan"
+    METADATA_MIGRATION_DO = "memory_jobs.metadata_migration.do"
+    RAG_PROFILE_GENERATE = "memory_jobs.dashboard.rag_profile_generate"
+    EMOTION_SUGGESTIONS_GENERATE = "memory_jobs.emotion.suggestions_generate"
+    FORGETTING_TRIGGER = "memory_jobs.forgetting.trigger"
+    WORKING_MEMORY_DETAIL_GENERATE = "memory_jobs.working_memory.detail_generate"
 
 
 class QueueName(StrEnum):
     """Broker queues owned by memory-jobs."""
 
-    #: memory-jobs' own queue: every task above is registered and consumed here,
+    #: memory-jobs ordinary queue (migration do has its own queue):
     #: so no other service's worker ever receives a task name it does not know.
     MEMORY_JOBS = "memory_jobs_tasks"
+    METADATA_MIGRATION = "metadata_migration_tasks"
 
 
 #: Highest priority number the queues are declared with (AMQP
@@ -86,12 +93,10 @@ PRIORITY_STEPS: tuple[int, ...] = (0, 3, 6, 9)
 
 
 #: ``task name -> queue``. memory-jobs renders it into Celery's ``task_routes``
-#: and producers publish with the queue this table names for their task. Every
-#: declared task runs on the single owned queue; when one moves elsewhere,
-#: replace this comprehension with explicit entries rather than deriving it.
-TASK_ROUTES: dict[str, str] = {
-    task.value: QueueName.MEMORY_JOBS.value for task in TaskName
-}
+#: and producers publish with the queue this table names for their task.
+#: Migration do is explicitly routed to its dedicated queue.
+TASK_ROUTES: dict[str, str] = {task.value: QueueName.MEMORY_JOBS.value for task in TaskName}
+TASK_ROUTES[TaskName.METADATA_MIGRATION_DO.value] = QueueName.METADATA_MIGRATION.value
 
 
 __all__ = [

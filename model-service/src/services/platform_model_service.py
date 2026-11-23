@@ -19,6 +19,7 @@ import httpx
 from sqlalchemy.orm import Session
 
 from ..errors import BizCode, BusinessException
+from ..infrastructure.model_provider_config import require_provider_supports_model_type
 from ..infrastructure.redis_cache import (
     invalidate_runtime_model_info,
     invalidate_runtime_model_info_batch,
@@ -186,7 +187,10 @@ class PlatformModelService:
             db, tenant_id=tenant_id, model_id=model_id
         )
         if update_data.get("type") is not None:
-            model.type = normalize_type(update_data["type"])
+            new_type = normalize_type(update_data["type"])
+            if new_type != normalize_type(model.type):
+                require_provider_supports_model_type(model.provider, new_type)
+            model.type = new_type
         for column, value in write_columns(
             input_modalities=_submitted_values(update_data, "input_modalities"),
             output_modalities=_submitted_values(update_data, "output_modalities"),
@@ -311,6 +315,7 @@ class PlatformModelService:
             "is_public": True,
             "is_active": True,
         }
+        require_provider_supports_model_type(payload["provider"], row["type"])
         payload.update(
             write_columns(
                 row_type=row["type"],

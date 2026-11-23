@@ -29,7 +29,8 @@ interface PrivateKnowledgeBaseWorkspaceProps {
   directoryCollapsed: boolean;
   onToggleDirectory: () => void;
   fileDirectory: ReactNode;
-  fileContent: ReactNode;
+  /** File tab content; pass a function to receive the callback for opening a Wiki page across tabs */
+  fileContent: ReactNode | ((openWikiPage: (pageId: string) => void) => ReactNode);
   onRefreshFiles: () => void;
   onCopyKnowledgeBaseId: () => void;
   onKnowledgeBaseStatusChange: (checked: boolean) => void;
@@ -189,6 +190,8 @@ const PrivateKnowledgeBaseWorkspace: FC<PrivateKnowledgeBaseWorkspaceProps> = ({
     setMode(nextMode);
   };
 
+  const resolvedFileContent = typeof fileContent === 'function' ? fileContent(openWikiPage) : fileContent;
+
   return (
     <Flex vertical className="rb:h-full rb:min-w-0 rb:overflow-hidden rb:rounded-xl rb:bg-white">
       <PrivateKnowledgeBaseHeader
@@ -255,7 +258,7 @@ const PrivateKnowledgeBaseWorkspace: FC<PrivateKnowledgeBaseWorkspaceProps> = ({
 
         <div className="rb:flex-1 rb:min-w-0 rb:pl-3">
           <div className={clsx('rb:h-full', mode !== 'files' && 'rb:hidden')}>
-            {fileContent}
+            {typeof fileContent === 'function' ? fileContent(openWikiPage) : fileContent}
           </div>
           {mode === 'faq'
             ? <FaqWorkspace key={knowledgeBaseId} knowledgeBaseId={knowledgeBaseId} onOpenWikiPage={openWikiPage} />

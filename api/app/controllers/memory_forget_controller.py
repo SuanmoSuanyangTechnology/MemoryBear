@@ -13,7 +13,7 @@
 import uuid
 from typing import Optional
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Request
 
 from app.core.error_codes import BizCode
 from app.core.logging_config import get_api_logger
@@ -22,6 +22,7 @@ from app.core.response_utils import fail, success
 from app.db import get_async_db_context
 from app.dependencies import CurrentUserSnapshot, get_current_user_async
 from app.repositories.end_user_repository import get_tenant_id_by_end_user_id_async
+from app.integrations.profile.proxy import memory_profile_proxy
 from app.repositories.forget_log_repository import ForgetLogRepository
 from app.repositories.memory_config_repository import MemoryConfigRepository
 from app.repositories.workspace_repository import get_workspace_memory_config_id_async
@@ -56,7 +57,9 @@ forget_service = MemoryForgetService()
 # ==================== API 端点 ====================
 
 @router.post("/trigger", response_model=ApiResponse)
+@memory_profile_proxy(body_arg="payload", body_fields=("end_user_id", "max_merge_batch_size", "min_days_since_access"), timeout_seconds=940.0)
 async def trigger_forgetting_cycle(
+        request: Request,
         payload: ForgettingTriggerRequest,
         current_user: CurrentUserSnapshot = Depends(get_current_user_async),
 ):
@@ -350,7 +353,9 @@ async def get_forgetting_curve(
 
 
 @router.get("/{end_user_id}/memory_quota", response_model=ApiResponse)
+@memory_profile_proxy(query_fields=("end_user_id",))
 async def get_end_user_memory_quota(
+    request: Request,
     end_user_id: str,
     current_user: CurrentUserSnapshot = Depends(get_current_user_async),
 ):
@@ -408,7 +413,9 @@ async def get_end_user_memory_quota(
 
 
 @router.get("/{end_user_id}/forgetting_trend", response_model=ApiResponse)
+@memory_profile_proxy(query_fields=("end_user_id", "days"), upper_bounds={"days": 90})
 async def get_forgetting_trend(
+    request: Request,
     end_user_id: str,
     days: int = Query(7, ge=1, le=90),
     current_user: CurrentUserSnapshot = Depends(get_current_user_async),
@@ -440,7 +447,9 @@ async def get_forgetting_trend(
 
 
 @router.get("/{end_user_id}/forgetting_candidates", response_model=ApiResponse)
+@memory_profile_proxy(query_fields=("end_user_id", "page", "pagesize"), upper_bounds={"pagesize": 200})
 async def get_forgetting_candidates(
+    request: Request,
     end_user_id: str,
     page: int = Query(1, ge=1),
     pagesize: int = Query(50, ge=1, le=200),
@@ -473,7 +482,9 @@ async def get_forgetting_candidates(
 
 
 @router.get("/{end_user_id}/forgotten_logs", response_model=ApiResponse)
+@memory_profile_proxy(query_fields=("end_user_id", "page", "pagesize"), upper_bounds={"pagesize": 100})
 async def get_forgotten_logs(
+    request: Request,
     end_user_id: str,
     page: int = Query(1, ge=1),
     pagesize: int = Query(10, ge=1, le=100),
@@ -505,7 +516,9 @@ async def get_forgotten_logs(
 
 
 @router.post("/{end_user_id}/refresh_cache", response_model=ApiResponse)
+@memory_profile_proxy(query_fields=("end_user_id",))
 async def refresh_forget_cache(
+    request: Request,
     end_user_id: str,
     current_user: CurrentUserSnapshot = Depends(get_current_user_async),
 ):

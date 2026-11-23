@@ -131,9 +131,10 @@ async def count_pages_by_document(db: AsyncSession, scope, document_ids):
     return dict(rows.tuples().all())
 
 
-def begin_read(session, scope):
+def begin_read(session, scope, *, repeatable_read=True):
     # Both graph endpoints and page/source reads use one consistent short snapshot.
-    session.connection(execution_options={"isolation_level": "REPEATABLE READ"})
+    if repeatable_read:
+        session.connection(execution_options={"isolation_level": "REPEATABLE READ"})
     knowledge = session.scalar(_readable_knowledge(scope))
     if knowledge is None:
         raise WikiError("WIKI_NOT_FOUND", retryable=False)

@@ -137,6 +137,7 @@ class ReadMemory:
             answer=result.content,
             intermediate_outputs=memory_dumps(result),
             result=result,
+            end_user_id=ctx.end_user_id,
         )
 
     async def _apply_side_effects(

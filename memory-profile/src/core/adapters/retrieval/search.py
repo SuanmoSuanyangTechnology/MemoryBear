@@ -941,7 +941,11 @@ class Neo4jSearchSession(_BaseSearchSession):
         record = await self.queries.user_metadata(self.ctx.end_user_id)
         scope = None
         if hasattr(self.queries, "metadata_scope"):
-            scope = await self.queries.metadata_scope(self.ctx.end_user_id)
+            # The read wire contract has no caller app yet; the lookup stays
+            # conditional so app-aware calls can supply one later.
+            scope = await self.queries.metadata_scope(
+                self.ctx.end_user_id, self.ctx.app_id
+            )
         record = scoped_metadata(record, scope)
         scene_names = await self.queries.scene_names(record, self.ctx.workspace_id)
         builder = MetadataBuilder(record, scene_names)

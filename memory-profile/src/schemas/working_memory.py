@@ -15,6 +15,14 @@ from pydantic import BaseModel, Field
 # ── Shared pagination ───────────────────────────────────────────────────────
 
 
+class ConversationDetailData(BaseModel):
+    theme: str
+    question: list[str]
+    summary: str
+    takeaways: list[str]
+    info_score: int
+
+
 class PageInfo(BaseModel):
     page: int
     pagesize: int

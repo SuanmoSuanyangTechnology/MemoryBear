@@ -391,6 +391,8 @@ export const space = {
       enable: 'Enable',
       baseInfo: 'Basic Information',
       permissionInfo: 'Permission Information',
+      app_mgmt: 'Agent Management',
+      asset: 'Resource Management',
       is_expired: 'Status',
       active: 'Active',
       inactive: 'Expired',

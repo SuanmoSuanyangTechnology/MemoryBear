@@ -92,7 +92,8 @@ async def get_end_user_info(
         # 在 session 活跃期间提取所有需要的字段
         # 顶层：other_name 恒返回，aliases 有值才返回；
         # meta_data：新结构 13 键展示投影（每键最多 10 条）与领域信息。
-        raw_meta = info_record.meta_data if isinstance(info_record.meta_data, dict) else {}
+        # 用户信息展示只读新列；NULL / {} 均不回退历史旧列。
+        raw_meta = info_record.meta_data_new if isinstance(info_record.meta_data_new, dict) else {}
 
         selected_top = {"other_name": info_record.other_name}
         if info_record.aliases:

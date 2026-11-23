@@ -17,7 +17,7 @@ from urllib.parse import quote
 from uuid import UUID
 
 import yaml
-from fastapi import APIRouter, Depends, File, Form, Header, Path, Query, UploadFile
+from fastapi import APIRouter, Depends, File, Form, Header, Path, Query, Request, UploadFile
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import Response, StreamingResponse
 from sqlalchemy import select
@@ -54,6 +54,7 @@ from ...services.workflow_tool_publish_service import WorkflowToolPublishService
 from ...storage.exceptions import StorageError
 from ...utils.redis_cache import delete_json
 from ..dependencies import (
+    API_KEY_ID_HEADER,
     Principal,
     SyncRedis,
     get_async_db,
@@ -628,10 +629,18 @@ def list_releases(
         app_id: UUID,
         workspace_id: WorkspaceId,
         db: DbSession,
+        include_config: bool = Query(
+            True,
+            description=(
+                "是否随每行返回版本配置快照（默认 true，与 /api 面一致）。"
+                "集群/工作流的快照可达数 MB，只要版本号与元信息时传 false，"
+                "此时每行的 config 为空对象而不是 null"
+            ),
+        ),
 ):
     service = AppService(db)
     releases = service.list_releases(app_id=app_id, workspace_id=workspace_id)
-    return success(data=service.release_schemas(releases))
+    return success(data=service.release_schemas(releases, include_config=include_config))
 
 
 @router.post("/{app_id}/rollback/{version}", summary="回滚到指定版本", response_model=ApiResponse)
@@ -646,6 +655,55 @@ def rollback(
     return success(data=service.release_schema(release))
 
 
+def _assert_share_scope_allowed(
+        db: Session,
+        *,
+        api_key_id: str,
+        workspace_id: UUID,
+        resource_center: bool,
+        community_market: bool,
+) -> None:
+    """The two v1-only gates of ``share_app``, both evaluated before any write.
+
+    Called only when the gateway injected ``X-Api-Key-ID`` (the API-key face);
+    the console's JWT calls carry no such header and skip this entirely.
+
+    - ``community_market``: the community market is out of scope for this
+      release. Answering 200 with a ``sync_failed`` payload would tell the
+      caller the submission was accepted when nothing can ever be staged, so
+      this is a hard 400 with a stable ``reason``.
+    - ``resource_center``: publishing into the tenant catalog is the ``asset``
+      scope's domain. An ``app_mgmt``-only key must not reach it indirectly
+      through the app-sharing shortcut.
+
+    A key row that cannot be resolved (deleted key, or bound to another
+    workspace) fails as ``API_KEY_INVALID`` rather than silently passing: the
+    gateway resolved it microseconds earlier, so a miss means the credential
+    changed under the request.
+    """
+
+    if community_market:
+        raise BusinessException(
+            "社区市场投稿本期未开放",
+            BizCode.INVALID_PARAMETER,
+            data={"reason": "COMMUNITY_MARKET_NOT_OPEN"},
+        )
+
+    if not resource_center:
+        return
+
+    try:
+        key_uuid = UUID(str(api_key_id))
+    except (TypeError, ValueError) as error:
+        raise BusinessException("API Key 无效或已过期", BizCode.API_KEY_INVALID) from error
+
+    binding = cross_domain_read.get_api_key_binding(db, key_uuid, workspace_id)
+    if binding is None:
+        raise BusinessException("API Key 无效或已过期", BizCode.API_KEY_INVALID)
+    if "asset" not in (binding.scopes or []):
+        raise BusinessException("缺少必须的权限范围：asset", BizCode.API_KEY_INVALID_SCOPE)
+
+
 @router.post(
     "/{app_id}/share",
     summary="共享应用（发布弹窗三开关）",
@@ -654,6 +712,7 @@ def rollback(
 def share_app(
         app_id: UUID,
         payload: app_schema.AppShareRequest,
+        http_request: Request,
         workspace_id: WorkspaceId,
         db: DbSession,
         principal: Caller,
@@ -676,6 +735,15 @@ def share_app(
       直接把业务码抛出去。确定性失败重试永远不会成功，报「共享已完成」会让
       用户以为包已经投出去了。两条路径都会先落 `market_sync`，
       所以请求报错时「我的共享」里也看得到这次失败。
+
+    **API Key 面（网关注入了 `X-Api-Key-ID`）多两道细判**，都在任何写入之前：
+
+    - 开关 3 直接报错：社区市场不在本期开放范围内，静默 200 会让调用方以为
+      投稿已受理（§3.6）。
+    - 开关 1/2 要求 Key 自带的 `scopes` 含 `asset`：资源中心条目是 `asset`
+      scope 的领域，`/v1/apps` 的 `app_mgmt` 不应单独把应用推进资源中心。
+
+    JWT 面（控制台发布弹窗）没有这个头，行为与改动前完全一致。
     """
 
     if not payload.resource_center.enabled and not payload.community_market.enabled:
@@ -683,6 +751,16 @@ def share_app(
             "至少需要打开一个共享范围",
             BizCode.INVALID_PARAMETER,
             data={"reason": "EMPTY_SHARE_SCOPE"},
+        )
+
+    api_key_id = http_request.headers.get(API_KEY_ID_HEADER)
+    if api_key_id:
+        _assert_share_scope_allowed(
+            db,
+            api_key_id=api_key_id,
+            workspace_id=workspace_id,
+            resource_center=payload.resource_center.enabled,
+            community_market=payload.community_market.enabled,
         )
 
     asset_service = AssetService(db)

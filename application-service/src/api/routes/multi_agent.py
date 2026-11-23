@@ -26,7 +26,7 @@ from ...schemas.multi_agent_schema import (
 from ...services.app_service import AppService
 from ...services.chat_errors import error_frame, error_payload
 from ...services.multi_agent_handoffs import MultiAgentHandoffsService
-from ...services.multi_agent_service import MultiAgentService
+from ...services.multi_agent_service import MultiAgentService, default_multi_agent_config
 from ...services.workspace_service import get_workspace_storage_type_without_auth_async
 from ...trace import get_trace_id
 from ...utils.sse_stream import sse_response
@@ -65,31 +65,10 @@ def get_multi_agent_configs(
     config = service.get_multi_agent_configs(app_id)
 
     if not config:
-        # Return the default template
-        default_template = {
-            "app_id": str(app_id),
-            "default_model_config_id": None,
-            "model_parameters": None,
-            "orchestration_mode": "supervisor_loop",
-            "sub_agents": [],
-            "routing_rules": [],
-            "execution_config": {
-                # Aligned with the ExecutionConfig schema defaults. The advanced guard
-                # options (timeout / stream_idle_timeout / parallel_limit /
-                # retry_on_failure / max_retries) have no frontend entry point and
-                # take effect via the backend schema defaults instead
-                "max_iterations": 10
-            },
-            # The supervisor is an Agent: default is the bare supervisor
-            # (None = hardcoded prompt + SubAgentTool only)
-            "supervisor_config": None,
-            # No cluster variables declared by default (None = runtime falls back
-            # to the union of sub-agent variables)
-            "variables": None,
-            "aggregation_strategy": "merge",
-        }
+        # Shared with the v1 face (`/v1/apps/{id}/app-config?type=multi_agent`);
+        # an inline copy here would let the two faces drift apart silently.
         return success(
-            data=default_template,
+            data=default_multi_agent_config(app_id),
             msg="该应用暂无配置，返回默认模板"
         )
 

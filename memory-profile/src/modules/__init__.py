@@ -5,8 +5,12 @@ from __future__ import annotations
 from fastapi import APIRouter
 
 from src.modules.analytics import router as analytics_router
+from src.modules.dashboard import router as dashboard_router
 from src.modules.display import router as display_router
+from src.modules.emotion_analytics import router as emotion_analytics_router
+from src.modules.episodic_memory import router as episodic_memory_router
 from src.modules.explicit_memory import router as explicit_memory_router
+from src.modules.forgetting import router as forgetting_router
 from src.modules.health import router as health_router
 from src.modules.implicit_memory import router as implicit_memory_router
 from src.modules.memory_config import (
@@ -30,6 +34,10 @@ router.include_router(perceptual_router)
 router.include_router(implicit_memory_router)
 router.include_router(working_memory_router)
 router.include_router(explicit_memory_router)
+router.include_router(episodic_memory_router)
+router.include_router(dashboard_router)
+router.include_router(emotion_analytics_router)
+router.include_router(forgetting_router)
 router.include_router(short_router)
 router.include_router(value_ranking_router)
 

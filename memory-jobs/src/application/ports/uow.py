@@ -10,16 +10,51 @@ from __future__ import annotations
 
 from contextlib import AbstractContextManager
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Protocol
 
+from src.application.emotion.ports import EmotionSuggestionsRepository
+from src.application.forgetting.ports import ForgettingRepository
+from src.application.ports.task_context import TaskContextRepository
+from src.application.rag_profile.ports import RAGProfileRepository
+from src.application.working_memory.ports import ConversationDetailRepository
 from src.domain.end_user.repository import EndUserDirectoryRepository
 from src.domain.model_config.repository import ModelConfigRepository
+from src.domain.profile.read_models import (
+    MetadataMigrationCandidate,
+    MetadataMigrationCursor,
+    MetadataMigrationScanCandidate,
+)
 from src.domain.profile.repository import (
     MemoryInsightRepository,
     ProfileRefreshReader,
     UserSummaryRepository,
 )
+from src.domain.shared.ids import EndUserId, WorkspaceId
 from src.domain.workspace.repository import WorkspaceRepository
+
+
+class MetadataMigrationRepository(Protocol):
+    def remaining_count(self, *, cutoff: datetime) -> int: ...
+
+    def migration_candidates(
+        self,
+        *,
+        cutoff: datetime,
+        after: MetadataMigrationCursor | None,
+        limit: int,
+        excluded_workspaces: frozenset[WorkspaceId] = frozenset(),
+    ) -> tuple[list[MetadataMigrationScanCandidate], MetadataMigrationCursor | None]: ...
+    def get_migration_candidate(
+        self, end_user_id: EndUserId, workspace_id: WorkspaceId
+    ) -> MetadataMigrationCandidate | None: ...
+    def cas_write_metadata_new(
+        self,
+        *,
+        end_user_id: EndUserId,
+        original_meta_data: object,
+        merged_metadata: dict[str, object],
+    ) -> bool: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -32,6 +67,12 @@ class Repositories:
     profile_refresh: ProfileRefreshReader
     insights: MemoryInsightRepository
     summaries: UserSummaryRepository
+    metadata_migration: MetadataMigrationRepository
+    task_context: TaskContextRepository
+    rag_profiles: RAGProfileRepository
+    emotion_suggestions: EmotionSuggestionsRepository
+    forgetting: ForgettingRepository
+    conversation_details: ConversationDetailRepository
 
 
 class UnitOfWork(Protocol):

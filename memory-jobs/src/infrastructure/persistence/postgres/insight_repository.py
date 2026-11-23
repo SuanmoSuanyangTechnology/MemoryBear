@@ -15,6 +15,7 @@ import json
 import sqlalchemy as sa
 from sqlalchemy import select
 from sqlalchemy.orm import Session
+from task_bridge.metadata_migration import metadata_read_expression
 
 from src.domain.profile.model import MemoryInsight, WriteOutcome
 from src.domain.profile.read_models import InsightSource
@@ -39,7 +40,7 @@ class SqlAlchemyMemoryInsightRepository:
                 EndUser.id.label("end_user_id"),
                 EndUser.workspace_id,
                 EndUserInfo.id.label("metadata_id"),
-                EndUserInfo.meta_data.label("meta_data"),
+                metadata_read_expression(EndUserInfo.meta_data, EndUserInfo.meta_data_new),
                 EndUserInfo.updated_at.label("metadata_updated_at"),
                 EndUser.write_time,
             )
@@ -76,9 +77,7 @@ class SqlAlchemyMemoryInsightRepository:
         if version.metadata_row_exists:
             metadata_unchanged = sa.exists().where(
                 EndUserInfo.end_user_id == insight.end_user_id.value,
-                EndUserInfo.updated_at.is_not_distinct_from(
-                    version.metadata_updated_at
-                ),
+                EndUserInfo.updated_at.is_not_distinct_from(version.metadata_updated_at),
             )
         else:
             metadata_unchanged = ~sa.exists().where(
@@ -117,6 +116,4 @@ class SqlAlchemyMemoryInsightRepository:
             return WriteOutcome.UPDATED
 
         current = self.find_source(insight.end_user_id, insight.workspace_id)
-        return insight.classify_missed_write(
-            None if current is None else current.version
-        )
+        return insight.classify_missed_write(None if current is None else current.version)
