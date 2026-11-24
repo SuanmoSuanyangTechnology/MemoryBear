@@ -427,7 +427,7 @@ async def update_knowledge(
         from ...services.wiki.runtime import transaction
 
         try:
-            if knowledge_id in runtime.settings.kb_wiki_batch_kbs:
+            if runtime.settings.wiki_batch_enabled(knowledge_id):
                 await dispatcher.send(
                     BATCH_TASK, kwargs={"kb_id": str(knowledge_id)}, queue=MAP_QUEUE,
                     task_id=outcome.wiki_backfill_task_id,
@@ -459,7 +459,7 @@ async def update_knowledge(
                     diagnostic_json(exception_details(state_exc)),
                 )
             raise KnowledgeError.from_code("KB_WIKI_BACKFILL_DISPATCH_FAILED") from exc
-        if knowledge_id in runtime.settings.kb_wiki_batch_kbs:
+        if runtime.settings.wiki_batch_enabled(knowledge_id):
             await asyncio.to_thread(
                 transaction, runtime, confirm_batch_trigger,
                 knowledge_id, outcome.wiki_backfill_task_id,

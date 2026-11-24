@@ -23,14 +23,10 @@ from ...repositories.wiki import deliveries, failures, pages
 from ...repositories.wiki.common import as_uuid, lock_document, lock_knowledge, state_delivery
 from ...usage_context import bind_usage_context
 from . import execution
-from .lease import map_lease, taxonomy_lease
+from .lease import map_batch_lease, map_lease, taxonomy_lease
 from .runtime import transaction
 
 logger = logging.getLogger(__name__)
-
-
-def batch_enabled(settings, kb_id):
-    return as_uuid(kb_id) in settings.kb_wiki_batch_kbs
 
 
 def wake_batch(runtime, kb_id, delay=None):
@@ -110,7 +106,7 @@ def _record(runtime, doc, exc):
 
 
 async def _read_batch(runtime, documents):
-    slots = asyncio.Semaphore(runtime.settings.kb_wiki_map_workers)
+    slots = asyncio.Semaphore(runtime.settings.kb_wiki_batch_size)
 
     async def read(doc, snapshot):
         async with slots:
@@ -128,11 +124,15 @@ async def _read_batch(runtime, documents):
     return {doc["document_id"]: value for (doc, _), value in zip(documents, values, strict=True)}
 
 
-def _prepare(runtime, doc, snapshot, raw, ensure, slots):
+def _prepare(runtime, doc, snapshot, raw, ensure, ensure_batch, slots):
     if isinstance(raw, Exception):
         raise raw
+    def ensure_owned():
+        ensure_batch()
+        ensure()
+
     with bind_usage_context("document", doc["document_id"]):
-        work = execution.extract_document(runtime, snapshot, raw, ensure, slots)
+        work = execution.extract_document(runtime, snapshot, raw, ensure_owned, slots)
         work.pop("model", None)
         return work
 
@@ -274,19 +274,47 @@ def _commit_doc(session, doc, work):
 
 def run_batch(runtime, kb_id):
     settings = runtime.settings
-    docs = transaction(runtime, claim, kb_id, settings.kb_wiki_batch_size)
-    if not docs:
-        logger.info("Wiki Map 无待领取文档 kb_id=%s", kb_id)
-        return {"documents": 0}
+    with map_batch_lease(
+        runtime.redis.sync_client(), kb_id, settings.kb_wiki_batch_max_workers_per_kb,
+    ) as ensure_batch:
+        if ensure_batch is None:
+            logger.info("Wiki Map 已达同库并发上限 kb_id=%s", kb_id)
+            return {"documents": 0}
+        docs = transaction(runtime, claim, kb_id, settings.kb_wiki_batch_size)
+        if not docs:
+            logger.info("Wiki Map 无待领取文档 kb_id=%s", kb_id)
+            return {"documents": 0}
+        result, retry = _process_batch(runtime, kb_id, docs, ensure_batch)
+
+    # 先释放批次名额，再查询待办，避免并发满额时跳过了最后一个新触发。
+    with_pending = transaction(
+        runtime,
+        lambda s: (
+            s.scalar(eligible(kb_id).with_only_columns(WikiDocumentState.document_id).limit(1))
+            is not None
+        ),
+    )
+    if with_pending:
+        delay = (
+            settings.kb_wiki_retry_delay_seconds
+            if retry
+            else settings.kb_wiki_batch_followup_seconds
+        )
+        wake_batch(runtime, kb_id, delay)
+    return result
+
+
+def _process_batch(runtime, kb_id, docs, ensure_batch):
+    settings = runtime.settings
     logger.info("Wiki Map 已领取 kb_id=%s batch_id=%s documents=%d",
                 kb_id, docs[0]["batch_id"], len(docs))
     ready, messages = [], []
     rerun_ids = set()
     failed, retry = 0, False
-    slots = BoundedSemaphore(settings.kb_wiki_parallelism)
+    slots = BoundedSemaphore(settings.kb_wiki_batch_size)
     with (
         ExitStack() as leases,
-        ThreadPoolExecutor(max_workers=settings.kb_wiki_map_workers) as pool,
+        ThreadPoolExecutor(max_workers=settings.kb_wiki_batch_size) as pool,
     ):
         to_extract = []
         for doc in docs:
@@ -322,6 +350,7 @@ def run_batch(runtime, kb_id):
                     snapshot,
                     sources.pop(doc["document_id"]),
                     ensure,
+                    ensure_batch,
                     slots,
                 ),
             )
@@ -338,9 +367,15 @@ def run_batch(runtime, kb_id):
         ]
         if planning:
             try:
-                with taxonomy_lease(runtime.redis.sync_client(), kb_id) as ensure_directory:
+                # 同库批次可以并行提取，等待目录轮到本批时复用已提取的素材。
+                with taxonomy_lease(
+                    runtime.redis.sync_client(), kb_id,
+                    wait_seconds=settings.kb_task_soft_time_limit_seconds,
+                ) as ensure_directory:
+                    ensure_batch()
                     context = transaction(runtime, pages.load_batch_context, kb_id)
                     _plan_topics(runtime, planning, context)
+                    ensure_batch()
                     ensure_directory()
                     plans = transaction(
                         runtime, _register_plans, kb_id, planning, context["revision"]
@@ -364,6 +399,7 @@ def run_batch(runtime, kb_id):
                     if isinstance(current, Exception):
                         raise current
                     work["materials"] = execution.prepare_materials(work, current)
+                ensure_batch()
                 ensure()
                 new_messages, reruns = transaction(runtime, _commit_doc, doc, work)
                 messages.extend(new_messages)
@@ -380,19 +416,6 @@ def run_batch(runtime, kb_id):
             if exc.code != "WIKI_PAGE_BUSY":
                 raise
     execution.publish_pages(runtime, kb_id, messages)
-    if transaction(
-        runtime,
-        lambda s: (
-            s.scalar(eligible(kb_id).with_only_columns(WikiDocumentState.document_id).limit(1))
-            is not None
-        ),
-    ):
-        delay = (
-            settings.kb_wiki_retry_delay_seconds
-            if retry
-            else settings.kb_wiki_batch_followup_seconds
-        )
-        wake_batch(runtime, kb_id, delay)
     logger.info("Wiki Map 已交接 kb_id=%s batch_id=%s documents=%d failed=%d page_messages=%d",
                 kb_id, docs[0]["batch_id"], len(docs), failed, len(messages))
-    return {"documents": len(docs), "failed": failed, "page_messages": len(messages)}
+    return {"documents": len(docs), "failed": failed, "page_messages": len(messages)}, retry

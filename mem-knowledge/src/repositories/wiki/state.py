@@ -382,7 +382,7 @@ def source_started(session, kb_id, document_id, source_task_id, *, replace=False
     from ...bootstrap import get_settings
 
     resume_pages = bool(state and replace and state.stage == "reducing"
-                        and as_uuid(kb_id) in get_settings().kb_wiki_batch_kbs)
+                        and get_settings().wiki_batch_enabled(kb_id))
     reuse = (resume_pages and state.mapped_version == state.requested_version
              and (state.map_progress or {}).get("identity_version") == TOPIC_MAP_VERSION
              and state.config_hash == generation_config_hash(
@@ -506,6 +506,6 @@ def page_handoffs(session, kb_id, page_ids):
     from ...bootstrap import get_settings
     from .deliveries import register
 
-    if as_uuid(kb_id) in get_settings().kb_wiki_batch_kbs:
+    if get_settings().wiki_batch_enabled(kb_id):
         return register(session, kb_id, page_ids)
     return [str(pid) for pid in sorted(set(page_ids), key=str)]

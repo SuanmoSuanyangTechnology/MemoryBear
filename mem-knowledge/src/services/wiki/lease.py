@@ -1,4 +1,4 @@
-"""复用 Redis 可续租锁，协调页面 Reduce 与知识库目录规划。"""
+"""复用 Redis 可续租锁，协调 Map 批次、页面 Reduce 与知识库目录规划。"""
 
 import logging
 import threading
@@ -18,8 +18,10 @@ def page_lease(redis, kb_id, page_id):
     return _lease(redis, f"wiki:reduce:{kb_id}:{page_id}", "WIKI_PAGE_BUSY", kb_id, page_id)
 
 
-def taxonomy_lease(redis, kb_id):
-    return _lease(redis, f"wiki:taxonomy:{kb_id}", "WIKI_TAXONOMY_BUSY", kb_id)
+def taxonomy_lease(redis, kb_id, *, wait_seconds=LEASE_WAIT_SECONDS):
+    return _lease(
+        redis, f"wiki:taxonomy:{kb_id}", "WIKI_TAXONOMY_BUSY", kb_id, wait_seconds=wait_seconds,
+    )
 
 
 def map_lease(redis, kb_id, document_id, requested_version):
@@ -31,11 +33,28 @@ def map_lease(redis, kb_id, document_id, requested_version):
 
 
 @contextmanager
-def _lease(redis, key, busy_code, kb_id, page_id=None, *, document_id=None, requested_version=None):
+def map_batch_lease(redis, kb_id, max_workers):
+    """跨进程和 Pod 限制同库 Map 并发。满额时由已领取的批次接续。"""
+    kb_id = str(uuid.UUID(str(kb_id)))
+    for slot in range(max_workers):
+        with _lease(
+            redis, f"wiki:map_batch:{kb_id}:{slot}", None, kb_id, wait_seconds=0
+        ) as ensure_owned:
+            if ensure_owned is not None:
+                yield ensure_owned
+                return
+    yield None
+
+
+@contextmanager
+def _lease(
+    redis, key, busy_code, kb_id, page_id=None, *, document_id=None, requested_version=None,
+    wait_seconds=LEASE_WAIT_SECONDS,
+):
     lock = redis.lock(
         key,
         timeout=LEASE_TTL_SECONDS,
-        blocking_timeout=LEASE_WAIT_SECONDS,
+        blocking_timeout=wait_seconds,
         thread_local=False,
     )
     try:
@@ -43,6 +62,9 @@ def _lease(redis, key, busy_code, kb_id, page_id=None, *, document_id=None, requ
     except Exception as exc:
         raise WikiDeferred("WIKI_REDIS_UNAVAILABLE") from exc
     if not acquired:
+        if busy_code is None:
+            yield None
+            return
         raise WikiDeferred(busy_code, diagnostics={
             "knowledge_id": str(kb_id), "page_id": str(page_id) if page_id else None,
             "document_id": document_id, "requested_version": requested_version,

@@ -8,7 +8,6 @@ from uuid import UUID
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from src.runtime import get_worker_runtime
-from src.services.wiki.batch import batch_enabled
 from src.services.wiki.delivery import rerun_page
 
 
@@ -19,7 +18,7 @@ def main():
     args = parser.parse_args()
     runtime = get_worker_runtime()
     try:
-        if not batch_enabled(runtime.settings, args.kb_id):
+        if not runtime.settings.wiki_batch_enabled(args.kb_id):
             parser.error("目标知识库尚未启用批量 Wiki")
         scheduled = rerun_page(runtime, str(args.kb_id), str(args.page_id))
         print("已投递" if scheduled else "没有待处理页面")

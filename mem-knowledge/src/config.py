@@ -32,13 +32,15 @@ class KnowledgeSettings(BaseSettings):
         default=4, ge=1, validation_alias="KB_FILE_FOLDER_MAX_DEPTH",
     )
 
-    kb_wiki_batch_kbs: frozenset[UUID] = Field(
+    kb_wiki_batch_kbs: frozenset[UUID | Literal["*"]] = Field(
         default_factory=frozenset, validation_alias="KB_WIKI_BATCH_KBS",
     )
-    kb_wiki_batch_size: int = Field(default=5, ge=1, le=32, validation_alias="KB_WIKI_BATCH_SIZE")
-    kb_wiki_map_workers: int = Field(default=3, ge=1, le=8, validation_alias="KB_WIKI_MAP_WORKERS")
+    kb_wiki_batch_size: int = Field(default=8, ge=1, le=32, validation_alias="KB_WIKI_BATCH_SIZE")
+    kb_wiki_batch_max_workers_per_kb: int = Field(
+        default=4, ge=1, le=32, validation_alias="KB_WIKI_BATCH_MAX_WORKERS_PER_KB",
+    )
     kb_wiki_batch_delay_seconds: int = Field(
-        default=5, ge=0, le=60, validation_alias="KB_WIKI_BATCH_DELAY_SECONDS",
+        default=30, ge=0, le=60, validation_alias="KB_WIKI_BATCH_DELAY_SECONDS",
     )
     kb_wiki_batch_followup_seconds: int = Field(
         default=5, ge=0, le=60, validation_alias="KB_WIKI_BATCH_FOLLOWUP_SECONDS",
@@ -53,6 +55,9 @@ class KnowledgeSettings(BaseSettings):
         if isinstance(value, str):
             return [v.strip() for v in value.split(",") if v.strip()]
         return value
+
+    def wiki_batch_enabled(self, kb_id: UUID | str) -> bool:
+        return "*" in self.kb_wiki_batch_kbs or UUID(str(kb_id)) in self.kb_wiki_batch_kbs
 
     # Wiki execution budgets are ceilings, not content truncation policies.
     kb_wiki_segment_tokens: int = Field(default=32768, ge=128,
