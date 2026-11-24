@@ -32,7 +32,7 @@ def _validate_hierarchy(
     db, model, scope_column, root_id, kind_column, folder_kind,
     values, max_depth, node_id, tree_kind, invalid_code, depth_code,
 ):
-    if node_id is not None and not {"parent_id", "status"} & values.keys():
+    if node_id is not None and not {"parent_id", "status", kind_column.key} & values.keys():
         return
     # Both services use the same lock key. It is held until commit or rollback.
     db.execute(
@@ -53,11 +53,11 @@ def _validate_hierarchy(
     if node_id is not None and current is None:
         _reject(invalid_code, "The edited record is outside the folder tree.")
     parent_id = values.get("parent_id", current.parent_id if current else root_id)
-    kind = current.kind if current else values.get(kind_column.key)
+    kind = values.get(kind_column.key, current.kind if current else None)
     parent_id = root_id if parent_id is None else parent_id
     old_parent_id = root_id if current is None or current.parent_id is None else current.parent_id
     restoring = current is not None and current.status == 2 and values.get("status", 2) != 2
-    if current and parent_id == old_parent_id and not restoring:
+    if current and parent_id == old_parent_id and kind == current.kind and not restoring:
         return
 
     def parent_depth(parent, *, check_available):
@@ -76,6 +76,12 @@ def _validate_hierarchy(
 
     destination_depth = parent_depth(parent_id, check_available=True)
     if kind != folder_kind:
+        if current and current.kind == folder_kind and db.scalar(
+            select(model.id).where(
+                scope_column == root_id, model.parent_id == node_id,
+            ).limit(1)
+        ) is not None:
+            _reject(invalid_code, "A folder with children cannot be converted to a non-folder.")
         return
 
     # Include soft-deleted folders so later restoration cannot expand this subtree.
@@ -97,7 +103,7 @@ def _validate_hierarchy(
     deepest = destination_depth + height
     if deepest <= max_depth:
         return
-    if current and not restoring:
+    if current and current.kind == folder_kind and not restoring:
         previous_deepest = parent_depth(old_parent_id, check_available=False) + height
         if deepest < previous_deepest:
             return
