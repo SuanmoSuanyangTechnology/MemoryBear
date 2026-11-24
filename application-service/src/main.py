@@ -182,9 +182,11 @@ def create_app(settings: AppServiceSettings | None = None) -> FastAPI:
         await BatchPersistQueue.start()
         if grpc_server is not None:
             await grpc_server.start()
+        runtime.readiness.start()
         try:
             yield
         finally:
+            await runtime.readiness.aclose()
             if grpc_server is not None:
                 await grpc_server.stop(grace_s=service_settings.grpc_shutdown_grace_s)
             if gateway_auth is not None:

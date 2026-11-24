@@ -19,37 +19,40 @@ from ..models.workflow_model import (
     WorkflowNodeExecution,
 )
 
-# Retention SQL for full-graph node rows, shared with the async queue persist
-# path. After each node-projection write the table keeps only the node rows of
-# the truly latest execution (by started_at / created_at / id) under the same
-# app_id + workflow_config_id. Keeping the just-written execution instead
-# would mis-evict: an older waiting_human execution can resume after a newer
-# one and write again. Only rows with a non-null execution_id are matched, so
-# single-node debug rows are never affected.
+# Limit each write to one cleanup batch. Select the latest execution by start
+# order so an older waiting_human execution resuming later cannot evict it.
 NODE_EXECUTION_RETENTION_SQL = """
-WITH current_scope AS (
+WITH current_scope AS MATERIALIZED (
     SELECT app_id, workflow_config_id
     FROM workflow_executions
     WHERE id = CAST(:eid AS uuid)
+      AND pg_try_advisory_xact_lock(hashtextextended('app:workflow-node-retention', 0))
 ),
 latest_execution AS (
-    SELECT candidate.id
-    FROM workflow_executions AS candidate
-    JOIN current_scope AS scope
-      ON candidate.app_id = scope.app_id
-     AND candidate.workflow_config_id = scope.workflow_config_id
-    ORDER BY candidate.started_at DESC,
-             candidate.created_at DESC,
-             candidate.id DESC
-    LIMIT 1
+    SELECT scope.app_id, scope.workflow_config_id, latest.id
+    FROM current_scope AS scope
+    CROSS JOIN LATERAL (
+        SELECT candidate.id
+        FROM workflow_executions AS candidate
+        WHERE candidate.app_id = scope.app_id
+          AND candidate.workflow_config_id = scope.workflow_config_id
+        ORDER BY candidate.started_at DESC, candidate.created_at DESC, candidate.id DESC
+        LIMIT 1
+    ) AS latest
+),
+stale_batch AS (
+    SELECT stale.id
+    FROM latest_execution AS latest
+    JOIN workflow_node_executions AS stale
+      ON stale.app_id = latest.app_id
+     AND stale.workflow_config_id = latest.workflow_config_id
+    WHERE stale.execution_id <> latest.id
+    LIMIT 200
+    FOR UPDATE OF stale SKIP LOCKED
 )
 DELETE FROM workflow_node_executions AS stale
-USING workflow_executions AS stale_exec,
-      current_scope AS scope
-WHERE stale.execution_id = stale_exec.id
-  AND stale_exec.app_id = scope.app_id
-  AND stale_exec.workflow_config_id = scope.workflow_config_id
-  AND stale_exec.id <> (SELECT id FROM latest_execution)
+USING stale_batch
+WHERE stale.id = stale_batch.id
 """
 
 
