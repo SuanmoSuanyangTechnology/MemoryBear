@@ -369,14 +369,6 @@ configurations return HTTP 404. English output now retains `baseline`, nullable
 assessment results can be translated safely, and failure duration uses one
 monotonic clock.
 
-The regression suite compares Chinese output and prompts against the legacy
-preview, exercises both ID types and isolation predicates, and checks HTTP and
-API proxy behavior without calling external services:
-
-```bash
-PYTHONPATH=../packages/task-bridge-sdk/src:. .venv/bin/python -m pytest tests/test_reflection_trial.py -q
-```
-
 ## Scene community graph
 
 The scene community graph follows the same entry chain as the other analytics
