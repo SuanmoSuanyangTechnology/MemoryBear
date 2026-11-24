@@ -2269,6 +2269,11 @@ class AppChatService:
 
             full_content = ""
             total_tokens = 0
+            # The orchestrator catches exceptions internally and only emits an
+            # error frame: record the unified frame so this turn persists as
+            # failed (content=user-facing msg, meta.error=diagnostic) instead
+            # of an empty completed assistant row.
+            _stream_failure: Optional[Dict[str, Any]] = None
             # Conversation-capability extras (suggested questions / citations /
             # audio) carried by the end event; empty when features are off
             end_extras: Dict[str, Any] = {}
@@ -2349,6 +2354,24 @@ class AppChatService:
                     except Exception:
                         pass
 
+                if _event_name == "error" and "data:" in event:
+                    try:
+                        _error_payload = json.loads(event.split("data: ", 1)[1].strip())
+                    except Exception:
+                        _error_payload = None
+                    # Agent-owned error frames only mark the sub-agent block
+                    # failed (same rule as the frontend's hasAgentOwner); the
+                    # turn may still end normally. Only a cluster-level error
+                    # (no ownership keys) marks this turn failed.
+                    if _error_payload is not None and not any(
+                        _k in _error_payload
+                        for _k in (
+                            "execution_id", "parent_execution_id",
+                            "orchestration_mode", "agent_id", "agent_name",
+                        )
+                    ):
+                        _stream_failure = _error_payload
+
                 if _event_name == "end":
                     held_end_event = event
                 else:
@@ -2373,6 +2396,14 @@ class AppChatService:
                         pass
 
             elapsed_time = time.time() - start_time
+
+            if _stream_failure is not None:
+                from error_core.messages import user_message
+                full_content = (
+                    _stream_failure.get("msg")
+                    or user_message(BizCode.INTERNAL_ERROR.value, get_current_locale())
+                    or "服务内部错误，请稍后重试"
+                )
 
             # Enqueue async batch persist
             # S3 persistence convergence: this entry (the app-orchestration
@@ -2411,6 +2442,11 @@ class AppChatService:
                 ),
                 "should_memorize": orchestrator.cluster_memory_enabled(),
             }
+            if _stream_failure is not None:
+                # content=msg, meta.error=diagnostic — same contract as Agent
+                # and workflow failed turns.
+                _result.assistant_meta["error"] = _stream_failure.get("error") or ""
+                _persist_args["assistant_status"] = "failed"
             # This turn's variable values persist with the user message so
             # regeneration can read them back (no key when empty: legacy unchanged)
             if variables:

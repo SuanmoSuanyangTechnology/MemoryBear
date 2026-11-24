@@ -19,9 +19,11 @@ from .conversation_state_manager import (
     ConversationStateManager,
     create_conversation_state_manager,
 )
-from ..errors import BusinessException, ResourceNotFoundException
+from ..errors import BusinessException, ResourceNotFoundException, get_current_locale
 from ..errors import BizCode
 from ..integrations.model.errors import ModelInvokeCancelledError
+from ..trace import get_trace_id
+from .chat_errors import error_frame, error_payload
 from ..utils.datetime_utils import utcnow_naive
 from ..repositories.tool_repository import ToolRepository
 from .model_service import ModelApiKeyService, ModelConfigService
@@ -1709,11 +1711,8 @@ class MultiAgentOrchestrator:
                 elapsed_time=time.time() - start_time,
                 error_message=str(e)[:2000],
             )
-            # Send the error event
-            yield self._format_sse_event("error", {
-                "error": str(e),
-                "timestamp": time.time()
-            })
+            # Send the unified error frame
+            yield self._error_event(e)
 
     async def execute(
         self,
@@ -4757,10 +4756,7 @@ class MultiAgentOrchestrator:
                     )
             except Exception:
                 pass
-            yield self._format_sse_event("error", {
-                "error": str(e),
-                "timestamp": time.time()
-            })
+            yield self._error_event(e)
 
     async def _execute_collaboration_mode(
         self,
@@ -4917,6 +4913,14 @@ class MultiAgentOrchestrator:
         """
         import json
         return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
+
+    def _error_event(self, exc: Exception) -> str:
+        """Build the unified SSE error frame (msg for users, error for diagnosis)."""
+        return error_frame(error_payload(
+            exc,
+            locale=get_current_locale(),
+            trace_id=get_trace_id(),
+        ))
 
     @staticmethod
     def _strip_conversation_id(event: str) -> str:

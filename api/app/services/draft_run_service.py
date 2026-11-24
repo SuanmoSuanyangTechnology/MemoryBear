@@ -1031,6 +1031,38 @@ class AgentRunService:
         )
         compact_error["retryable"] = retryable
 
+    @staticmethod
+    def _compare_error_fields(error: Any) -> Dict[str, Any]:
+        """把单模型错误平铺为统一 SSE 错误帧字段。
+
+        msg 面向用户（本地化目录文案），error 为排障诊断（前端不得展示），
+        message 是 error 的旧别名。
+        """
+        locale = get_current_locale()
+        if isinstance(error, dict):
+            numeric = coerce_code(error.get("code"))
+            if numeric in (None, BizCode.OK.value):
+                numeric = BizCode.INTERNAL_ERROR.value
+            msg = (
+                error.get("msg")
+                or error.get("message")
+                or user_message(numeric, locale)
+            )
+            detail = str(error.get("error") or "")
+            retryable = bool(error.get("retryable", False))
+        else:
+            numeric = BizCode.INTERNAL_ERROR.value
+            msg = user_message(numeric, locale) or "服务内部错误，请稍后重试"
+            detail = str(error or "")
+            retryable = False
+        return {
+            "code": numeric,
+            "msg": msg,
+            "error": detail,
+            "message": detail,
+            "retryable": retryable,
+        }
+
     def _build_model_error_event_data(
             self,
             *,
@@ -1047,7 +1079,7 @@ class AgentRunService:
             "model_config_id": model_config_id,
             "label": label,
             "conversation_id": conversation_id,
-            "error": error,
+            **self._compare_error_fields(error),
             "timestamp": timestamp if timestamp is not None else time.time(),
             "time": now_ms(),
         }
@@ -1086,8 +1118,8 @@ class AgentRunService:
             "timestamp": time.time(),
             "time": now_ms(),
         }
-        if error is not None:
-            data["error"] = error
+        if status == "failed" or error is not None:
+            data.update(self._compare_error_fields(error))
         return data
 
     async def _check_annotation_match(self, app_id: uuid.UUID, message: str,

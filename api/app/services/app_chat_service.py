@@ -1900,6 +1900,27 @@ class AppChatService:
             ) or "服务内部错误，请稍后重试"
         return display, str(e)[:2000]
 
+    def _unified_error_frame(
+            self,
+            exc: Exception,
+            *,
+            msg: Optional[str] = None,
+            detail: Optional[str] = None,
+    ) -> str:
+        """Build a unified SSE error frame: msg for users, error for diagnosis."""
+        from app.core.workflow.error_info import workflow_error_info
+
+        info = workflow_error_info(exc)
+        frame = {
+            "code": info["code"],
+            "msg": msg or info["msg"],
+            "error": detail or info["error"],
+            "message": detail or info["error"],
+            "retryable": info["retryable"],
+            "time": int(time.time() * 1000),
+        }
+        return f"event: error\ndata: {json.dumps(frame, ensure_ascii=False)}\n\n"
+
     @bind_usage("app", "config.app_id")
     async def multi_agent_chat(
             self,
@@ -2097,7 +2118,9 @@ class AppChatService:
         """
         gate = get_multi_agent_stream_gate()
         if not await gate.acquire():
-            yield f"event: error\ndata: {json.dumps({'error': BUSY_MESSAGE}, ensure_ascii=False)}\n\n"
+            yield self._unified_error_frame(
+                BusinessException(BUSY_MESSAGE, BizCode.SERVICE_UNAVAILABLE)
+            )
             return
         try:
             async with aclosing(self._multi_agent_chat_stream_impl(
@@ -2151,6 +2174,9 @@ class AppChatService:
 
             full_content = ""
             total_tokens = 0
+            # 编排器内部捕获异常后只发 error 帧不抛出：记下统一错误帧，本轮按
+            # failed 落库（content=用户可读 msg，meta.error=诊断），否则日志 content 为空。
+            _stream_failure: Optional[Dict[str, Any]] = None
             # end 事件携带的对话能力附加字段（建议问题/引用/语音）；features 未开启时为空
             end_extras: Dict[str, Any] = {}
             # end 事件先扣住，等落库入队完成后再下发：客户端收到 end 即断开会取消本生成器，
@@ -2218,6 +2244,23 @@ class AppChatService:
                     except:
                         pass
 
+                if _event_name == "error" and "data:" in event:
+                    try:
+                        _error_payload = json.loads(event.split("data: ", 1)[1].strip())
+                    except Exception:
+                        _error_payload = None
+                    # 带 Agent 归属的 error 帧只标记子 Agent 区块失败（与前端
+                    # hasAgentOwner 同口径），轮末仍可能正常收尾；只有集群级 error
+                    #（无归属字段）才把本轮按 failed 落库。
+                    if _error_payload is not None and not any(
+                        _k in _error_payload
+                        for _k in (
+                            "execution_id", "parent_execution_id",
+                            "orchestration_mode", "agent_id", "agent_name",
+                        )
+                    ):
+                        _stream_failure = _error_payload
+
                 if _event_name == "end":
                     held_end_event = event
                 else:
@@ -2240,6 +2283,15 @@ class AppChatService:
                         pass
 
             elapsed_time = time.time() - start_time
+
+            if _stream_failure is not None:
+                from app.i18n.exceptions import get_current_locale
+                from error_core.messages import user_message
+                full_content = (
+                    _stream_failure.get("msg")
+                    or user_message(BizCode.INTERNAL_ERROR.value, get_current_locale())
+                    or "服务内部错误，请稍后重试"
+                )
 
             # Enqueue async batch persist
             # S3 落库收口：本入口（应用编排侧）是唯一的落库层——落库内容为
@@ -2270,6 +2322,10 @@ class AppChatService:
                 "user_parent_message_id": await self._get_last_current_assistant_id(conversation_id),
                 "should_memorize": orchestrator.cluster_memory_enabled(),
             }
+            if _stream_failure is not None:
+                # content=msg、meta.error=诊断，与 Agent/工作流失败轮口径一致
+                _result.assistant_meta["error"] = _stream_failure.get("error") or ""
+                _persist_args["assistant_status"] = "failed"
             # 本轮变量值随 user 消息落库，重新生成时回读（无变量不加键，老集群落库不变）
             if variables:
                 _persist_args["variables_meta"] = variables
@@ -2358,8 +2414,8 @@ class AppChatService:
                     ))
                 except Exception:
                     pass
-            # 发送错误事件
-            yield f"event: error\ndata: {json.dumps({'error': display_error}, ensure_ascii=False)}\n\n"
+            # 发送统一错误帧
+            yield self._unified_error_frame(e, msg=display_error, detail=error_detail)
 
     async def workflow_chat(
             self,

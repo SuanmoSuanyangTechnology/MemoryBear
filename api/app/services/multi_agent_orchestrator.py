@@ -21,6 +21,7 @@ from app.core.exceptions import BusinessException, ResourceNotFoundException
 from app.core.error_codes import BizCode
 from app.core.logging_config import get_business_logger
 from app.core.utils.datetime_utils import utcnow_naive
+from app.core.workflow.error_info import workflow_error_info
 from app.repositories.tool_repository import ToolRepository
 from app.services.model_service import ModelApiKeyService, ModelConfigService
 from app.services.multi_agent_variable_contract import (
@@ -1441,11 +1442,8 @@ class MultiAgentOrchestrator:
                 elapsed_time=time.time() - start_time,
                 error_message=str(e)[:2000],
             )
-            # 发送错误事件
-            yield self._format_sse_event("error", {
-                "error": str(e),
-                "timestamp": time.time()
-            })
+            # 发送统一错误帧
+            yield self._error_event(e)
 
     async def execute(
         self,
@@ -4237,10 +4235,7 @@ class MultiAgentOrchestrator:
                     )
             except Exception:
                 pass
-            yield self._format_sse_event("error", {
-                "error": str(e),
-                "timestamp": time.time()
-            })
+            yield self._error_event(e)
 
     async def _execute_collaboration_mode(
         self,
@@ -4390,6 +4385,19 @@ class MultiAgentOrchestrator:
         """
         import json
         return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
+
+    def _error_event(self, exc: Exception) -> str:
+        """构建统一 SSE 错误帧：msg 给用户、error 给排障。"""
+        info = workflow_error_info(exc)
+        return self._format_sse_event("error", {
+            "code": info["code"],
+            "msg": info["msg"],
+            "error": info["error"],
+            "message": info["error"],
+            "retryable": info["retryable"],
+            "time": int(time.time() * 1000),
+            "timestamp": time.time(),
+        })
 
     @staticmethod
     def _strip_conversation_id(event: str) -> str:
