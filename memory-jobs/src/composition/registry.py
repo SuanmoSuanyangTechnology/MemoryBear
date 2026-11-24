@@ -31,6 +31,7 @@ from src.composition.profile_cache import build_profile_cache_wiring
 from src.composition.rag_profile import build_rag_profile_wiring
 from src.composition.shared import SharedDependencies
 from src.composition.working_memory import build_working_memory_wiring
+from src.extensions import extension_domains, load_extensions
 from src.runtime import JobsRuntime
 
 
@@ -54,3 +55,16 @@ MODULES: tuple[DomainModule, ...] = (
     DomainModule(name="admission", build=build_admission_wiring),
     DomainModule(name="outbox", build=build_outbox_wiring),
 )
+
+
+def get_modules() -> tuple[DomainModule, ...]:
+    """The open-build domains followed by every configured extension domain.
+
+    Resolved when the container is built, not at import, so an extension module
+    may import the host composition root without re-entering this module.
+    """
+
+    return MODULES + tuple(
+        DomainModule(name=domain.name, build=domain.build)
+        for domain in extension_domains(load_extensions())
+    )

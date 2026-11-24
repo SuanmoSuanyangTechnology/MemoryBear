@@ -37,6 +37,7 @@ from src.application.jobs.forgetting_trigger import TriggerForgettingJob
 from src.application.jobs.rag_profile_generate import GenerateRAGProfileJob
 from src.application.ports.jobs import JobHandler, JobSpec
 from src.composition import get_container
+from src.extensions import extension_jobs, load_extensions
 from src.runtime import get_runtime
 
 
@@ -150,6 +151,9 @@ JOBS: tuple[JobRegistration, ...] = (
 
 
 def get_jobs() -> tuple[JobRegistration, ...]:
-    """Every registered job of the open build."""
+    """The open-build jobs followed by every configured extension job."""
 
-    return JOBS
+    return JOBS + tuple(
+        JobRegistration(name=job.name, spec=job.spec, build=job.build)
+        for job in extension_jobs(load_extensions())
+    )

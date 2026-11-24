@@ -27,6 +27,7 @@ from task_bridge.mem_router import QueueName, TaskName, TaskPriority
 
 from src.bootstrap import get_settings
 from src.config import JobsSettings
+from src.extensions import extension_periodic, load_extensions
 
 #: Beat only publishes; every entry therefore lands on this service's queue.
 DEFAULT_BEAT_QUEUE = QueueName.MEMORY_JOBS
@@ -65,7 +66,7 @@ def periodic_tasks(settings: JobsSettings | None = None) -> tuple[PeriodicTask, 
     """
 
     settings = settings or get_settings()
-    return (
+    open_build = (
         # Nightly sweep for stale insight/summary caches, taken over from the
         # API's ``regenerate-memory-cache`` entry. That entry is still live on
         # this branch, so both scanners fire at the same hour until its removal
@@ -136,6 +137,9 @@ def periodic_tasks(settings: JobsSettings | None = None) -> tuple[PeriodicTask, 
             priority=TaskPriority.BACKGROUND,
         ),
     )
+    # Extension entries carry their own queue and enable switch; the open build
+    # contributes none and never imports the package.
+    return open_build + extension_periodic(load_extensions(settings))
 
 
 def build_beat_schedule(settings: JobsSettings | None = None) -> dict[str, dict[str, Any]]:

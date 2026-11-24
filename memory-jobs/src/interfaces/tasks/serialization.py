@@ -39,6 +39,7 @@ from src.application.ports.outbox.outbox import CleanupReport, ProjectionReport
 from src.application.profile_cache.generate import ProfileCacheResult
 from src.application.rag_profile.dto import RAGProfileResult
 from src.application.working_memory.dto import ConversationDetailResult
+from src.extensions import extension_serializers, load_extensions
 
 
 def _health(report: HealthReport) -> dict[str, Any]:
@@ -181,6 +182,7 @@ _SERIALIZERS: dict[type, Callable[[Any], dict[str, Any]]] = {
     RecoverReport: _admission_recover,
     ProjectionReport: _outbox_projection,
     CleanupReport: _outbox_cleanup,
+    **extension_serializers(load_extensions()),
 }
 
 

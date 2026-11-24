@@ -147,6 +147,11 @@ class JobsSettings(BaseSettings):
     task_default_queue: str = Field(
         QueueName.MEMORY_JOBS.value, validation_alias="JOBS_TASK_DEFAULT_QUEUE"
     )
+    #: Comma-separated modules that contribute edition-specific jobs, domain
+    #: wirings, routes, beat entries and result serializers (for example
+    #: ``enterprise_ext.memory_jobs`` in the enterprise build). Empty is the
+    #: open build. A configured module must import.
+    jobs_extension_modules: str = Field("", validation_alias="JOBS_EXTENSION_MODULES")
     task_time_limit_seconds: int = Field(3600, ge=1, validation_alias="JOBS_TASK_TIME_LIMIT")
     task_soft_time_limit_seconds: int = Field(
         3000, ge=1, validation_alias="JOBS_TASK_SOFT_TIME_LIMIT"
@@ -447,6 +452,17 @@ class JobsSettings(BaseSettings):
         if self.celery_result_backend:
             return self.celery_result_backend
         return _redis_url_with_db(self.resolved_redis_url, self.redis_db_celery_backend)
+
+    @property
+    def jobs_extension_module_names(self) -> tuple[str, ...]:
+        """The configured extension modules, trimmed and de-duplicated."""
+
+        names: list[str] = []
+        for part in self.jobs_extension_modules.split(","):
+            name = part.strip()
+            if name and name not in names:
+                names.append(name)
+        return tuple(names)
 
     @property
     def elasticsearch_hosts(self) -> list[str]:

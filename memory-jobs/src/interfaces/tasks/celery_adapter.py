@@ -19,7 +19,7 @@ from celery import shared_task
 
 from src.application.ports.jobs import JobSpec, ResourceClass
 from src.interfaces.tasks.base import JobTask
-from src.interfaces.tasks.registry import JOBS, JobRegistration
+from src.interfaces.tasks.registry import JobRegistration, get_jobs
 from src.interfaces.tasks.serialization import serialize
 
 #: Resource class -> (hard limit, soft limit), in seconds. ``None`` leaves the
@@ -81,5 +81,5 @@ def _register(registration: JobRegistration) -> Any:
 
 #: Every registered job as a Celery task, keyed by its wire name.
 TASKS: dict[str, Any] = {
-    registration.name: _register(registration) for registration in JOBS
+    registration.name: _register(registration) for registration in get_jobs()
 }
