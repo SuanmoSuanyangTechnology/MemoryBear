@@ -78,6 +78,15 @@ def _parse_uuid(value: Any) -> UUID | None:
     return None
 
 
+def _as_text(value: Any) -> str:
+    """Render a stored model id for a payload without validating it."""
+
+    if value is None:
+        return ""
+    text = str(value).strip()
+    return "" if text in {"", "None"} else text
+
+
 def _effective_model_ids(source: Mapping[str, Any]) -> dict[str, Any]:
     """The model ids a workspace should resolve at runtime.
 
@@ -99,6 +108,26 @@ class PostgresEndUserPort:
 
     def __init__(self, repository: EndUserRepository) -> None:
         self._repository = repository
+
+    async def workspace_of(self, end_user_id: str) -> UUID | None:
+        """The workspace the id belongs to (no merge routing), or ``None``."""
+
+        parsed = _parse_uuid(end_user_id)
+        if parsed is None:
+            return None
+        return await self._repository.workspace_of(parsed)
+
+    async def write_target(self, end_user_id: str) -> dict[str, Any] | None:
+        """The host's write target: active row, else newest merge target.
+
+        Returns ``{"id", "workspace_id"}``; the caller applies the workspace
+        check on the *resolved* user, exactly like ``write_server_async``.
+        """
+
+        parsed = _parse_uuid(end_user_id)
+        if parsed is None:
+            return None
+        return await self._repository.write_target(parsed)
 
     async def resolve_in_workspace(self, end_user_id: str, workspace_id: UUID) -> EndUserRef | None:
         """Return the canonical (merge-routed) id, or ``None`` when unusable.
@@ -190,6 +219,31 @@ class PostgresReadConfigPort:
         if row is None:
             return None
         return row["storage_type"] or DEFAULT_STORAGE_TYPE
+
+    async def write_model_ids(self, config_id: UUID) -> tuple[str, str, str]:
+        """The ``(embedding, llm, tenant)`` facts a write unit carries.
+
+        The monolith's write controller never loads the configuration: it hands
+        the config id to the worker, which resolves (and validates) the model
+        slots at execution time. This adapter therefore resolves the *effective*
+        workspace/preset ids only — the same values the worker would read — and
+        leaves a missing/unusable slot empty, so the unit fails where the
+        monolith's task would fail instead of rejecting the request early.
+
+        ``tenant`` is the workspace's tenant, because that is what the API's
+        worker uses to resolve model-service credentials (not the caller's
+        token tenant).
+        """
+
+        source = await self._configs.get_read_config_source(config_id)
+        if source is None:
+            return "", "", ""
+        effective = _effective_model_ids(source)
+        return (
+            _as_text(effective.get("embedding")),
+            _as_text(effective.get("llm")),
+            _as_text(source.get("tenant_id")),
+        )
 
     async def semantic_rebuild_pending(
         self,

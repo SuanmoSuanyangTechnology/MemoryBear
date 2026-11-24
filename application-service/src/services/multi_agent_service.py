@@ -22,6 +22,7 @@ from ..errors import (
     BusinessException,
     ResourceNotFoundException,
     SubAgentValidationError,
+    get_current_locale,
 )
 from ..integrations.model.errors import ModelInvokeCancelledError
 from ..models import App, AppRelease
@@ -30,6 +31,8 @@ from ..models.multi_agent_model import MultiAgentConfig
 from ..repositories import cross_domain_read
 from ..repositories.multi_agent_repository import MultiAgentConfigRepository
 from ..schemas.multi_agent_schema import MultiAgentConfigUpdate, MultiAgentRunRequest
+from ..trace import get_trace_id
+from .chat_errors import error_frame, error_payload
 from .model_ref_gate import raise_model_unavailable, resolve_invoke_ref
 from .multi_agent_orchestrator import MultiAgentOrchestrator
 from .multi_agent_release_resolver import describe_release_state, resolve_release_for_save
@@ -815,6 +818,14 @@ class MultiAgentService:
         # Conversation-capability extras carried by the end event (suggested
         # questions / citations / voice); empty when the features are off.
         end_extras: dict = {}
+        # The orchestrator catches exceptions internally and only emits an
+        # error frame: record the unified frame so this turn persists as
+        # failed (content=user-facing msg, meta.error=diagnostic) instead of
+        # an empty completed assistant row.
+        _stream_failure: dict[str, Any] | None = None
+        # Agent-owned error frames are remembered separately; they only
+        # escalate to a failed turn when the main bubble has no body at all.
+        _last_error_frame: dict[str, Any] | None = None
         async for event in orchestrator.execute_stream(
             message=request.message,
             conversation_id=request.conversation_id,
@@ -851,6 +862,26 @@ class MultiAgentService:
                 except Exception:
                     pass
 
+            if _event_name == "error" and "data:" in event:
+                try:
+                    _error_payload = json.loads(event.split("data: ", 1)[1].strip())
+                except Exception:
+                    _error_payload = None
+                # Agent-owned error frames only mark the sub-agent block failed
+                # (same rule as the frontend's hasAgentOwner); a cluster-level
+                # error (no ownership keys) marks the whole turn failed.
+                if isinstance(_error_payload, dict):
+                    if any(
+                        _k in _error_payload
+                        for _k in (
+                            "execution_id", "parent_execution_id",
+                            "orchestration_mode", "agent_id", "agent_name",
+                        )
+                    ):
+                        _last_error_frame = _error_payload
+                    else:
+                        _stream_failure = _error_payload
+
             yield event
             # Persist only the cluster-level `message` events (decided by event
             # name). Sub-agent bodies arrive as `sub_agent_message`; counting
@@ -864,6 +895,16 @@ class MultiAgentService:
                         full_content += data["content"]
                 except Exception:
                     pass
+
+        # A sub-agent failed and the turn produced no main-bubble body at all
+        # (e.g. the first collaboration agent errored): persist the empty turn
+        # as failed with the error frame's msg as content.
+        if (
+            _stream_failure is None
+            and _last_error_frame is not None
+            and not full_content.strip()
+        ):
+            _stream_failure = _last_error_frame
 
         # Persistence closure: this service (draft/API scenario) is the single
         # persistence layer for the multi-agent stream — writes go through
@@ -907,38 +948,49 @@ class MultiAgentService:
             )
             if _history_files:
                 _result.history_files = _history_files
+        _persist_args = {
+            "conversation_id": str(request.conversation_id),
+            "result": _result,
+            "user_message_id_override": user_message_id,
+            "user_message_content": request.message,
+            # This turn's variable values are persisted on the user row so a
+            # cluster regeneration can read them back (key omitted when absent)
+            "variables_meta": request.variables or None,
+            # Attachment references persisted for this turn (regeneration
+            # restores FileInput from them)
+            "files_meta": _files_meta,
+            # The user message attaches to the version the user is currently
+            # viewing, so a version switch isolates follow-up turns by parent
+            "user_parent_message_id": await self._get_last_current_assistant_id(
+                request.conversation_id
+            ),
+            "should_memorize": orchestrator.cluster_memory_enabled(),
+            # The new-conversation opening statement persists with this round
+            # (same as Agent apps) so the version-switch branch chain can
+            # include it; key omitted when there is no opening
+            **(
+                {
+                    "is_new_conversation": True,
+                    "opening_statement": opening_statement,
+                    "opening_message_id": uuid.uuid4(),
+                    "opening_suggested_questions": _opening_suggested_questions,
+                }
+                if opening_statement else {}
+            ),
+        }
+        if _stream_failure is not None:
+            from error_core.messages import user_message
+
+            _result.full_content = (
+                _stream_failure.get("msg")
+                or user_message(BizCode.INTERNAL_ERROR.value, get_current_locale())
+                or "服务内部错误，请稍后重试"
+            )
+            _result.assistant_meta["error"] = _stream_failure.get("error") or ""
+            _persist_args["assistant_status"] = "failed"
         await BatchPersistQueue.enqueue(PersistTask(
             task_type="save_messages",
-            args={
-                "conversation_id": str(request.conversation_id),
-                "result": _result,
-                "user_message_id_override": user_message_id,
-                "user_message_content": request.message,
-                # This turn's variable values are persisted on the user row so a
-                # cluster regeneration can read them back (key omitted when absent)
-                "variables_meta": request.variables or None,
-                # Attachment references persisted for this turn (regeneration
-                # restores FileInput from them)
-                "files_meta": _files_meta,
-                # The user message attaches to the version the user is currently
-                # viewing, so a version switch isolates follow-up turns by parent
-                "user_parent_message_id": await self._get_last_current_assistant_id(
-                    request.conversation_id
-                ),
-                "should_memorize": orchestrator.cluster_memory_enabled(),
-                # The new-conversation opening statement persists with this round
-                # (same as Agent apps) so the version-switch branch chain can
-                # include it; key omitted when there is no opening
-                **(
-                    {
-                        "is_new_conversation": True,
-                        "opening_statement": opening_statement,
-                        "opening_message_id": uuid.uuid4(),
-                        "opening_suggested_questions": _opening_suggested_questions,
-                    }
-                    if opening_statement else {}
-                ),
-            },
+            args=_persist_args,
         ))
 
         # Context-engine after-turn summary (enqueued only when this turn
@@ -1514,6 +1566,7 @@ class MultiAgentService:
         stream_failed = False
         error_emitted = False
         failure_error: str | None = None
+        failure_exc: Exception | None = None
         try:
             async for event in orchestrator.execute_stream(
                 message=user_message_content,
@@ -1593,6 +1646,7 @@ class MultiAgentService:
         except Exception as e:
             stream_failed = True
             failure_error = str(e)
+            failure_exc = e
 
         # Failure rollback: restore the original version as current, persist no new
         # version. The failure frame is an error event (same semantics as Agent /
@@ -1601,12 +1655,20 @@ class MultiAgentService:
         if stream_failed:
             self._mark_message_current(original_msg.id, True)
             if not error_emitted:
-                yield _sse("error", {
+                _payload = error_payload(
+                    failure_exc
+                    or BusinessException(
+                        failure_error or "集群重新生成失败", BizCode.INTERNAL_ERROR
+                    ),
+                    locale=get_current_locale(),
+                    trace_id=get_trace_id(),
+                )
+                _payload.update({
                     "conversation_id": str(conversation_id),
-                    "error": failure_error or "集群重新生成失败",
                     "elapsed_time": _time.time() - start_time,
                     "timestamp": _time.time(),
                 })
+                yield error_frame(_payload)
             return
 
         # 7. Persist the new-version assistant message

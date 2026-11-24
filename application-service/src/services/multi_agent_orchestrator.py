@@ -19,9 +19,11 @@ from .conversation_state_manager import (
     ConversationStateManager,
     create_conversation_state_manager,
 )
-from ..errors import BusinessException, ResourceNotFoundException
+from ..errors import BusinessException, ResourceNotFoundException, get_current_locale
 from ..errors import BizCode
 from ..integrations.model.errors import ModelInvokeCancelledError
+from ..trace import get_trace_id
+from .chat_errors import error_frame, error_payload
 from ..utils.datetime_utils import utcnow_naive
 from ..repositories.tool_repository import ToolRepository
 from .model_service import ModelApiKeyService, ModelConfigService
@@ -523,6 +525,54 @@ def _sse_event_name(event: str) -> Optional[str]:
         return event.split("event:", 1)[1].split("\n", 1)[0].strip() or None
     except Exception:
         return None
+
+
+def _normalize_error_frame(event: str) -> str:
+    """Upgrade legacy sub-run error frames to the unified error frame.
+
+    AgentRunService / handoffs may still emit ``error``-only payloads without
+    msg/code/time. The cluster surface exposes only the unified shape so the
+    frontend and logs can read the user-facing msg. Frames that already carry
+    ``msg`` (or cannot be parsed) pass through unchanged.
+    """
+    if _sse_event_name(event) != "error":
+        return event
+    try:
+        data = json.loads(event.split("data: ", 1)[1].strip())
+    except Exception:
+        return event
+    if not isinstance(data, dict) or "msg" in data:
+        return event
+    error = data.get("error")
+    nested = error if isinstance(error, dict) else {}
+    numeric = data.get("code")
+    if not isinstance(numeric, int):
+        numeric = nested.get("code")
+    if not isinstance(numeric, int) or numeric == BizCode.OK.value:
+        numeric = BizCode.INTERNAL_ERROR.value
+    from error_core.messages import user_message
+
+    msg = (
+        nested.get("msg")
+        or nested.get("message")
+        or user_message(numeric, get_current_locale())
+        or "服务内部错误，请稍后重试"
+    )
+    detail = "" if not error else (
+        error if isinstance(error, str)
+        else str(nested.get("error") or nested.get("message") or "")
+    )
+    frame = {
+        "code": numeric,
+        "msg": msg,
+        "error": detail,
+        "message": detail,
+        "retryable": bool(nested.get("retryable", False)),
+        "time": int(time.time() * 1000),
+    }
+    for _k, _v in data.items():
+        frame.setdefault(_k, _v)
+    return f"event: error\ndata: {json.dumps(frame, ensure_ascii=False)}\n\n"
 
 
 class MultiAgentOrchestrator:
@@ -1709,11 +1759,8 @@ class MultiAgentOrchestrator:
                 elapsed_time=time.time() - start_time,
                 error_message=str(e)[:2000],
             )
-            # Send the error event
-            yield self._format_sse_event("error", {
-                "error": str(e),
-                "timestamp": time.time()
-            })
+            # Send the unified error frame
+            yield self._error_event(e)
 
     async def execute(
         self,
@@ -3785,7 +3832,7 @@ class MultiAgentOrchestrator:
             # fill missing fields, never overwrite same-named fields carried by the
             # event) so the running panel can route events to the matching sub-agent block.
             yield self._inject_agent_meta(
-                self._strip_conversation_id(event),
+                self._strip_conversation_id(_normalize_error_frame(event)),
                 self._sub_event_meta(agent_id, agent_info.get("name")),
             )
 
@@ -4689,6 +4736,8 @@ class MultiAgentOrchestrator:
                 # (prevents the frontend's conversation pointer from being poisoned by
                 # handoffs' internal conversation ID — the cluster conversation ID is
                 # only ever published by start/end).
+                if event_name == "error":
+                    event = _normalize_error_frame(event)
                 if event_name not in _SUB_RUN_LIFECYCLE_EVENTS:
                     yield self._strip_conversation_id(event)
 
@@ -4757,10 +4806,7 @@ class MultiAgentOrchestrator:
                     )
             except Exception:
                 pass
-            yield self._format_sse_event("error", {
-                "error": str(e),
-                "timestamp": time.time()
-            })
+            yield self._error_event(e)
 
     async def _execute_collaboration_mode(
         self,
@@ -4917,6 +4963,14 @@ class MultiAgentOrchestrator:
         """
         import json
         return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
+
+    def _error_event(self, exc: Exception) -> str:
+        """Build the unified SSE error frame (msg for users, error for diagnosis)."""
+        return error_frame(error_payload(
+            exc,
+            locale=get_current_locale(),
+            trace_id=get_trace_id(),
+        ))
 
     @staticmethod
     def _strip_conversation_id(event: str) -> str:

@@ -300,13 +300,17 @@ PeriodicTask(
 - **企业版服务（可选）**：企业版表（本体场景名等）由闭源 `memory-enterprise` 服务持有，
   包含表定义与迁移；本服务只通过 HTTP 读取，不接触企业 schema。
   `MEMORY_ENTERPRISE_BASE_URL` 指向该服务（例：`http://memory-enterprise:8083`），
-  `MEMORY_ENTERPRISE_TIMEOUT_SECONDS` 默认 3s，`MEMORY_ENTERPRISE_TOKEN` 设置后以
-  `X-Internal-Token` 发送。场景名查询还会带上 workspace 所属租户的 `X-Tenant-Id`，
-  服务端只返回该租户可见的场景（自有场景 + 系统默认场景）；租户为空的 workspace 不发起
-  查询。
+  `MEMORY_ENTERPRISE_TIMEOUT_SECONDS` 默认 3s。调用携带服务间内部 JWT
+  （`iss=JOBS_SERVICE_NAME`、`aud=MEMORY_ENTERPRISE_AUDIENCE`），用共享的
+  `INTERNAL_ISSUER_PRIVATE_KEY` / `INTERNAL_ISSUER_KID` 签发，不再发送共享 token；
+  租户作为 JWT 的 `tenant_id` claim 传递，服务端只返回该租户可见的场景（自有场景 +
+  系统默认场景）；租户为空的 workspace 不发起查询。identity 的 ACL 需放行 caller
+  `JOBS_SERVICE_NAME` → target `MEMORY_ENTERPRISE_AUDIENCE` 的
+  `POST /internal/v1/ontology/scene-names` 与
+  `GET /internal/v1/quota/tenants/*/memory-limits`。
   - **未配置**（开放版）：与「未装插件的 API」一致，洞察输入里 uuid 场景键视为已删除、整组丢弃。
-  - **已配置但不可用**（超时 / 5xx / 坏响应）：不再视为删除——跳过场景名投影，**保留存储里的
-    原键**；日志与行为一致（`场景名查询失败/不可用，保留存储原键`）。
+  - **已配置但不可用**（超时 / 5xx / 坏响应 / 缺少签发私钥）：不再视为删除——跳过场景名投影，
+    **保留存储里的原键**；日志与行为一致（`场景名查询失败/不可用，保留存储原键`）。
   该服务**不参与**依赖探测，挂了只会失去场景名映射，不会让任务失败。
 - `JOBS_SCAN_PAGE_SIZE`（默认 500）：周期扫描每次从库里取多少候选。按 `end_user.id`
   keyset 分页，每页一个短读作用域，内存上界是页大小而不是工作空间的用户数；扫描期间

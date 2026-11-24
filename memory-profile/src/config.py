@@ -5,9 +5,22 @@ from __future__ import annotations
 from typing import Literal
 from urllib.parse import quote_plus, urlparse
 
-from pydantic import AliasChoices, ConfigDict, Field, field_validator, model_validator
+from pydantic import (
+    AliasChoices,
+    ConfigDict,
+    Field,
+    SecretStr,
+    field_validator,
+    model_validator,
+)
 from pydantic_settings import BaseSettings
 from sqlalchemy.engine import make_url
+
+
+def _redis_url_with_db(url: str, db: int) -> str:
+    """Return ``url`` pointed at logical Redis database ``db``."""
+
+    return urlparse(url)._replace(path=f"/{db}").geturl()
 
 
 def _as_asyncpg_url(value: str) -> str:
@@ -22,6 +35,10 @@ class ProfileSettings(BaseSettings):
 
     metadata_migration_enabled: bool = Field(
         False, validation_alias="JOBS_METADATA_MIGRATION_ENABLED"
+    )
+    #: Wall-clock budget of one in-merge metadata migration (API parity).
+    metadata_migration_timeout_seconds: int = Field(
+        60, ge=1, validation_alias="METADATA_MIGRATION_TIMEOUT_SECONDS"
     )
 
     service_name: str = Field("memory-profile", validation_alias="PROFILE_SERVICE_NAME")
@@ -80,7 +97,6 @@ class ProfileSettings(BaseSettings):
         "http://127.0.0.1:8080", validation_alias="MODEL_SERVICE_BASE_URL"
     )
     # Scene continuity BERT probe used only by the scene/split-demo endpoint.
-    # This is the single model credential this process holds; see README.
     scene_continuity_url: str = Field("", validation_alias="SCENE_CONTINUITY_URL")
     scene_continuity_api_key: str = Field(
         "", validation_alias="SCENE_CONTINUITY_API_KEY"
@@ -90,6 +106,15 @@ class ProfileSettings(BaseSettings):
     )
     scene_continuity_timeout_seconds: float = Field(
         2.0, ge=0.1, validation_alias="SCENE_CONTINUITY_TIMEOUT_SECONDS"
+    )
+    emotion_url: str = Field("", validation_alias="BERT_URL")
+    emotion_api_key: SecretStr = Field(SecretStr(""), validation_alias="FAST_WRITE_EMOTION_API_KEY")
+    emotion_model: str = Field("", validation_alias="FAST_WRITE_EMOTION_MODEL")
+    emotion_http_timeout_seconds: float = Field(
+        5.0, validation_alias="FAST_WRITE_EMOTION_HTTP_TIMEOUT_SECONDS"
+    )
+    emotion_total_timeout_seconds: float = Field(
+        3.0, validation_alias="FAST_WRITE_EMOTION_TOTAL_TIMEOUT_SECONDS"
     )
     model_service_connect_timeout_seconds: float = Field(
         5.0, validation_alias="MODEL_SERVICE_INVOKE_CONNECT_TIMEOUT_SECONDS"
@@ -110,13 +135,18 @@ class ProfileSettings(BaseSettings):
         20, validation_alias="MODEL_SERVICE_MAX_KEEPALIVE_CONNECTIONS"
     )
 
-    # 企业版配额由闭源 memory-enterprise 服务持有（套餐/资源包表），本服务只查询
-    # 生效额度。留空 base URL 视为社区版；查询失败同样回落免费版。
+    # 企业版配额和默认情绪策略由 memory-enterprise 持有。
+    # 未配置服务或配额查询失败时，配额回落到社区免费版。
     memory_enterprise_base_url: str = Field("", validation_alias="MEMORY_ENTERPRISE_BASE_URL")
     memory_enterprise_timeout_seconds: float = Field(
         3.0, gt=0, validation_alias="MEMORY_ENTERPRISE_TIMEOUT_SECONDS"
     )
-    memory_enterprise_token: str = Field("", validation_alias="MEMORY_ENTERPRISE_TOKEN")
+    #: Audience for the service-to-service internal JWT (the enterprise
+    #: service's ``AUTH_SERVICE_NAME`` / ACL target). Signed with the same
+    #: ``INTERNAL_ISSUER_PRIVATE_KEY`` as file-service uploads.
+    memory_enterprise_audience: str = Field(
+        "mem-enterprise", validation_alias="MEMORY_ENTERPRISE_AUDIENCE"
+    )
 
     # 免费版额度：memory-profile 自己维护，变量名与 api 的 QUOTA_* 保持一致，
     # 一个部署值即可覆盖三个服务。企业版订阅值由 memory-enterprise 返回，
@@ -163,14 +193,6 @@ class ProfileSettings(BaseSettings):
     write_gateway_wait_seconds: float = Field(
         120.0, validation_alias="WRITE_GATEWAY_WAIT_SECONDS"
     )
-    # Option A（A2 分片）：写批次的“消息落库/seq”步骤执行位置。
-    # - api（默认）：保持 A1 行为，全部写流程在 api worker；
-    # - memory_jobs：仅落库步骤投递到 memory-jobs admission，其余仍在 api。
-    # 默认 api 即为回滚开关：改成 api 立即恢复 A1 路径。
-    # A2 S4b：图写入（WritePipeline）等待执行的派发位置；默认 api，可回滚。
-    # A2 S5d：RAG（ES 直写）执行位置；默认 api，可回滚。
-    # 留空时沿用 resolved_redis_url（业务 Redis，与 memory-jobs 的 admission
-    # keyspace 同库）；跨集群部署时显式指向 memory-jobs 使用的业务 Redis。
     migration_database_url: str | None = Field(
         None,
         validation_alias="PROFILE_MIGRATION_DATABASE_URL",
@@ -225,6 +247,9 @@ class ProfileSettings(BaseSettings):
     redis_port: int = Field(6379, validation_alias="REDIS_PORT")
     redis_password: str | None = Field(None, validation_alias="REDIS_PASSWORD")
     redis_db: int = Field(1, validation_alias="REDIS_DB")
+    #: The API's Celery-result-backend DB; the merge write lock lives there so
+    #: API and memory-jobs writers take the same lock.
+    redis_db_celery_backend: int = Field(4, validation_alias="REDIS_DB_CELERY_BACKEND")
     redis_pool_size: int = Field(100, validation_alias="PROFILE_REDIS_POOL_SIZE")
 
     elasticsearch_host: str = Field("https://127.0.0.1", validation_alias="ELASTICSEARCH_HOST")
@@ -247,6 +272,35 @@ class ProfileSettings(BaseSettings):
     #: storage ``BackendFactory`` matches this value directly, like the host.
     memory_read_backend: Literal["ELASTIC", "NEO4J"] = Field(
         "ELASTIC", validation_alias="MEMORY_READ_BACKEND"
+    )
+
+    # ── File upload (host ``POST /v1/memory/files/upload``) ──────────────────
+    #: 上传大小上限；与 api 的 ``MAX_FILE_SIZE`` 同值、同环境变量。
+    max_file_size: int = Field(52428800, ge=1, validation_alias="MAX_FILE_SIZE")
+    #: 文件由独立 file-service 持有（存储后端 + ``file_metadata``）；profile 只
+    #: 转发上传，不再直接访问对象存储。
+    file_service_base_url: str = Field("", validation_alias="FILE_SERVICE_BASE_URL")
+    #: 内部 JWT 的 audience；等于 file-service 的 ``service_name``。
+    file_service_audience: str = Field(
+        "file-service", validation_alias="FILE_SERVICE_AUDIENCE"
+    )
+    file_service_read_timeout_seconds: float = Field(
+        30.0, gt=0, validation_alias="FILE_SERVICE_READ_TIMEOUT_SECONDS"
+    )
+    #: 上传写预算；大文件传输必须留足时间。
+    file_service_write_timeout_seconds: float = Field(
+        300.0, gt=0, validation_alias="FILE_SERVICE_WRITE_TIMEOUT_SECONDS"
+    )
+
+    # ── Internal JWT (service-to-service) ────────────────────────────────────
+    #: 与 gateway / identity-service 同源变量：三方必须使用同一对密钥，否则
+    #: file-service 无法通过 identity 发布的 JWKS 验签。
+    internal_issuer_private_key: SecretStr = Field(
+        SecretStr(""), validation_alias="INTERNAL_ISSUER_PRIVATE_KEY"
+    )
+    internal_issuer_kid: str = Field("internal-1", validation_alias="INTERNAL_ISSUER_KID")
+    internal_token_ttl_seconds: int = Field(
+        120, ge=1, validation_alias="INTERNAL_TOKEN_TTL"
     )
 
     @field_validator("memory_read_backend", mode="before")
@@ -275,6 +329,11 @@ class ProfileSettings(BaseSettings):
             raise ValueError("MODEL_SERVICE_BASE_URL must not contain query or fragment")
         return value
 
+    @field_validator("emotion_http_timeout_seconds", "emotion_total_timeout_seconds")
+    @classmethod
+    def normalize_emotion_timeout(cls, value: float) -> float:
+        return max(0.1, value)
+
     @field_validator("memory_enterprise_base_url")
     @classmethod
     def validate_memory_enterprise_base_url(cls, value: str) -> str:
@@ -285,6 +344,18 @@ class ProfileSettings(BaseSettings):
             raise ValueError("MEMORY_ENTERPRISE_BASE_URL must be an absolute HTTP(S) URL")
         if parsed.query or parsed.fragment:
             raise ValueError("MEMORY_ENTERPRISE_BASE_URL must not contain query or fragment")
+        return value
+
+    @field_validator("file_service_base_url")
+    @classmethod
+    def validate_file_service_base_url(cls, value: str) -> str:
+        if not value:
+            return value
+        parsed = urlparse(value)
+        if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+            raise ValueError("FILE_SERVICE_BASE_URL must be an absolute HTTP(S) URL")
+        if parsed.query or parsed.fragment:
+            raise ValueError("FILE_SERVICE_BASE_URL must not contain query or fragment")
         return value
 
     @field_validator("log_level", mode="before")
@@ -341,14 +412,16 @@ class ProfileSettings(BaseSettings):
         return f"redis://{password}{self.redis_host}:{self.redis_port}/{self.redis_db}"
 
     @property
-    def resolved_write_ingest_admission_redis_url(self) -> str:
-        """Redis URL backing the memory-jobs admission keyspace.
+    def memory_write_redis_url(self) -> str:
+        """Redis URL of the Celery-backend DB that holds the merge write lock."""
 
-        Falls back to the business Redis URL because the admission keyspace lives
-        in the same logical database as the business data by default.
-        """
-
-        return self.write_ingest_admission_redis_url or self.resolved_redis_url
+        if self.redis_url:
+            return _redis_url_with_db(self.redis_url, self.redis_db_celery_backend)
+        password = f":{quote_plus(self.redis_password)}@" if self.redis_password else ""
+        return (
+            f"redis://{password}{self.redis_host}:{self.redis_port}/"
+            f"{self.redis_db_celery_backend}"
+        )
 
     def _deployment_scoped_name(self, explicit: str, base: str, env_name: str) -> str:
         """Resolve a deployment-scoped Redis name from an override or DB_NAME."""

@@ -7,7 +7,7 @@ import threading
 
 from redis import Redis
 
-from src.config import JobsSettings, _redis_url_with_db
+from src.config import JobsSettings
 
 logger = logging.getLogger(__name__)
 
@@ -19,10 +19,12 @@ class RedisManager:
     this single client across its concurrency slots.
     """
 
-    def __init__(self, settings: JobsSettings, *, db: int | None = None) -> None:
+    def __init__(self, settings: JobsSettings, url: str | None = None) -> None:
         self._settings = settings
-        self._url = (settings.resolved_redis_url if db is None else
-                     _redis_url_with_db(settings.resolved_redis_url, db))
+        #: Explicit URL override. The runtime uses it so one manager can point at
+        #: the Celery result backend while the default one points at business
+        #: data; both share this class' lifecycle.
+        self._url = url
         self._client: Redis | None = None
         self._lock = threading.Lock()
 
@@ -36,7 +38,7 @@ class RedisManager:
         with self._lock:
             if self._client is None:
                 self._client = Redis.from_url(
-                    self._url,
+                    self._url or self._settings.resolved_redis_url,
                     decode_responses=True,
                     max_connections=self._settings.redis_pool_size,
                     socket_timeout=self._settings.redis_socket_timeout_seconds,

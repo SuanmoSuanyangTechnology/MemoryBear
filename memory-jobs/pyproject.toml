@@ -9,6 +9,8 @@ description = "MemoryBear Celery worker service on synchronous infrastructure cl
 readme = "README.md"
 requires-python = ">=3.12,<3.13"
 dependencies = [
+    # Signs the service-to-service internal JWT memory-enterprise verifies.
+    "auth-sdk",
     "celery==5.6.3",
     "elasticsearch==8.17.0",
     # ``redbear_model.__init__`` eagerly imports its SQL registry module, which
@@ -29,11 +31,16 @@ dependencies = [
     # Task names, the owned queue and the task->queue table shared with the
     # producer (memory-profile). Contract only: no transport, no extra deps.
     "task-bridge-sdk[mem-router]",
+    # Shared Memory labels / Elasticsearch index schema / document
+    # normalization with the API (pure Python, no runtime dependencies).
+    "memory-storage-schema",
 ]
 
 [tool.uv.sources]
-redbear-model = { path = "../packages/redbear-model", editable = true }
-task-bridge-sdk = { path = "../packages/task-bridge-sdk", editable = true }
+auth-sdk = { path = "../packages/auth-sdk" }
+redbear-model = { path = "../packages/redbear-model" }
+task-bridge-sdk = { path = "../packages/task-bridge-sdk" }
+memory-storage-schema = { path = "../packages/memory-storage-schema" }
 
 [dependency-groups]
 dev = [
@@ -46,6 +53,8 @@ packages = ["src"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# Exercise the checked-in contracts/packages, not stale installed wheels.
+pythonpath = ["../packages/task-bridge-sdk/src", "../packages/memory-storage-schema/src"]
 
 [tool.ruff]
 line-length = 100
@@ -56,3 +65,12 @@ select = ["E", "F", "I", "UP", "B", "ASYNC", "TID"]
 
 [tool.ruff.lint.flake8-tidy-imports]
 ban-relative-imports = "all"
+
+# Resolve through the same mirror as the other services. The container build has
+# no route to pypi.org, and auth-sdk's setuptools build requirement is resolved
+# from the index at build time (not from this lock), so the default index must be
+# reachable there.
+[[tool.uv.index]]
+name = "tencent"
+url = "https://mirrors.cloud.tencent.com/pypi/simple"
+default = true

@@ -8,6 +8,7 @@ checkpointer 由编排层注入，Redis 不可用时退回 MemorySaver（行为�
 """
 import json
 import os
+import time
 import uuid
 import threading
 from collections import OrderedDict
@@ -30,6 +31,7 @@ from sqlalchemy.orm import Session
 
 from app.core.logging_config import get_business_logger
 from app.core.models import RedBearChatModel
+from app.core.workflow.error_info import workflow_error_info
 from app.schemas.model_schema import ModelInfo
 from app.services.model_service import ModelConfigService
 from app.services.multi_agent_variable_contract import (
@@ -1097,7 +1099,23 @@ class HandoffsService:
             
         except Exception as e:
             logger.error(f"Handoffs stream error: {str(e)}")
-            yield f"event: error\ndata: {json.dumps({'error': str(e)}, ensure_ascii=False)}\n\n"
+            # 统一错误帧：code/msg/error/retryable/time（data 仅非流式响应使用）
+            _info = workflow_error_info(e)
+            yield (
+                "event: error\ndata: "
+                + json.dumps(
+                    {
+                        "code": _info["code"],
+                        "msg": _info["msg"],
+                        "error": _info["error"],
+                        "message": _info["error"],
+                        "retryable": _info["retryable"],
+                        "time": int(time.time() * 1000),
+                    },
+                    ensure_ascii=False,
+                )
+                + "\n\n"
+            )
     
     def get_agents(self) -> List[Dict[str, Any]]:
         """获取可用的 Agent 列表"""

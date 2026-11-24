@@ -421,10 +421,12 @@ async def get_behavior_habits(
 
 @router.post("/generate_profile", response_model=ApiResponse)
 @cur_workspace_access_guard()
+@memory_profile_proxy(query_fields=(), body_arg="body", body_fields=("end_user_id",))
 async def generate_implicit_memory_profile(
-    request: GenerateProfileRequest,
+    body: GenerateProfileRequest,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    request: Request = None,
 ) -> ApiResponse:
     """
     Generate complete user profile (all 4 modules) and cache it.
@@ -437,7 +439,7 @@ async def generate_implicit_memory_profile(
     Returns:
         Complete user profile with all modules
     """
-    end_user_id = request.end_user_id
+    end_user_id = body.end_user_id
     api_logger.info(f"Generate profile requested for user: {end_user_id}")
     
     try:
