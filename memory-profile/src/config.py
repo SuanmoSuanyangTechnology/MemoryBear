@@ -5,7 +5,14 @@ from __future__ import annotations
 from typing import Literal
 from urllib.parse import quote_plus, urlparse
 
-from pydantic import AliasChoices, ConfigDict, Field, field_validator, model_validator
+from pydantic import (
+    AliasChoices,
+    ConfigDict,
+    Field,
+    SecretStr,
+    field_validator,
+    model_validator,
+)
 from pydantic_settings import BaseSettings
 from sqlalchemy.engine import make_url
 
@@ -249,6 +256,35 @@ class ProfileSettings(BaseSettings):
         "ELASTIC", validation_alias="MEMORY_READ_BACKEND"
     )
 
+    # ── File upload (host ``POST /v1/memory/files/upload``) ──────────────────
+    #: 上传大小上限；与 api 的 ``MAX_FILE_SIZE`` 同值、同环境变量。
+    max_file_size: int = Field(52428800, ge=1, validation_alias="MAX_FILE_SIZE")
+    #: 文件由独立 file-service 持有（存储后端 + ``file_metadata``）；profile 只
+    #: 转发上传，不再直接访问对象存储。
+    file_service_base_url: str = Field("", validation_alias="FILE_SERVICE_BASE_URL")
+    #: 内部 JWT 的 audience；等于 file-service 的 ``service_name``。
+    file_service_audience: str = Field(
+        "file-service", validation_alias="FILE_SERVICE_AUDIENCE"
+    )
+    file_service_read_timeout_seconds: float = Field(
+        30.0, gt=0, validation_alias="FILE_SERVICE_READ_TIMEOUT_SECONDS"
+    )
+    #: 上传写预算；大文件传输必须留足时间。
+    file_service_write_timeout_seconds: float = Field(
+        300.0, gt=0, validation_alias="FILE_SERVICE_WRITE_TIMEOUT_SECONDS"
+    )
+
+    # ── Internal JWT (service-to-service) ────────────────────────────────────
+    #: 与 gateway / identity-service 同源变量：三方必须使用同一对密钥，否则
+    #: file-service 无法通过 identity 发布的 JWKS 验签。
+    internal_issuer_private_key: SecretStr = Field(
+        SecretStr(""), validation_alias="INTERNAL_ISSUER_PRIVATE_KEY"
+    )
+    internal_issuer_kid: str = Field("internal-1", validation_alias="INTERNAL_ISSUER_KID")
+    internal_token_ttl_seconds: int = Field(
+        120, ge=1, validation_alias="INTERNAL_TOKEN_TTL"
+    )
+
     @field_validator("memory_read_backend", mode="before")
     @classmethod
     def normalize_read_backend(cls, value: str) -> str:
@@ -285,6 +321,18 @@ class ProfileSettings(BaseSettings):
             raise ValueError("MEMORY_ENTERPRISE_BASE_URL must be an absolute HTTP(S) URL")
         if parsed.query or parsed.fragment:
             raise ValueError("MEMORY_ENTERPRISE_BASE_URL must not contain query or fragment")
+        return value
+
+    @field_validator("file_service_base_url")
+    @classmethod
+    def validate_file_service_base_url(cls, value: str) -> str:
+        if not value:
+            return value
+        parsed = urlparse(value)
+        if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+            raise ValueError("FILE_SERVICE_BASE_URL must be an absolute HTTP(S) URL")
+        if parsed.query or parsed.fragment:
+            raise ValueError("FILE_SERVICE_BASE_URL must not contain query or fragment")
         return value
 
     @field_validator("log_level", mode="before")
