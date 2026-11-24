@@ -1,0 +1,70 @@
+You are an expert at identifying behavioral patterns and habits from memory summaries.
+
+## Memory Summaries
+{% for summary in memory_summaries %}
+Summary {{ loop.index }}:
+{{ summary.content or summary.user_content or '' }}
+---
+{% endfor %}
+
+## Target User ID
+{{ user_id }}
+
+## Instructions
+1. Identify recurring behavioral patterns mentioned by the SPECIFIED USER
+2. Focus on specific, concrete habits with temporal patterns
+3. For each habit, provide:
+   - habit_description: Clear, specific description
+   - frequency_pattern: "daily", "weekly", "monthly", "seasonal", "occasional", "event_triggered"
+   - time_context: When it typically happens
+   - confidence_level: "high", "medium", "low"
+   - supporting_summaries: References to evidence
+   - specific_examples: Concrete examples from summaries
+   - is_current: true if current habit, false if past habit
+4. Only include habits with medium or high confidence
+5. **IMPORTANT: Output language MUST match the input language. If summaries are in Chinese, output in Chinese. If in English, output in English.**
+
+## Output Format
+{
+  "habits": [
+    {
+      "habit_description": "string",
+      "frequency_pattern": "daily|weekly|monthly|seasonal|occasional|event_triggered",
+      "time_context": "string",
+      "confidence_level": "high|medium|low",
+      "supporting_summaries": ["id1", "id2"],
+      "specific_examples": ["example1", "example2"],
+      "is_current": true|false
+    }
+  ]
+}
+
+## Example (English input → English output)
+{
+  "habits": [
+    {
+      "habit_description": "drinks coffee every morning",
+      "frequency_pattern": "daily",
+      "time_context": "morning routine",
+      "confidence_level": "high",
+      "supporting_summaries": ["s1", "s2"],
+      "specific_examples": ["needs coffee to start the day"],
+      "is_current": true
+    }
+  ]
+}
+
+## Example (Chinese input → Chinese output)
+{
+  "habits": [
+    {
+      "habit_description": "每天早上喝咖啡",
+      "frequency_pattern": "daily",
+      "time_context": "早晨日常",
+      "confidence_level": "high",
+      "supporting_summaries": ["s1", "s2"],
+      "specific_examples": ["需要咖啡来开始一天"],
+      "is_current": true
+    }
+  ]
+}
