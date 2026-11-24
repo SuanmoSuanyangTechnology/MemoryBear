@@ -9,6 +9,7 @@ from uuid import UUID
 from fastapi import Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
+from starlette.routing import compile_path
 
 from .codes import HTTP_STATUS_TO_BIZ_CODE, BizCode
 from .diagnostics import format_diagnostics
@@ -25,24 +26,39 @@ class UploadKind(StrEnum):
     QA = "/chunks/{kb_id}/import_qa"
 
 
+VERSIONED_UPLOAD_PATHS = {
+    face + path: INTERNAL_UPLOAD_PREFIX + kind
+    for face in ("/api", "/v1")
+    for path, kind in (
+        (FILE_UPLOAD_PATH, UploadKind.DOCUMENT),
+        ("/chunks/v1/{kb_id}/import_qa", UploadKind.QA),
+    )
+}
+_EXTERNAL_UPLOAD_MATCHERS = tuple(
+    (compile_path(path)[0], target) for path, target in VERSIONED_UPLOAD_PATHS.items()
+)
+_INTERNAL_UPLOAD_MATCHERS = tuple(
+    compile_path(INTERNAL_UPLOAD_PREFIX + kind)[0] for kind in UploadKind
+)
+
+
+def versioned_upload_target(method: str, path: str) -> str | None:
+    """返回新版上传的内部路径。调用方可保留外部 URL 的尾斜杠重定向。"""
+    if method == "POST":
+        path = path.removesuffix("/")
+        for matcher, target in _EXTERNAL_UPLOAD_MATCHERS:
+            if match := matcher.fullmatch(path):
+                return target.format(**match.groupdict())
+    return None
+
+
 def is_versioned_upload(request: Request, *, internal: bool = False) -> bool:
-    if request.method != "POST":
-        return False
-    path = request.url.path
-    prefixes = (INTERNAL_UPLOAD_PREFIX,) if internal else ("/api", "/v1")
-    path = path.removesuffix("/")
-    for prefix in prefixes:
-        if not path.startswith(prefix + "/"):
-            continue
-        parts = path.removeprefix(prefix).split("/")
-        document_path = UploadKind.DOCUMENT if internal else FILE_UPLOAD_PATH
-        return path.removeprefix(prefix) == document_path or (
-            len(parts) == (4 if internal else 5)
-            and parts[1:-2] == (["chunks"] if internal else ["chunks", "v1"])
-            and bool(parts[-2])
-            and parts[-1] == "import_qa"
-        )
-    return False
+    if not internal:
+        return versioned_upload_target(request.method, request.url.path) is not None
+    path = request.url.path.removesuffix("/")
+    return request.method == "POST" and any(
+        matcher.fullmatch(path) for matcher in _INTERNAL_UPLOAD_MATCHERS
+    )
 
 
 def upload_locale(request: Request) -> str:

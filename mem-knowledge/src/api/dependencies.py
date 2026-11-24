@@ -75,17 +75,16 @@ async def get_optional_principal(request: Request) -> Principal | None:
 
 
 async def require_knowledge_copy_principal(request: Request) -> Principal:
-    """配置复制信任网关断言的管理端面。
-
-    两种鉴权形态都满足：direct 头信任与企业 claims 各自设置已认证主体，上游注入
-    管理端面。面标识检查排除外部/API-Key 调用方；凭据已在上游终止，其存在不再是
-    信任信号（企业网关会把 internal token 作为 Authorization 转发）。网络边界仍
-    限定 kb 只接受网关 + 单体调用方。
-    """
+    """配置复制仅接受管理端来源和知识库认证中间件确认的身份。"""
 
     if not is_manager_request(request):
         raise KnowledgeError.from_code("KB_HTTP_FORBIDDEN")
-    return await get_principal(request)
+    principal = getattr(request.state, "principal", None)
+    if isinstance(principal, Principal):
+        return principal
+    if getattr(request.state, "kb_legacy_proxy_authenticated", False) is True:
+        return _principal_from_headers(request)
+    raise KnowledgeError.from_code("KB_HTTP_FORBIDDEN")
 
 
 def _resolve_source_value(request: Request) -> str | None:

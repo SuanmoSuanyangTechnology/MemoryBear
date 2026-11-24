@@ -2,7 +2,7 @@
 name = "error-core"
 version = "0.1.0"
 description = "Shared error vocabulary, catalogs, envelopes and diagnostics for MemoryBear services"
-requires-python = ">=3.12,<3.13"
+requires-python = ">=3.12"
 dependencies = []
 
 [build-system]

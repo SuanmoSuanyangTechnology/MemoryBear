@@ -25,6 +25,7 @@ from collections.abc import Callable
 from typing import Literal, Protocol
 
 import httpx
+from error_core.knowledge_upload import versioned_upload_target
 from fastapi import Request
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 from memorybear_grpc.metadata import traceparent_trace_id
@@ -77,33 +78,6 @@ def rewrite_internal_path(external_path: str) -> str:
     return external_path
 
 
-# 版本化上传精确路径映射：外部操作版本段映射到内部主版本上传面（/internal/v2），
-# 不是纯前缀透传（纯重写会落到 kb 不服务的 /internal/v1/files/v1/file）。与单体代理
-# （api/app/integrations/knowledge/transport.py internal_path）及 error-core
-# knowledge_upload 常量（FILE_UPLOAD_PATH / INTERNAL_UPLOAD_PREFIX / UploadKind）
-# 同一契约，三处须保持同步。这些路径仅 POST 上传。
-_UPLOAD_DOCUMENT_EXTERNAL = "/files/v1/file"
-_UPLOAD_DOCUMENT_INTERNAL = "/internal/v2/files/file"
-
-
-def versioned_upload_internal_path(external_path: str, method: str) -> str | None:
-    """命中已登记的版本化上传时返回内部上传面路径，否则返回 None（回落默认前缀重写）。"""
-    if method != "POST":
-        return None
-    for prefix in ("/api", "/v1"):
-        if not external_path.startswith(prefix + "/"):
-            continue
-        suffix = external_path[len(prefix):]
-        if suffix == _UPLOAD_DOCUMENT_EXTERNAL:
-            return _UPLOAD_DOCUMENT_INTERNAL
-        parts = suffix.split("/")
-        # /chunks/v1/{kb_id}/import_qa -> /internal/v2/chunks/{kb_id}/import_qa
-        if (len(parts) == 5 and parts[:3] == ["", "chunks", "v1"]
-                and parts[3] and parts[4] == "import_qa"):
-            return f"/internal/v2/chunks/{parts[3]}/import_qa"
-    return None
-
-
 class TargetRoute(BaseModel):
     path_prefix: str
     service: str
@@ -129,13 +103,15 @@ class TargetRoute(BaseModel):
     grpc_target: str | None = None
     grpc_method: str = ""
 
+    def upload_target(self, method: str, external_path: str) -> str | None:
+        if self.service == "kb" and self.path_mode == "internal":
+            return versioned_upload_target(method, external_path)
+        return None
+
     def target_path(self, external_path: str, method: str = "GET") -> str:
         if self.path_mode == "preserve":
             return external_path
-        override = versioned_upload_internal_path(external_path, method)
-        if override is not None:
-            return override
-        return rewrite_internal_path(external_path)
+        return self.upload_target(method, external_path) or rewrite_internal_path(external_path)
 
 
 class TargetResolver(Protocol):
@@ -249,7 +225,10 @@ class Forwarder:
             return JSONResponse(status_code=502, content={"detail": "circuit open"})
         gateway_circuit_breaker_state.labels(target=route.service).set(0)
         # request.url.path 不含查询串，query 须单独拼回，否则分页/过滤等参数静默丢失
-        url = route.base_url + route.target_path(request.url.path, request.method)
+        path = getattr(request.state, "kb_upload_target", None)
+        if path is None:
+            path = route.target_path(request.url.path, request.method)
+        url = route.base_url + path
         if request.url.query:
             url += "?" + request.url.query
         headers = self.build_headers(request)

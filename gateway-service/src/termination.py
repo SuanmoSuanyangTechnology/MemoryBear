@@ -93,8 +93,9 @@ def _extract_api_key(request: Request) -> str | None:
     (mirrors the monolith extract_api_key_from_request semantics — under the
     /v1/ prefix a Bearer value is an API key, not a user JWT)."""
     auth = request.headers.get("authorization", "")
-    if auth.startswith("Bearer "):
-        key = auth.removeprefix("Bearer ").strip()
+    scheme, _, credential = auth.partition(" ")
+    if scheme.lower() == "bearer":
+        key = credential.strip()
         if key:
             return key
     return request.headers.get("x-api-key") or None

@@ -10,7 +10,7 @@ from typing import Any
 
 import httpx
 
-from error_core.knowledge_upload import FILE_UPLOAD_PATH, INTERNAL_UPLOAD_PREFIX, UploadKind
+from error_core.knowledge_upload import versioned_upload_target
 
 from .call_profile import CallProfile
 from .contracts import KnowledgeCallContext
@@ -92,17 +92,8 @@ class KnowledgeHttpTransport:
 
     @staticmethod
     def internal_path(external_path: str, *, method: str = "GET") -> str:
-        if method == "POST":
-            for prefix in ("/api", "/v1"):
-                suffix = external_path.removeprefix(prefix)
-                if suffix == external_path:
-                    continue
-                if suffix == FILE_UPLOAD_PATH:
-                    return INTERNAL_UPLOAD_PREFIX + UploadKind.DOCUMENT
-                parts = suffix.split("/")
-                if (len(parts) == 5 and parts[:3] == ["", "chunks", "v1"]
-                        and parts[3] and parts[4] == "import_qa"):
-                    return INTERNAL_UPLOAD_PREFIX + UploadKind.QA.format(kb_id=parts[3])
+        if target := versioned_upload_target(method, external_path):
+            return target
         for prefix in ("/api", "/v1"):
             if external_path == prefix or external_path.startswith(prefix + "/"):
                 suffix = external_path[len(prefix) :]

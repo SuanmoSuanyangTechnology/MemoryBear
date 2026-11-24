@@ -1,4 +1,4 @@
-"""Anonymous exemptions for the file-service surface and workflow webhook.
+"""网关公开操作的路径和方法匹配。
 
 Containment mirrors the hardcoded exemptions in middleware.py:
 - exact path shape (UUID segment where applicable) and explicit method;
@@ -10,6 +10,8 @@ Containment mirrors the hardcoded exemptions in middleware.py:
   the middleware captures it for the forwarder, mirroring /api/public/share.
 """
 import re
+
+from .termination import SOURCE_EXTERNAL, SOURCE_INTERNAL
 
 _UUID = r"[0-9a-fA-F-]{36}"
 
@@ -53,3 +55,25 @@ def is_license_status(path: str, method: str) -> bool:
     expiry banner, including while the license middleware rejects other
     paths; the monolith route had no auth dependency either."""
     return method in _LICENSE_STATUS_METHODS and path == "/api/license/status"
+
+
+_KB_DOWNLOAD_PATH = re.compile(
+    r"/(?P<face>api|v1)/files/[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}"
+)
+_KB_PUBLIC_V1_ENUM_PATHS = frozenset({
+    "/v1/knowledges/knowledgetype",
+    "/v1/knowledges/permissiontype",
+    "/v1/knowledges/parsertype",
+    "/v1/chunks/retrieve_type",
+})
+
+
+def kb_public_source(method: str, path: str) -> str | None:
+    """返回匿名知识库读取的可信来源，用于文件下载和检索类型投影。"""
+    if method != "GET":
+        return None
+    if path in _KB_PUBLIC_V1_ENUM_PATHS:
+        return SOURCE_EXTERNAL
+    if match := _KB_DOWNLOAD_PATH.fullmatch(path):
+        return SOURCE_INTERNAL if match["face"] == "api" else SOURCE_EXTERNAL
+    return None
