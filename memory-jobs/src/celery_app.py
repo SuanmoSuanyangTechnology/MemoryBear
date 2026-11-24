@@ -21,7 +21,8 @@ from celery.signals import (
     worker_ready,
     worker_shutdown,
 )
-from task_bridge.mem_router import PRIORITY_STEPS, TaskPriority
+from kombu import Queue
+from task_bridge.mem_router import PRIORITY_STEPS, QueueName, TaskPriority
 
 from src.bootstrap import get_settings
 from src.common import get_logger, setup_logging
@@ -86,13 +87,32 @@ celery_app.conf.update(
     worker_redirect_stdouts_level="INFO",
     broker_connection_retry_on_startup=True,
     # Priority. On AMQP the level is the message's ``priority`` property, and
-    # the queue must carry ``x-max-priority`` for RabbitMQ to order by it — that
-    # argument is what ``task_queue_max_priority`` injects. The worker,
-    # memory-profile and the API all declare this queue, so all three must pass
-    # the same number or the declaration is rejected with
-    # PRECONDITION_FAILED. ``task_default_priority`` keeps an internal
-    # ``apply_async`` that forgot to name a level out of the interactive bucket.
-    task_queue_max_priority=settings.task_queue_max_priority,
+    # the queue must carry ``x-max-priority`` for RabbitMQ to order by it.
+    # Only the queues this service owns get that argument: ``send_task`` to a
+    # foreign queue (the API's memory/memory-rag/graphrag queues, which the
+    # dispatch-admission worker publishes admitted work to) must declare it
+    # exactly like its owner does, or RabbitMQ rejects one side with
+    # PRECONDITION_FAILED. ``task_queue_max_priority`` would apply the argument
+    # to *every* declared queue, so the owned queues are declared explicitly and
+    # missing queues keep their owner's plain declaration.
+    task_queues=(
+        Queue(
+            QueueName.MEMORY_JOBS.value,
+            queue_arguments={"x-max-priority": settings.task_queue_max_priority},
+        ),
+        Queue(
+            QueueName.MEMORY_ADMISSION.value,
+            queue_arguments={"x-max-priority": settings.task_queue_max_priority},
+        ),
+        Queue(
+            QueueName.PROMPT_WORKBENCH.value,
+            queue_arguments={"x-max-priority": settings.task_queue_max_priority},
+        ),
+        Queue(
+            QueueName.MEMORY_PROJECTION.value,
+            queue_arguments={"x-max-priority": settings.task_queue_max_priority},
+        ),
+    ),
     task_default_priority=int(TaskPriority.NORMAL),
     broker_transport_options=_broker_transport_options(settings),
     result_expires=settings.result_expires_seconds,

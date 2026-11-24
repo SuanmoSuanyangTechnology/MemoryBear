@@ -21,6 +21,7 @@ from src.common.observability.runtime_metrics import (
 )
 from src.config import ProfileSettings
 from src.infrastructure.elasticsearch import ElasticsearchManager
+from src.infrastructure.file_service import FileServiceClient
 from src.infrastructure.memory_enterprise import MemoryEnterpriseManager
 from src.infrastructure.model_service import ModelServiceManager
 from src.infrastructure.neo4j import Neo4jManager
@@ -28,6 +29,7 @@ from src.infrastructure.postgres import PostgresManager
 from src.infrastructure.redis import RedisManager
 from src.infrastructure.scene_continuity import SceneContinuityClient
 from src.infrastructure.task_bridge import TaskBridgeManager
+from src.infrastructure.write_gateway import WriteGatewayClient
 from src.services.quota import QuotaEntitlements
 
 HealthCheck = Callable[[], Awaitable[bool]]
@@ -48,6 +50,10 @@ class ProfileRuntime:
         self.scene_continuity = SceneContinuityClient(settings)
         # 缓存生成投递到 memory-jobs 的 worker；本进程只做 producer + 结果等待。
         self.task_bridge = TaskBridgeManager(settings)
+        # 文件上传转发给独立 file-service（存储后端 + file_metadata 由其持有）。
+        self.file_service = FileServiceClient(settings)
+        # 合并/情绪回复仍走 api worker 网关。
+        self.write_gateway = WriteGatewayClient(settings)
         # 企业版配额查询：可选外部服务，未配置或不可达时按社区免费版处理。
         self.memory_enterprise = MemoryEnterpriseManager(settings)
         self.quota = QuotaEntitlements(settings, self.memory_enterprise)
@@ -187,5 +193,12 @@ class ProfileRuntime:
             self.model_service.aclose(),
             self.scene_continuity.aclose(),
             self.task_bridge.aclose(),
+            self.file_service.aclose(),
+            self.write_gateway.aclose(),
             self.memory_enterprise.aclose(),
         )
+
+
+
+
+

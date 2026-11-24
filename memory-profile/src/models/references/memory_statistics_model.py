@@ -94,6 +94,17 @@ class ShortTermMemory(ReadOnlyBase):
     created_at = Column(DateTime, nullable=False)
 
 
+class LongTermMemory(ReadOnlyBase):
+    """``memory_long_term``: only the merge's reference reassignment needs it."""
+
+    __tablename__ = "memory_long_term"
+
+    id = Column(UUID(as_uuid=True), primary_key=True)
+    end_user_id = Column(String(255), nullable=False)
+    retrieved_content = Column(JSON, nullable=True)
+    created_at = Column(DateTime, nullable=False)
+
+
 class ForgetAudit(ReadOnlyBase):
     """One forgotten-memory audit row (``memory_forget_log``).
 
