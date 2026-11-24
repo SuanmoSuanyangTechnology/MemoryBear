@@ -3858,6 +3858,19 @@ class WorkflowService:
             await self._delete_runtime_execution_snapshot_async(execution_id)
             return self._build_execution_ref(execution)
 
+    @staticmethod
+    def _with_failure_envelope(
+            output_data: dict[str, Any] | None,
+            error_info: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Merge unified failure fields into output_data so the app log can show
+        the localized msg instead of the diagnostic error_message."""
+        merged = dict(output_data or {})
+        for key in ("msg", "error", "code", "retryable"):
+            if error_info.get(key) is not None:
+                merged.setdefault(key, error_info[key])
+        return merged
+
     async def _add_message_async(
             self,
             conversation_id: uuid.UUID,
@@ -7029,6 +7042,7 @@ class WorkflowService:
             await self._patch_execution_async(
                 execution.execution_id,
                 status="failed",
+                output_data=self._with_failure_envelope(execution.output_data, error_info),
                 error_message=error_info["error"],
             )
             try:
@@ -7047,7 +7061,7 @@ class WorkflowService:
                 )
             raise BusinessException(
                 code=BizCode.INTERNAL_ERROR,
-                message=f"工作流执行失败: {str(e)}"
+                message=error_info["msg"],
             )
 
     @bind_usage("app", "app_id")
@@ -8910,6 +8924,7 @@ class WorkflowService:
             execution = await self._patch_execution_async(
                 execution.execution_id,
                 status="failed",
+                output_data=self._with_failure_envelope(execution.output_data, error_info),
                 error_message=error_info["error"],
             )
             try:
@@ -10717,7 +10732,7 @@ class WorkflowService:
             execution = await self._patch_execution_async(
                 execution_id,
                 status="failed",
-                output_data=execution.output_data,
+                output_data=self._with_failure_envelope(execution.output_data, error_info),
                 error_message=error_info["error"],
                 error_node_id=error_node_id,
             )
