@@ -152,6 +152,25 @@ const markInterventionTimeout = (
   }
 }
 
+/**
+ * Sync the sidebar history and the active conversation id with the conversation
+ * reported by the stream. Called on `start`, `error` and `end`/`workflow_end` so
+ * an early failure can't leave the newly created conversation out of the list.
+ */
+export const syncConversation = (
+  targetConversationId: string | null | undefined,
+  currentConversationId: string | null,
+  upsertHistory: (conversationId: string, title?: string) => void,
+  setConversationId: (id: string | null) => void,
+  title?: string,
+) => {
+  if (!targetConversationId) return
+  upsertHistory(targetConversationId, title)
+  if (targetConversationId !== currentConversationId) {
+    setConversationId(targetConversationId)
+  }
+}
+
 export interface StreamHandlerDeps {
   /** Current conversation id */
   conversationId: string | null
@@ -205,7 +224,12 @@ export const createSendStreamHandler = (deps: StreamHandlerDeps) => {
       switch (item.event) {
         case 'start':
         case 'node_start': {
-          currentConversationId = curId
+          if (curId) {
+            currentConversationId = curId
+            // The conversation is created on the backend at `start`; show it in the
+            // sidebar right away so an early `error` (with no `end`) doesn't lose it.
+            upsertHistory(curId, title)
+          }
           setChatList(prev => {
             const withUserId = applyUserMessageId(prev, user_message_id)
             const lastList = [...withUserId]
@@ -238,6 +262,15 @@ export const createSendStreamHandler = (deps: StreamHandlerDeps) => {
               return [...prev, { role: 'assistant', content: errorMsg, created_at: Date.now(), meta_data: { error: errorMsg } }]
             })
           }
+          // `error` can terminate the stream before `end`; keep sidebar/active id in
+          // sync with the id received in `start`.
+          syncConversation(
+            curId || currentConversationId || conversationId,
+            conversationId,
+            upsertHistory,
+            setConversationId,
+            title,
+          )
           setLoading(false)
           chatIsEnded.current = true
           break
@@ -290,13 +323,13 @@ export const createSendStreamHandler = (deps: StreamHandlerDeps) => {
           }
           setChatList(prev => finalizeOutputs(prev))
           setLoading(false)
-          const targetConvId = currentConversationId || conversationId
-          if (targetConvId) {
-            upsertHistory(targetConvId, title)
-          }
-          if (currentConversationId && currentConversationId !== conversationId) {
-            setConversationId(currentConversationId)
-          }
+          syncConversation(
+            currentConversationId || conversationId,
+            conversationId,
+            upsertHistory,
+            setConversationId,
+            title,
+          )
           chatIsEnded.current = true
           break
         }
@@ -323,7 +356,10 @@ export const createRegenerateStreamHandler = (deps: StreamHandlerDeps & { messag
       switch (item.event) {
         case 'start':
         case 'node_start': {
-          currentConversationId = curId
+          if (curId) {
+            currentConversationId = curId
+            upsertHistory(curId)
+          }
           setChatList(prev => {
             const withUserId = applyUserMessageId(prev, user_message_id)
             const lastList = [...withUserId]
@@ -357,6 +393,12 @@ export const createRegenerateStreamHandler = (deps: StreamHandlerDeps & { messag
           if (errorMsg) {
             updateAssistantMessage('', undefined, undefined, undefined, undefined, errorMsg, messageId)
           }
+          syncConversation(
+            curId || currentConversationId || conversationId,
+            conversationId,
+            upsertHistory,
+            setConversationId,
+          )
           setLoading(false)
           chatIsEnded.current = true
           break
@@ -409,13 +451,12 @@ export const createRegenerateStreamHandler = (deps: StreamHandlerDeps & { messag
           }
           setChatList(prev => finalizeOutputs(prev))
           setLoading(false)
-          const targetConvId = currentConversationId || conversationId
-          if (targetConvId) {
-            upsertHistory(targetConvId)
-          }
-          if (currentConversationId && currentConversationId !== conversationId) {
-            setConversationId(currentConversationId)
-          }
+          syncConversation(
+            currentConversationId || conversationId,
+            conversationId,
+            upsertHistory,
+            setConversationId,
+          )
           chatIsEnded.current = true
           break
         }
