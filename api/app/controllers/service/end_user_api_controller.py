@@ -215,7 +215,9 @@ async def get_end_user_info(
     """
     Get end user info.
 
-    Retrieves the info record (aliases, meta_data, etc.) for the specified end user.
+    Retrieves the info record for the specified end user. meta_data contains only
+    the migrated 13-key profile display projection and domain_specific_info; the
+    eight legacy profile fields are not returned.
     Delegates to the manager-side controller for shared logic.
     """
     async with get_async_db_context() as auth_db:

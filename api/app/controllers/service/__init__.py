@@ -25,6 +25,7 @@ from . import (
     rag_api_document_controller,
     rag_api_file_controller,
     rag_api_knowledge_controller,
+    rag_api_knowledgeshare_controller,
     user_memory_api_controller,
 )
 
@@ -38,6 +39,7 @@ service_router.include_router(message_feedback_api_controller.router)
 service_router.include_router(emotion_api_controller.router)
 service_router.include_router(emotion_reply_api_controller.router)
 service_router.include_router(rag_api_knowledge_controller.router)
+service_router.include_router(rag_api_knowledgeshare_controller.router)
 service_router.include_router(rag_api_document_controller.router)
 service_router.include_router(rag_api_file_controller.router)
 service_router.include_router(rag_api_chunk_controller.router)

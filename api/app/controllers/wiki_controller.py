@@ -58,6 +58,7 @@ async def pages(
     request: Request,
     kb_id: uuid.UUID,
     current_user: Annotated[User, Depends(get_current_user_async)],
+    document_id: uuid.UUID | None = None,
     page_types: str | None = None,
     keyword: Annotated[str | None, Query(
         description="搜索 Wiki 标题、摘要和正文，忽略首尾空白，不区分大小写；% 和 _ 为普通字符。"

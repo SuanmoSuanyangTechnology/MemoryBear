@@ -1,5 +1,85 @@
 provider: volcano
 models:
+- name: doubao-seed-2-1-lite-260915
+  type: llm
+  provider: volcano
+  description: Seed 2.1 轻量模型，支持约 1M 上下文窗口，适合高并发多模态理解。
+  is_deprecated: false
+  is_official: true
+  input_modalities:
+  - text
+  - image
+  - video
+  output_modalities:
+  - text
+  features:
+  - thinking
+  - json_output
+  - function_call
+  tags:
+  - 大语言模型
+  - 多模态
+  logo: volcano
+- name: doubao-seed-2-0-lite-260428
+  type: llm
+  provider: volcano
+  description: Seed 2.0 Lite 长期支持版本，支持 256K 上下文窗口，适合通用多模态任务。
+  is_deprecated: false
+  is_official: true
+  input_modalities:
+  - text
+  - image
+  - video
+  output_modalities:
+  - text
+  features:
+  - thinking
+  - json_output
+  - function_call
+  tags:
+  - 大语言模型
+  - 多模态
+  logo: volcano
+- name: doubao-seed-2-0-mini-260428
+  type: llm
+  provider: volcano
+  description: Seed 2.0 Mini 长期支持版本，支持 256K 上下文窗口，适合低延迟多模态任务。
+  is_deprecated: false
+  is_official: true
+  input_modalities:
+  - text
+  - image
+  - video
+  output_modalities:
+  - text
+  features:
+  - thinking
+  - json_output
+  - function_call
+  tags:
+  - 大语言模型
+  - 多模态
+  logo: volcano
+- name: doubao-seed-evolving
+  type: llm
+  provider: volcano
+  description: 快速迭代的 Seed 模型，支持约 1M 上下文窗口，适合代码与多模态任务。
+  is_deprecated: false
+  is_official: true
+  input_modalities:
+  - text
+  - image
+  - video
+  output_modalities:
+  - text
+  features:
+  - thinking
+  - json_output
+  - function_call
+  tags:
+  - 大语言模型
+  - 多模态
+  logo: volcano
 - name: doubao-seed-2-0-pro-260215
   type: llm
   provider: volcano

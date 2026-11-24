@@ -11,10 +11,16 @@ from src.models.references.memory_generation_model import (
     ModelConfig,
     WorkspaceDefaultModelPreset,
 )
+from src.models.references.memory_reembed_model import (
+    MemoryReembedJobRow,
+    MemoryReembedJobUserRow,
+)
 from src.models.references.memory_statistics_model import (
     Conversation,
+    DialogueEmotionRaw,
     ForgetAudit,
     ImplicitEmotionsStorage,
+    MemoryIncrement,
     MemoryMessage,
     MemoryPerceptual,
     ShortTermMemory,
@@ -24,6 +30,8 @@ from src.models.references.workspace_model import Workspace
 
 __all__ = [
     "Conversation",
+    "DialogueEmotionRaw",
+    "MemoryIncrement",
     "EndUser",
     "EndUserInfo",
     "MemoryConfigRow",
@@ -42,3 +50,4 @@ __all__ = [
 from src.models.references.memory_display_model import MemoryDisplayRecord, MemoryEngineDisplayEvent
 
 __all__ += ["MemoryDisplayRecord", "MemoryEngineDisplayEvent"]
+__all__ += ["MemoryReembedJobRow", "MemoryReembedJobUserRow"]

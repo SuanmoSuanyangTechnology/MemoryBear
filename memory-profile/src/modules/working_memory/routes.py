@@ -1,13 +1,13 @@
 """Internal routes for working-memory read endpoints (T01–T04).
 
-All routes live under ``/internal/v1`` and are registered with
+The four existing read routes live under ``/internal/v1`` and are registered with
 ``@external_api`` so the contract snapshot tracks them.  The monolith's
 ``memory_profile_proxy`` forwards to these paths when
 ``ENABLE_MEMORY_PROFILE`` is true at API startup.
 
 Response ``msg`` strings stay hardcoded on purpose: the monolith returns the
 same literals regardless of request language, so these endpoints do not
-consume the i18n middleware.
+consume the i18n middleware. The detail route is JWT-only and may await a jobs summary.
 """
 
 from __future__ import annotations
@@ -24,6 +24,7 @@ from src.middleware.auth import MemoryPrincipal
 from src.middleware.identity import require_memory_context
 from src.modules.working_memory.handler import WorkingMemoryHandler
 from src.schemas.working_memory import (
+    ConversationDetailData,
     ConversationsData,
     MessagesData,
     SourceMessagesData,
@@ -36,6 +37,19 @@ Context = Annotated[MemoryPrincipal, Depends(require_memory_context)]
 
 def _handler(request: Request) -> WorkingMemoryHandler:
     return WorkingMemoryHandler(request.app.state.runtime)
+
+
+@router.get(
+    "/memory/work/{end_user_id}/detail",
+    response_model=ApiResponse[ConversationDetailData],
+)
+async def get_detail(
+    request: Request,
+    context: Context,
+    end_user_id: uuid.UUID,
+    conversation_id: uuid.UUID,
+) -> ApiResponse[ConversationDetailData] | JSONResponse:
+    return await _handler(request).get_detail(context, str(end_user_id), str(conversation_id))
 
 
 @router.get(

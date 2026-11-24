@@ -32,17 +32,10 @@ _STAGE_FIELDS = {
     "context_prepared": {"memory_count"},
     "result_ready": {"duration_ms", "total_count", "shown_count", "items"},
 }
+
 _PROFILE_FIELDS = {
     "aliases_name",
     "description",
-    "core_facts",
-    "goals",
-    "interests",
-    "relations",
-    "beliefs_or_stances",
-    "anchors",
-    "events",
-    "traits",
     *PROFILE_DISPLAY_KEYS,
 }
 _MEMORY_ITEM_FIELDS = {"rank", "memory_type", "source", "score", "content"}

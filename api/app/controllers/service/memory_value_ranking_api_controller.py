@@ -1,25 +1,12 @@
 """API Key authenticated v1 queries for memory value ranking."""
 
-import logging
-
-from fastapi import APIRouter, Query, Request
-from fastapi.responses import JSONResponse
+from fastapi import APIRouter, Query, Request, Response
 
 from app.core.api_key_auth import get_current_api_key_auth, require_api_key_self_db
-from app.core.api_key_utils import (
-    validate_end_user_in_workspace_async,
-)
-from app.core.error_codes import BizCode
-from app.core.response_utils import fail, success
+from app.core.api_key_utils import validate_end_user_in_workspace_async
 from app.db import get_async_db_context
+from app.integrations.profile.proxy import memory_profile_proxy
 from app.schemas.memory_value_ranking_schema import PermanentMemoryListApiResponse
-from app.services.memory_value_ranking_service import (
-    MemoryValueRankingService,
-    PermanentMemoryNotFound,
-    PermanentMemoryUnavailable,
-)
-
-logger = logging.getLogger(__name__)
 
 router = APIRouter(
     prefix="/memory/value-ranking",
@@ -27,23 +14,12 @@ router = APIRouter(
 )
 
 
-def _error_response(exc: Exception) -> JSONResponse:
-    if isinstance(exc, PermanentMemoryNotFound):
-        return JSONResponse(
-            status_code=404,
-            content=fail(BizCode.NOT_FOUND, "终端用户或记忆不存在", "resource not found"),
-        )
-    if isinstance(exc, PermanentMemoryUnavailable):
-        logger.error("Permanent-memory V1 service unavailable", exc_info=exc)
-        return JSONResponse(
-            status_code=503,
-            content=fail(BizCode.SERVICE_UNAVAILABLE, "永久记忆服务暂时不可用"),
-        )
-    logger.exception("Unexpected permanent-memory V1 API failure", exc_info=exc)
-    return JSONResponse(
-        status_code=500,
-        content=fail(BizCode.INTERNAL_ERROR, "永久记忆操作失败", "internal error"),
-    )
+@memory_profile_proxy(
+    query_fields=("end_user_id", "page", "pagesize"),
+    preserve_status=True,
+)
+async def _forward_list(request: Request, end_user_id: str, page: int, pagesize: int):
+    """Forward the workspace-validated and merge-resolved API Key query."""
 
 
 @router.get("/permanent-memories", response_model=PermanentMemoryListApiResponse)
@@ -53,8 +29,8 @@ async def list_permanent_memories(
     end_user_id: str = Query(...),
     page: int = Query(1, ge=1),
     pagesize: int = Query(20, ge=1, le=100),
-) -> dict | JSONResponse:
-    """Query the shared value-ranking service using the API Key workspace."""
+) -> dict | Response:
+    """Query memory-profile using the API Key workspace and resolved end user."""
     api_key_auth = get_current_api_key_auth()
     async with get_async_db_context() as db:
         end_user = await validate_end_user_in_workspace_async(
@@ -62,13 +38,11 @@ async def list_permanent_memories(
             end_user_id,
             api_key_auth.workspace_id,
         )
-        try:
-            result = await MemoryValueRankingService(db).list_permanent_memories(
-                str(end_user.id),
-                api_key_auth.workspace_id,
-                page,
-                pagesize,
-            )
-            return success(data=result.model_dump(), msg="查询成功")
-        except Exception as exc:
-            return _error_response(exc)
+        resolved_end_user_id = str(end_user.id)
+
+    return await _forward_list(
+        request=request,
+        end_user_id=resolved_end_user_id,
+        page=page,
+        pagesize=pagesize,
+    )

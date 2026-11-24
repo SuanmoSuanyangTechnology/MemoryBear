@@ -8,6 +8,11 @@ import type { Dayjs } from 'dayjs'
 import { maskApiKeys } from '@/utils/apiKeyReplacer'
 
 /**
+ * 权限范围：app、rag、memory、app_mgmt（Agent 管理）、asset（资源管理）
+ */
+export type Scope = 'app' | 'app_mgmt' | 'asset' | 'memory' | 'rag'
+
+/**
  * API Key data structure
  */
 export interface ApiKey {
@@ -19,8 +24,7 @@ export interface ApiKey {
   description?: string;
   /** API key type */
   type: 'agent' | 'multi_agent' | 'workflow' | 'service';
-  /** Permission scopes: 'memory' | 'rag' | 'app' */
-  scopes?: string[];
+  scopes?: Scope[];
 
   /** The actual API key string */
   api_key: string;
@@ -37,8 +41,11 @@ export interface ApiKey {
   /** End user name when memory is enabled */
   user_id?: string;
   end_user?: any[];
-  /** RAG/Knowledge base permission flag */
+
+  /** Permission flag */
   rag?: boolean;
+  asset?: boolean;
+  app_mgmt?: boolean;
 
   /** Last update timestamp */
   updated_at: string;

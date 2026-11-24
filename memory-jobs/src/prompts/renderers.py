@@ -21,9 +21,7 @@ def render_memory_insight_prompt(
     """Grounded insight prompt: profile metadata plus statement fallback."""
 
     payload = {
-        "profile_metadata": {
-            field: values for field, values in metadata_input.items() if values
-        },
+        "profile_metadata": {field: values for field, values in metadata_input.items() if values},
         "fallback_statements": fallback_statements,
     }
     return render_prompt(
@@ -69,9 +67,7 @@ def render_interest_filter_prompt(
         candidates_json=json.dumps(candidates, ensure_ascii=False),
         evidence_json=json.dumps(evidence, ensure_ascii=False) if evidence else None,
         existing_interests_json=(
-            json.dumps(existing_interests, ensure_ascii=False)
-            if existing_interests
-            else None
+            json.dumps(existing_interests, ensure_ascii=False) if existing_interests else None
         ),
         language=language,
     )
@@ -87,3 +83,14 @@ def render_tag_filter_user_prompt(tags: list[str]) -> str:
     """User message carrying the candidate tags for the tag filter."""
 
     return render_prompt("hot_tags_filter_user", tag_list=", ".join(tags))
+
+
+def render_metadata_migration_prompt(
+    *, entity_id: str, language: str, input_json: dict[str, object]
+) -> str:
+    return render_prompt(
+        "migrate_user_metadata_v1",
+        entity_id=entity_id,
+        language=language,
+        input_json=json.dumps(input_json, ensure_ascii=False),
+    )

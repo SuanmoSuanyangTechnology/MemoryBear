@@ -11,7 +11,9 @@ from datetime import datetime, timezone
 from typing import Any, Sequence
 from uuid import uuid4
 
+from billiard.exceptions import SoftTimeLimitExceeded
 from jinja2 import Template
+from pydantic import ValidationError
 
 from app.core.memory.models.graph_models import SceneCommunityNode, SceneSummaryNode
 from app.core.memory.pipelines.base_pipeline import ModelClientMixin
@@ -22,7 +24,9 @@ from app.core.memory.scene.scene_community_resources import (
 )
 from app.core.memory.storage.custom.scene_storage import (
     SceneStorage,
+    SceneStorageOutboxError,
 )
+from app.core.memory.storage.outbox.types import OutboxOperation
 from app.db import get_db_context
 from app.schemas.scene_community_schema import (
     CommunityBoundarySummaryOutput,
@@ -72,7 +76,7 @@ def _community_prompt_payload(community: SceneCommunityNode) -> dict[str, Any]:
 
 
 class SceneCommunityIncrementalService:
-    """Plan one complete INACTIVE batch, then commit it atomically."""
+    """Plan one batch of pending scenes, then commit it atomically."""
 
     def __init__(
         self,
@@ -259,27 +263,28 @@ class SceneCommunityIncrementalService:
             raise RuntimeError("SceneCommunity embedding is empty")
         return list(embeddings[0])
 
-    # Batch orchestration and atomic Neo4j/outbox commit.
-    async def run(self, end_user_id: str) -> dict[str, Any]:
-        batch_size = int(self.memory_config.batch_trigger_count)
+    # Batch orchestration, Neo4j commit and projection enqueue.
+    async def run(self, end_user_id: str, *, trigger: str = "threshold") -> dict[str, Any]:
+        batch_size = self.memory_config.batch_trigger_count
         rows = await self.writer.load_inactive_batch(end_user_id, batch_size)
-        if len(rows) < batch_size:
+        if not rows or (trigger == "threshold" and len(rows) < batch_size):
             return {
                 "status": "skipped",
-                "reason": "incomplete_batch",
+                "reason": "incomplete_batch" if rows else "no_pending",
                 "inactive_count": len(rows),
                 "dispatch_next": False,
             }
 
-        scenes = [SceneSummaryNode.model_validate(row) for row in rows]
-        if any(
-            scene.end_user_id != end_user_id
-            or scene.community_status != "INACTIVE"
-            or scene.community_eligibility != "ELIGIBLE"
-            or not scene.topic_scope
-            for scene in scenes
-        ):
-            raise RuntimeError("inactive SceneCommunity batch contains an invalid SceneSummary")
+        scenes: list[SceneSummaryNode] = []
+        for row in rows:
+            try:
+                scene = SceneSummaryNode.model_validate(row)
+            except ValidationError:
+                logger.error("[SceneCommunity] invalid scene: user=%s scene=%s", end_user_id, row.get("id"))
+                raise
+            if not scene.topic_scope:
+                raise ValueError(f"SceneSummary has no topic_scope: user={end_user_id} scene={scene.id}")
+            scenes.append(scene)
         ontology = self.ontology or load_scene_community_ontology()
         self._ensure_clients()
 
@@ -478,12 +483,42 @@ class SceneCommunityIncrementalService:
 
         for assignment in assignments:
             assignment["updated_at"] = commit_time
-        await self.writer.commit_batch(
-            end_user_id=end_user_id,
-            communities=final_communities,
-            assignments=assignments,
-        )
-        remaining = await self.writer.count_inactive(end_user_id)
+        status = "success"
+        try:
+            await self.writer.commit_batch(
+                end_user_id=end_user_id,
+                communities=final_communities,
+                assignments=assignments,
+            )
+        except SceneStorageOutboxError as exc:
+            status = "projection_pending"
+            replay = [
+                {
+                    "id": str(event_id),
+                    "label": node.label.value,
+                    "node_id": node.node_id,
+                    "operation": OutboxOperation.UPSERT.value,
+                }
+                for event_id, node in zip(exc.event_ids, exc.affected_nodes, strict=True)
+            ]
+            logger.error(
+                "[SceneCommunity] Neo4j committed; projection pending: "
+                "user=%s trigger=%s stage=outbox_enqueue reason=%s replay_events=%s",
+                end_user_id, trigger, exc.reason, json.dumps(replay),
+            )
+
+        remaining = None
+        if trigger == "threshold":
+            try:
+                remaining = await self.writer.count_inactive(end_user_id)
+            except SoftTimeLimitExceeded:
+                raise
+            except Exception as exc:
+                logger.error(
+                    "[SceneCommunity] Neo4j committed; continuation count failed: "
+                    "user=%s trigger=%s stage=count_remaining error_type=%s",
+                    end_user_id, trigger, type(exc).__name__,
+                )
         # 展示统计：批次指纹对排序后的 SceneSummary ID 做 SHA-256，
         # 同一成员集合换序视为同一批次，用于展示事件 operation_id 派生。
         batch_fingerprint = hashlib.sha256(
@@ -493,11 +528,11 @@ class SceneCommunityIncrementalService:
             [c for c in target_order if c not in newly_created]
         )
         return {
-            "status": "success",
+            "status": status,
             "processed": len(scenes),
             "community_count": len(final_communities),
             "remaining_inactive_count": remaining,
-            "dispatch_next": remaining >= batch_size,
+            "dispatch_next": remaining is not None and remaining >= batch_size,
             # 展示扩展字段：事件组装按新字段统计，旧字段保留兼容现有日志
             "processed_scene_count": len(scenes),
             "new_community_count": len(newly_created),

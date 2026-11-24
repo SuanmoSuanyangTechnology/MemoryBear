@@ -46,3 +46,13 @@ class UnitPublisher(Protocol):
         priority: Priority,
         dispatch_index: int,
     ) -> None: ...
+
+    def publish_metadata_migration(
+        self,
+        *,
+        end_user_id: str,
+        workspace_id: str,
+        language: str,
+        priority: str,
+        dispatch_index: int,
+    ) -> None: ...

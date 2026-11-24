@@ -3029,6 +3029,212 @@
         "status_code": 200
       }
     },
+    "GET /internal/v1/memory/value-ranking/permanent-memories": {
+      "endpoint": "list_permanent_memories",
+      "parameters": {
+        "query:end_user_id": {
+          "annotation": "str",
+          "constraints": [],
+          "default": null,
+          "in": "query",
+          "required": true
+        },
+        "query:page": {
+          "annotation": "int",
+          "constraints": [
+            "Ge(ge=1)"
+          ],
+          "default": 1,
+          "in": "query",
+          "required": false
+        },
+        "query:pagesize": {
+          "annotation": "int",
+          "constraints": [
+            "Ge(ge=1)",
+            "Le(le=100)"
+          ],
+          "default": 20,
+          "in": "query",
+          "required": false
+        }
+      },
+      "response": {
+        "declared": [],
+        "fields": {
+          "code": {
+            "annotation": "int",
+            "constraints": [],
+            "default": 0,
+            "required": false
+          },
+          "data": {
+            "annotation": "src.schemas.value_ranking.PermanentMemoryList",
+            "config": {
+              "extra": "forbid"
+            },
+            "constraints": [],
+            "default": null,
+            "fields": {
+              "items": {
+                "annotation": "list[src.schemas.value_ranking.PermanentMemoryItem]",
+                "constraints": [],
+                "default": null,
+                "fields": {
+                  "id": {
+                    "annotation": "str",
+                    "constraints": [],
+                    "default": null,
+                    "required": true
+                  },
+                  "label": {
+                    "annotation": "str",
+                    "constraints": [],
+                    "default": "Statement",
+                    "required": false
+                  },
+                  "properties": {
+                    "annotation": "src.schemas.value_ranking.PermanentMemoryProperties",
+                    "constraints": [],
+                    "default": null,
+                    "fields": {
+                      "created_at": {
+                        "annotation": "int | None",
+                        "constraints": [],
+                        "default": null,
+                        "required": false
+                      },
+                      "is_permanent": {
+                        "annotation": "bool",
+                        "constraints": [],
+                        "default": false,
+                        "required": false
+                      },
+                      "statement": {
+                        "annotation": "str",
+                        "constraints": [],
+                        "default": null,
+                        "required": true
+                      },
+                      "value_score": {
+                        "annotation": "float | None",
+                        "constraints": [],
+                        "default": null,
+                        "required": false
+                      }
+                    },
+                    "required": true
+                  }
+                },
+                "required": true
+              },
+              "page": {
+                "annotation": "src.common.pagination.PageMeta",
+                "config": {
+                  "extra": "forbid"
+                },
+                "constraints": [],
+                "default": null,
+                "fields": {
+                  "hasnext": {
+                    "annotation": "bool",
+                    "constraints": [],
+                    "default": null,
+                    "required": true
+                  },
+                  "page": {
+                    "annotation": "int",
+                    "constraints": [
+                      "Ge(ge=1)"
+                    ],
+                    "default": null,
+                    "required": true
+                  },
+                  "pagesize": {
+                    "annotation": "int",
+                    "constraints": [
+                      "Ge(ge=0)"
+                    ],
+                    "default": null,
+                    "required": true
+                  },
+                  "total": {
+                    "annotation": "int",
+                    "constraints": [
+                      "Ge(ge=0)"
+                    ],
+                    "default": null,
+                    "required": true
+                  }
+                },
+                "required": true
+              },
+              "quota": {
+                "annotation": "src.schemas.value_ranking.PermanentMemoryQuota",
+                "constraints": [],
+                "default": null,
+                "fields": {
+                  "permanent_limit": {
+                    "annotation": "int",
+                    "constraints": [
+                      "Ge(ge=0)"
+                    ],
+                    "default": null,
+                    "required": true
+                  },
+                  "remaining": {
+                    "annotation": "int",
+                    "constraints": [
+                      "Ge(ge=0)"
+                    ],
+                    "default": null,
+                    "required": true
+                  },
+                  "total_memory_limit": {
+                    "annotation": "int",
+                    "constraints": [
+                      "Gt(gt=0)"
+                    ],
+                    "default": null,
+                    "required": true
+                  },
+                  "used": {
+                    "annotation": "int",
+                    "constraints": [
+                      "Ge(ge=0)"
+                    ],
+                    "default": null,
+                    "required": true
+                  }
+                },
+                "required": true
+              }
+            },
+            "required": true
+          },
+          "error": {
+            "annotation": "str",
+            "constraints": [],
+            "default": "",
+            "required": false
+          },
+          "msg": {
+            "annotation": "str",
+            "constraints": [],
+            "default": "OK",
+            "required": false
+          },
+          "time": {
+            "annotation": "int",
+            "constraints": [],
+            "default": "<factory:now_ms#5bec5d10ddf5>",
+            "required": false
+          }
+        },
+        "model": "src.common.responses.ApiResponse[PermanentMemoryList]",
+        "status_code": 200
+      }
+    },
     "GET /internal/v1/memory/work/{end_user_id}/conversations": {
       "endpoint": "get_conversations",
       "parameters": {
@@ -5253,6 +5459,201 @@
         "status_code": 200
       }
     },
+    "POST /internal/v1/memory/read/internal": {
+      "endpoint": "read_memory_internal",
+      "parameters": {
+        "body:body": {
+          "annotation": "src.modules.memory_read.schemas.ReadInternalBody",
+          "constraints": [],
+          "default": null,
+          "fields": {
+            "config_id": {
+              "annotation": "str | None",
+              "constraints": [],
+              "default": null,
+              "required": false
+            },
+            "enable_rerank": {
+              "annotation": "bool",
+              "constraints": [],
+              "default": false,
+              "required": false
+            },
+            "end_user_id": {
+              "annotation": "str",
+              "constraints": [],
+              "default": null,
+              "required": true
+            },
+            "include_metadata": {
+              "annotation": "bool",
+              "constraints": [],
+              "default": true,
+              "required": false
+            },
+            "includes": {
+              "annotation": "list[str] | None",
+              "constraints": [],
+              "default": null,
+              "required": false
+            },
+            "limit": {
+              "annotation": "int",
+              "constraints": [
+                "Ge(ge=1)",
+                "Le(le=100)"
+              ],
+              "default": 10,
+              "required": false
+            },
+            "message": {
+              "annotation": "str",
+              "constraints": [],
+              "default": null,
+              "required": true
+            },
+            "search_switch": {
+              "annotation": "str",
+              "constraints": [],
+              "default": null,
+              "required": true
+            },
+            "session_id": {
+              "annotation": "uuid.UUID",
+              "constraints": [],
+              "default": "<factory:uuid4#3c580eb3f8e0>",
+              "required": false
+            },
+            "skip_summary": {
+              "annotation": "bool",
+              "constraints": [],
+              "default": false,
+              "required": false
+            }
+          },
+          "in": "body",
+          "required": true
+        }
+      },
+      "response": {
+        "declared": [],
+        "fields": {
+          "code": {
+            "annotation": "int",
+            "constraints": [],
+            "default": 0,
+            "required": false
+          },
+          "data": {
+            "annotation": "dict[str, Any]",
+            "constraints": [],
+            "default": null,
+            "required": true
+          },
+          "error": {
+            "annotation": "str",
+            "constraints": [],
+            "default": "",
+            "required": false
+          },
+          "msg": {
+            "annotation": "str",
+            "constraints": [],
+            "default": "OK",
+            "required": false
+          },
+          "time": {
+            "annotation": "int",
+            "constraints": [],
+            "default": "<factory:now_ms#5bec5d10ddf5>",
+            "required": false
+          }
+        },
+        "model": "src.common.responses.ApiResponse[dict[str, Any]]",
+        "status_code": 200
+      }
+    },
+    "POST /internal/v1/memory/read/sync": {
+      "endpoint": "read_memory_sync",
+      "parameters": {
+        "body:body": {
+          "annotation": "src.modules.memory_read.schemas.ReadSyncBody",
+          "constraints": [],
+          "default": null,
+          "fields": {
+            "enable_rerank": {
+              "annotation": "bool",
+              "constraints": [],
+              "default": false,
+              "required": false
+            },
+            "end_user_id": {
+              "annotation": "str | None",
+              "constraints": [],
+              "default": null,
+              "required": false
+            },
+            "end_user_ids": {
+              "annotation": "list[str] | None",
+              "constraints": [],
+              "default": null,
+              "required": false
+            },
+            "message": {
+              "annotation": "str",
+              "constraints": [],
+              "default": null,
+              "required": true
+            },
+            "search_switch": {
+              "annotation": "str",
+              "constraints": [],
+              "default": null,
+              "required": true
+            }
+          },
+          "in": "body",
+          "required": true
+        }
+      },
+      "response": {
+        "declared": [],
+        "fields": {
+          "code": {
+            "annotation": "int",
+            "constraints": [],
+            "default": 0,
+            "required": false
+          },
+          "data": {
+            "annotation": "dict[str, Any]",
+            "constraints": [],
+            "default": null,
+            "required": true
+          },
+          "error": {
+            "annotation": "str",
+            "constraints": [],
+            "default": "",
+            "required": false
+          },
+          "msg": {
+            "annotation": "str",
+            "constraints": [],
+            "default": "OK",
+            "required": false
+          },
+          "time": {
+            "annotation": "int",
+            "constraints": [],
+            "default": "<factory:now_ms#5bec5d10ddf5>",
+            "required": false
+          }
+        },
+        "model": "src.common.responses.ApiResponse[dict[str, Any]]",
+        "status_code": 200
+      }
+    },
     "POST /internal/v1/memory_config/create_config": {
       "endpoint": "create_config",
       "parameters": {
@@ -6678,6 +7079,1369 @@
           }
         },
         "model": "src.common.responses.ApiResponse[SceneCommunityConfigData]",
+        "status_code": 200
+      }
+    },
+    "GET /internal/v1/dashboard/dashboard_data": {
+      "endpoint": "dashboard_data",
+      "parameters": {
+        "query:end_date": {
+          "annotation": "int | None",
+          "constraints": [],
+          "default": null,
+          "in": "query",
+          "required": false
+        },
+        "query:end_user_id": {
+          "annotation": "str | None",
+          "constraints": [],
+          "default": null,
+          "in": "query",
+          "required": false
+        },
+        "query:start_date": {
+          "annotation": "int | None",
+          "constraints": [],
+          "default": null,
+          "in": "query",
+          "required": false
+        }
+      },
+      "response": {
+        "declared": [],
+        "fields": {
+          "code": {
+            "annotation": "int",
+            "constraints": [],
+            "default": 0,
+            "required": false
+          },
+          "data": {
+            "annotation": "src.schemas.dashboard.DashboardData",
+            "constraints": [],
+            "default": null,
+            "fields": {
+              "memory_update": {
+                "annotation": "int | None",
+                "constraints": [],
+                "default": null,
+                "required": true
+              },
+              "memory_update_change": {
+                "annotation": "int | None",
+                "constraints": [],
+                "default": null,
+                "required": true
+              },
+              "neo4j_data": {
+                "annotation": "src.schemas.dashboard.DashboardCounters | None",
+                "constraints": [],
+                "default": null,
+                "fields": {
+                  "total_api_call": {
+                    "annotation": "int | None",
+                    "constraints": [],
+                    "default": null,
+                    "required": true
+                  },
+                  "total_api_call_change": {
+                    "annotation": "float | None",
+                    "constraints": [],
+                    "default": null,
+                    "required": true
+                  },
+                  "total_app": {
+                    "annotation": "int | None",
+                    "constraints": [],
+                    "default": null,
+                    "required": true
+                  },
+                  "total_app_change": {
+                    "annotation": "float | None",
+                    "constraints": [],
+                    "default": null,
+                    "required": true
+                  },
+                  "total_knowledge": {
+                    "annotation": "int | None",
+                    "constraints": [],
+                    "default": null,
+                    "required": true
+                  },
+                  "total_knowledge_change": {
+                    "annotation": "float | None",
+                    "constraints": [],
+                    "default": null,
+                    "required": true
+                  },
+                  "total_memory": {
+                    "annotation": "int | None",
+                    "constraints": [],
+                    "default": null,
+                    "required": true
+                  },
+                  "total_memory_change": {
+                    "annotation": "float | None",
+                    "constraints": [],
+                    "default": null,
+                    "required": true
+                  }
+                },
+                "required": true
+              },
+              "rag_data": {
+                "annotation": "src.schemas.dashboard.DashboardCounters | None",
+                "constraints": [],
+                "default": null,
+                "fields": {
+                  "total_api_call": {
+                    "annotation": "int | None",
+                    "constraints": [],
+                    "default": null,
+                    "required": true
+                  },
+                  "total_api_call_change": {
+                    "annotation": "float | None",
+                    "constraints": [],
+                    "default": null,
+                    "required": true
+                  },
+                  "total_app": {
+                    "annotation": "int | None",
+                    "constraints": [],
+                    "default": null,
+                    "required": true
+                  },
+                  "total_app_change": {
+                    "annotation": "float | None",
+                    "constraints": [],
+                    "default": null,
+                    "required": true
+                  },
+                  "total_knowledge": {
+                    "annotation": "int | None",
+                    "constraints": [],
+                    "default": null,
+                    "required": true
+                  },
+                  "total_knowledge_change": {
+                    "annotation": "float | None",
+                    "constraints": [],
+                    "default": null,
+                    "required": true
+                  },
+                  "total_memory": {
+                    "annotation": "int | None",
+                    "constraints": [],
+                    "default": null,
+                    "required": true
+                  },
+                  "total_memory_change": {
+                    "annotation": "float | None",
+                    "constraints": [],
+                    "default": null,
+                    "required": true
+                  }
+                },
+                "required": true
+              },
+              "storage_type": {
+                "annotation": "str",
+                "constraints": [],
+                "default": null,
+                "required": true
+              },
+              "workspace_statistics": {
+                "annotation": "dict[str, Any] | None",
+                "constraints": [],
+                "default": null,
+                "required": true
+              }
+            },
+            "required": true
+          },
+          "error": {
+            "annotation": "str",
+            "constraints": [],
+            "default": "",
+            "required": false
+          },
+          "msg": {
+            "annotation": "str",
+            "constraints": [],
+            "default": "OK",
+            "required": false
+          },
+          "time": {
+            "annotation": "int",
+            "constraints": [],
+            "default": "<factory:now_ms#5bec5d10ddf5>",
+            "required": false
+          }
+        },
+        "model": "src.common.responses.ApiResponse[DashboardData]",
+        "status_code": 200
+      }
+    },
+    "GET /internal/v1/dashboard/end_users": {
+      "endpoint": "end_users",
+      "parameters": {
+        "query:keyword": {
+          "annotation": "str | None",
+          "constraints": [],
+          "default": null,
+          "in": "query",
+          "required": false
+        },
+        "query:label": {
+          "annotation": "str | None",
+          "constraints": [],
+          "default": null,
+          "in": "query",
+          "required": false
+        },
+        "query:page": {
+          "annotation": "int",
+          "constraints": [
+            "Ge(ge=1)"
+          ],
+          "default": 1,
+          "in": "query",
+          "required": false
+        },
+        "query:pagesize": {
+          "annotation": "int",
+          "constraints": [
+            "Ge(ge=1)"
+          ],
+          "default": 10,
+          "in": "query",
+          "required": false
+        },
+        "query:workspace_id": {
+          "annotation": "uuid.UUID | None",
+          "constraints": [],
+          "default": null,
+          "in": "query",
+          "required": false
+        }
+      },
+      "response": {
+        "declared": [],
+        "fields": {
+          "code": {
+            "annotation": "int",
+            "constraints": [],
+            "default": 0,
+            "required": false
+          },
+          "data": {
+            "annotation": "src.schemas.dashboard.EndUsersData",
+            "constraints": [],
+            "default": null,
+            "fields": {
+              "items": {
+                "annotation": "list[src.schemas.dashboard.EndUserItem]",
+                "constraints": [],
+                "default": null,
+                "fields": {
+                  "end_user": {
+                    "annotation": "dict[str, Any]",
+                    "constraints": [],
+                    "default": null,
+                    "required": true
+                  },
+                  "end_user_id": {
+                    "annotation": "str",
+                    "constraints": [],
+                    "default": null,
+                    "required": true
+                  },
+                  "memory_config": {
+                    "annotation": "dict[str, str | None]",
+                    "constraints": [],
+                    "default": null,
+                    "required": true
+                  },
+                  "memory_num": {
+                    "annotation": "dict[str, int | float]",
+                    "constraints": [],
+                    "default": null,
+                    "required": true
+                  },
+                  "tags": {
+                    "annotation": "list[str]",
+                    "constraints": [],
+                    "default": null,
+                    "required": true
+                  }
+                },
+                "required": true
+              },
+              "page": {
+                "annotation": "src.schemas.dashboard.PageInfo",
+                "constraints": [],
+                "default": null,
+                "fields": {
+                  "hasnext": {
+                    "annotation": "bool",
+                    "constraints": [],
+                    "default": null,
+                    "required": true
+                  },
+                  "page": {
+                    "annotation": "int",
+                    "constraints": [],
+                    "default": null,
+                    "required": true
+                  },
+                  "pagesize": {
+                    "annotation": "int",
+                    "constraints": [],
+                    "default": null,
+                    "required": true
+                  },
+                  "total": {
+                    "annotation": "int",
+                    "constraints": [],
+                    "default": null,
+                    "required": true
+                  }
+                },
+                "required": true
+              }
+            },
+            "required": true
+          },
+          "error": {
+            "annotation": "str",
+            "constraints": [],
+            "default": "",
+            "required": false
+          },
+          "msg": {
+            "annotation": "str",
+            "constraints": [],
+            "default": "OK",
+            "required": false
+          },
+          "time": {
+            "annotation": "int",
+            "constraints": [],
+            "default": "<factory:now_ms#5bec5d10ddf5>",
+            "required": false
+          }
+        },
+        "model": "src.common.responses.ApiResponse[EndUsersData]",
+        "status_code": 200
+      }
+    },
+    "GET /internal/v1/dashboard/memory_increment_daily": {
+      "endpoint": "memory_increment_daily",
+      "parameters": {
+        "query:end_time": {
+          "annotation": "int",
+          "constraints": [],
+          "default": null,
+          "in": "query",
+          "required": true
+        },
+        "query:start_time": {
+          "annotation": "int",
+          "constraints": [],
+          "default": null,
+          "in": "query",
+          "required": true
+        }
+      },
+      "response": {
+        "declared": [],
+        "fields": {
+          "code": {
+            "annotation": "int",
+            "constraints": [],
+            "default": 0,
+            "required": false
+          },
+          "data": {
+            "annotation": "src.schemas.dashboard.MemoryIncrementData",
+            "constraints": [],
+            "default": null,
+            "fields": {
+              "items": {
+                "annotation": "list[src.schemas.dashboard.MemoryIncrementItem]",
+                "constraints": [],
+                "default": null,
+                "fields": {
+                  "date": {
+                    "annotation": "int",
+                    "constraints": [],
+                    "default": null,
+                    "required": true
+                  },
+                  "total_num": {
+                    "annotation": "int",
+                    "constraints": [],
+                    "default": null,
+                    "required": true
+                  }
+                },
+                "required": true
+              }
+            },
+            "required": true
+          },
+          "error": {
+            "annotation": "str",
+            "constraints": [],
+            "default": "",
+            "required": false
+          },
+          "msg": {
+            "annotation": "str",
+            "constraints": [],
+            "default": "OK",
+            "required": false
+          },
+          "time": {
+            "annotation": "int",
+            "constraints": [],
+            "default": "<factory:now_ms#5bec5d10ddf5>",
+            "required": false
+          }
+        },
+        "model": "src.common.responses.ApiResponse[MemoryIncrementData]",
+        "status_code": 200
+      }
+    },
+    "GET /internal/v1/dashboard/total_memory_count": {
+      "endpoint": "total_memory_count",
+      "parameters": {
+        "query:end_user_id": {
+          "annotation": "str | None",
+          "constraints": [],
+          "default": null,
+          "in": "query",
+          "required": false
+        }
+      },
+      "response": {
+        "declared": [],
+        "fields": {
+          "code": {
+            "annotation": "int",
+            "constraints": [],
+            "default": 0,
+            "required": false
+          },
+          "data": {
+            "annotation": "src.schemas.dashboard.TotalMemoryData",
+            "constraints": [],
+            "default": null,
+            "fields": {
+              "details": {
+                "annotation": "list[src.schemas.dashboard.TotalMemoryDetail]",
+                "constraints": [],
+                "default": null,
+                "fields": {
+                  "count": {
+                    "annotation": "int",
+                    "constraints": [],
+                    "default": null,
+                    "required": true
+                  },
+                  "end_user_id": {
+                    "annotation": "str",
+                    "constraints": [],
+                    "default": null,
+                    "required": true
+                  },
+                  "name": {
+                    "annotation": "str | None",
+                    "constraints": [],
+                    "default": null,
+                    "required": true
+                  }
+                },
+                "required": true
+              },
+              "host_count": {
+                "annotation": "int",
+                "constraints": [],
+                "default": null,
+                "required": true
+              },
+              "total_memory_count": {
+                "annotation": "int",
+                "constraints": [],
+                "default": null,
+                "required": true
+              }
+            },
+            "required": true
+          },
+          "error": {
+            "annotation": "str",
+            "constraints": [],
+            "default": "",
+            "required": false
+          },
+          "msg": {
+            "annotation": "str",
+            "constraints": [],
+            "default": "OK",
+            "required": false
+          },
+          "time": {
+            "annotation": "int",
+            "constraints": [],
+            "default": "<factory:now_ms#5bec5d10ddf5>",
+            "required": false
+          }
+        },
+        "model": "src.common.responses.ApiResponse[TotalMemoryData]",
+        "status_code": 200
+      }
+    },
+    "GET /internal/v1/memory/emotion-memory/query_emotion_overview": {
+      "endpoint": "overview",
+      "parameters": {
+        "header:timezone": {
+          "annotation": "str",
+          "constraints": [
+            "alias=X-Timezone"
+          ],
+          "default": null,
+          "in": "header",
+          "required": true
+        },
+        "query:end_user_id": {
+          "annotation": "str",
+          "constraints": [],
+          "default": null,
+          "in": "query",
+          "required": true
+        }
+      },
+      "response": {
+        "declared": [],
+        "fields": {
+          "code": {
+            "annotation": "int",
+            "constraints": [],
+            "default": 0,
+            "required": false
+          },
+          "data": {
+            "annotation": "src.schemas.emotion_analytics.EmotionOverviewData",
+            "constraints": [],
+            "default": null,
+            "fields": {
+              "conclusion": {
+                "annotation": "dict[str, Any] | None",
+                "constraints": [],
+                "default": null,
+                "required": true
+              },
+              "data_quality": {
+                "annotation": "Literal[no_data, one_day, too_few, normal]",
+                "constraints": [],
+                "default": null,
+                "required": true
+              },
+              "items": {
+                "annotation": "list[src.schemas.emotion_analytics.EmotionDailyItem]",
+                "constraints": [],
+                "default": null,
+                "fields": {
+                  "data_quality": {
+                    "annotation": "Literal[normal, too_few]",
+                    "constraints": [],
+                    "default": null,
+                    "required": true
+                  },
+                  "date": {
+                    "annotation": "str",
+                    "constraints": [],
+                    "default": null,
+                    "required": true
+                  },
+                  "dialogue_count": {
+                    "annotation": "int",
+                    "constraints": [],
+                    "default": null,
+                    "required": true
+                  },
+                  "emotions": {
+                    "annotation": "list[src.schemas.emotion_analytics.DailyEmotion]",
+                    "constraints": [],
+                    "default": null,
+                    "fields": {
+                      "count": {
+                        "annotation": "int",
+                        "constraints": [],
+                        "default": null,
+                        "required": true
+                      },
+                      "display_name": {
+                        "annotation": "str",
+                        "constraints": [],
+                        "default": null,
+                        "required": true
+                      },
+                      "percentage": {
+                        "annotation": "float",
+                        "constraints": [],
+                        "default": null,
+                        "required": true
+                      },
+                      "type": {
+                        "annotation": "str",
+                        "constraints": [],
+                        "default": null,
+                        "required": true
+                      }
+                    },
+                    "required": true
+                  }
+                },
+                "required": true
+              },
+              "summary": {
+                "annotation": "src.schemas.emotion_analytics.OverviewSummary",
+                "constraints": [],
+                "default": null,
+                "fields": {
+                  "dialogue_count": {
+                    "annotation": "int",
+                    "constraints": [],
+                    "default": null,
+                    "required": true
+                  },
+                  "emotion_type_count": {
+                    "annotation": "int",
+                    "constraints": [],
+                    "default": null,
+                    "required": true
+                  }
+                },
+                "required": true
+              }
+            },
+            "required": true
+          },
+          "error": {
+            "annotation": "str",
+            "constraints": [],
+            "default": "",
+            "required": false
+          },
+          "msg": {
+            "annotation": "str",
+            "constraints": [],
+            "default": "OK",
+            "required": false
+          },
+          "time": {
+            "annotation": "int",
+            "constraints": [],
+            "default": "<factory:now_ms#5bec5d10ddf5>",
+            "required": false
+          }
+        },
+        "model": "src.common.responses.ApiResponse[EmotionOverviewData]",
+        "status_code": 200
+      }
+    },
+    "GET /internal/v1/memory/emotion-memory/query_emotion_timeline": {
+      "endpoint": "timeline",
+      "parameters": {
+        "header:timezone": {
+          "annotation": "str",
+          "constraints": [
+            "alias=X-Timezone"
+          ],
+          "default": null,
+          "in": "header",
+          "required": true
+        },
+        "query:end_date": {
+          "annotation": "datetime.date | None",
+          "constraints": [],
+          "default": null,
+          "in": "query",
+          "required": false
+        },
+        "query:end_user_id": {
+          "annotation": "str",
+          "constraints": [],
+          "default": null,
+          "in": "query",
+          "required": true
+        },
+        "query:page": {
+          "annotation": "int",
+          "constraints": [
+            "Ge(ge=1)"
+          ],
+          "default": 1,
+          "in": "query",
+          "required": false
+        },
+        "query:pagesize": {
+          "annotation": "int",
+          "constraints": [
+            "Ge(ge=1)",
+            "Le(le=10000)"
+          ],
+          "default": 5,
+          "in": "query",
+          "required": false
+        },
+        "query:sort": {
+          "annotation": "Literal[asc, desc]",
+          "constraints": [],
+          "default": "asc",
+          "in": "query",
+          "required": false
+        },
+        "query:start_date": {
+          "annotation": "datetime.date | None",
+          "constraints": [],
+          "default": null,
+          "in": "query",
+          "required": false
+        }
+      },
+      "response": {
+        "declared": [],
+        "fields": {
+          "code": {
+            "annotation": "int",
+            "constraints": [],
+            "default": 0,
+            "required": false
+          },
+          "data": {
+            "annotation": "src.schemas.emotion_analytics.EmotionTimelineData",
+            "constraints": [],
+            "default": null,
+            "fields": {
+              "items": {
+                "annotation": "list[src.schemas.emotion_analytics.EmotionTimelineItem]",
+                "constraints": [],
+                "default": null,
+                "fields": {
+                  "data_quality": {
+                    "annotation": "Literal[normal, too_few]",
+                    "constraints": [],
+                    "default": null,
+                    "required": true
+                  },
+                  "date": {
+                    "annotation": "str",
+                    "constraints": [],
+                    "default": null,
+                    "required": true
+                  },
+                  "dialogue_count": {
+                    "annotation": "int",
+                    "constraints": [],
+                    "default": null,
+                    "required": true
+                  },
+                  "emotions": {
+                    "annotation": "list[src.schemas.emotion_analytics.DailyEmotion]",
+                    "constraints": [],
+                    "default": null,
+                    "fields": {
+                      "count": {
+                        "annotation": "int",
+                        "constraints": [],
+                        "default": null,
+                        "required": true
+                      },
+                      "display_name": {
+                        "annotation": "str",
+                        "constraints": [],
+                        "default": null,
+                        "required": true
+                      },
+                      "percentage": {
+                        "annotation": "float",
+                        "constraints": [],
+                        "default": null,
+                        "required": true
+                      },
+                      "type": {
+                        "annotation": "str",
+                        "constraints": [],
+                        "default": null,
+                        "required": true
+                      }
+                    },
+                    "required": true
+                  },
+                  "summary": {
+                    "annotation": "str",
+                    "constraints": [],
+                    "default": null,
+                    "required": true
+                  }
+                },
+                "required": true
+              },
+              "page": {
+                "annotation": "src.schemas.emotion_analytics.PageInfo",
+                "constraints": [],
+                "default": null,
+                "fields": {
+                  "hasnext": {
+                    "annotation": "bool",
+                    "constraints": [],
+                    "default": null,
+                    "required": true
+                  },
+                  "page": {
+                    "annotation": "int",
+                    "constraints": [],
+                    "default": null,
+                    "required": true
+                  },
+                  "pagesize": {
+                    "annotation": "int",
+                    "constraints": [],
+                    "default": null,
+                    "required": true
+                  },
+                  "total": {
+                    "annotation": "int",
+                    "constraints": [],
+                    "default": null,
+                    "required": true
+                  }
+                },
+                "required": true
+              }
+            },
+            "required": true
+          },
+          "error": {
+            "annotation": "str",
+            "constraints": [],
+            "default": "",
+            "required": false
+          },
+          "msg": {
+            "annotation": "str",
+            "constraints": [],
+            "default": "OK",
+            "required": false
+          },
+          "time": {
+            "annotation": "int",
+            "constraints": [],
+            "default": "<factory:now_ms#5bec5d10ddf5>",
+            "required": false
+          }
+        },
+        "model": "src.common.responses.ApiResponse[EmotionTimelineData]",
+        "status_code": 200
+      }
+    },
+    "POST /internal/v1/dashboard/end_user_memory_counts": {
+      "endpoint": "end_user_memory_counts",
+      "parameters": {
+        "body:body": {
+          "annotation": "src.modules.dashboard.schemas.MemoryCountsRequest",
+          "constraints": [],
+          "default": null,
+          "fields": {
+            "end_user_ids": {
+              "annotation": "list[str]",
+              "constraints": [],
+              "default": null,
+              "required": true
+            }
+          },
+          "in": "body",
+          "required": true
+        }
+      },
+      "response": {
+        "declared": [],
+        "fields": {
+          "code": {
+            "annotation": "int",
+            "constraints": [],
+            "default": 0,
+            "required": false
+          },
+          "data": {
+            "annotation": "src.schemas.dashboard.MemoryCountsData",
+            "constraints": [],
+            "default": null,
+            "fields": {
+              "items": {
+                "annotation": "list[src.schemas.dashboard.MemoryCountItem]",
+                "constraints": [],
+                "default": null,
+                "fields": {
+                  "end_user_id": {
+                    "annotation": "str",
+                    "constraints": [],
+                    "default": null,
+                    "required": true
+                  },
+                  "memory_count": {
+                    "annotation": "int",
+                    "constraints": [],
+                    "default": null,
+                    "required": true
+                  },
+                  "other_name": {
+                    "annotation": "str | None",
+                    "constraints": [],
+                    "default": null,
+                    "required": false
+                  }
+                },
+                "required": true
+              },
+              "total": {
+                "annotation": "int",
+                "constraints": [],
+                "default": null,
+                "required": true
+              }
+            },
+            "required": true
+          },
+          "error": {
+            "annotation": "str",
+            "constraints": [],
+            "default": "",
+            "required": false
+          },
+          "msg": {
+            "annotation": "str",
+            "constraints": [],
+            "default": "OK",
+            "required": false
+          },
+          "time": {
+            "annotation": "int",
+            "constraints": [],
+            "default": "<factory:now_ms#5bec5d10ddf5>",
+            "required": false
+          }
+        },
+        "model": "src.common.responses.ApiResponse[MemoryCountsData]",
+        "status_code": 200
+      }
+    },
+    "POST /internal/v1/memory/emotion-memory/health": {
+      "endpoint": "health",
+      "parameters": {
+        "body:body": {
+          "annotation": "src.modules.emotion_analytics.schemas.EmotionHealthRequest",
+          "constraints": [],
+          "default": null,
+          "fields": {
+            "end_user_id": {
+              "annotation": "str",
+              "constraints": [
+                "MinLen(min_length=1)"
+              ],
+              "default": null,
+              "required": true
+            },
+            "time_range": {
+              "annotation": "Literal[7d, 30d, 90d]",
+              "constraints": [],
+              "default": "30d",
+              "required": false
+            }
+          },
+          "in": "body",
+          "required": true
+        }
+      },
+      "response": {
+        "declared": [],
+        "fields": {
+          "code": {
+            "annotation": "int",
+            "constraints": [],
+            "default": 0,
+            "required": false
+          },
+          "data": {
+            "annotation": "src.schemas.emotion_analytics.EmotionHealthData",
+            "constraints": [],
+            "default": null,
+            "fields": {
+              "dimensions": {
+                "annotation": "src.schemas.emotion_analytics.HealthDimensions",
+                "constraints": [],
+                "default": null,
+                "fields": {
+                  "positivity_rate": {
+                    "annotation": "src.schemas.emotion_analytics.PositivityRate",
+                    "constraints": [],
+                    "default": null,
+                    "fields": {
+                      "negative_count": {
+                        "annotation": "int",
+                        "constraints": [],
+                        "default": null,
+                        "required": true
+                      },
+                      "neutral_count": {
+                        "annotation": "int",
+                        "constraints": [],
+                        "default": null,
+                        "required": true
+                      },
+                      "positive_count": {
+                        "annotation": "int",
+                        "constraints": [],
+                        "default": null,
+                        "required": true
+                      },
+                      "score": {
+                        "annotation": "float | None",
+                        "constraints": [],
+                        "default": null,
+                        "required": true
+                      }
+                    },
+                    "required": true
+                  },
+                  "resilience": {
+                    "annotation": "src.schemas.emotion_analytics.Resilience",
+                    "constraints": [],
+                    "default": null,
+                    "fields": {
+                      "recovery_rate": {
+                        "annotation": "float",
+                        "constraints": [],
+                        "default": null,
+                        "required": true
+                      },
+                      "score": {
+                        "annotation": "float | None",
+                        "constraints": [],
+                        "default": null,
+                        "required": true
+                      }
+                    },
+                    "required": true
+                  },
+                  "stability": {
+                    "annotation": "src.schemas.emotion_analytics.Stability",
+                    "constraints": [],
+                    "default": null,
+                    "fields": {
+                      "score": {
+                        "annotation": "float | None",
+                        "constraints": [],
+                        "default": null,
+                        "required": true
+                      },
+                      "std_deviation": {
+                        "annotation": "float",
+                        "constraints": [],
+                        "default": null,
+                        "required": true
+                      }
+                    },
+                    "required": true
+                  }
+                },
+                "required": true
+              },
+              "emotion_distribution": {
+                "annotation": "dict[str, int]",
+                "constraints": [],
+                "default": null,
+                "required": true
+              },
+              "health_score": {
+                "annotation": "float | None",
+                "constraints": [],
+                "default": null,
+                "required": true
+              },
+              "level": {
+                "annotation": "str",
+                "constraints": [],
+                "default": null,
+                "required": true
+              },
+              "time_range": {
+                "annotation": "str",
+                "constraints": [],
+                "default": null,
+                "required": true
+              }
+            },
+            "required": true
+          },
+          "error": {
+            "annotation": "str",
+            "constraints": [],
+            "default": "",
+            "required": false
+          },
+          "msg": {
+            "annotation": "str",
+            "constraints": [],
+            "default": "OK",
+            "required": false
+          },
+          "time": {
+            "annotation": "int",
+            "constraints": [],
+            "default": "<factory:now_ms#5bec5d10ddf5>",
+            "required": false
+          }
+        },
+        "model": "src.common.responses.ApiResponse[EmotionHealthData]",
+        "status_code": 200
+      }
+    },
+    "POST /internal/v1/memory/emotion-memory/tags": {
+      "endpoint": "tags",
+      "parameters": {
+        "body:body": {
+          "annotation": "src.modules.emotion_analytics.schemas.EmotionTagsRequest",
+          "constraints": [],
+          "default": null,
+          "fields": {
+            "end_date": {
+              "annotation": "str | None",
+              "constraints": [],
+              "default": null,
+              "required": false
+            },
+            "end_user_id": {
+              "annotation": "str",
+              "constraints": [
+                "MinLen(min_length=1)"
+              ],
+              "default": null,
+              "required": true
+            },
+            "limit": {
+              "annotation": "int",
+              "constraints": [
+                "Ge(ge=1)",
+                "Le(le=100)"
+              ],
+              "default": 10,
+              "required": false
+            },
+            "start_date": {
+              "annotation": "str | None",
+              "constraints": [],
+              "default": null,
+              "required": false
+            }
+          },
+          "in": "body",
+          "required": true
+        }
+      },
+      "response": {
+        "declared": [],
+        "fields": {
+          "code": {
+            "annotation": "int",
+            "constraints": [],
+            "default": 0,
+            "required": false
+          },
+          "data": {
+            "annotation": "src.schemas.emotion_analytics.EmotionTagsData",
+            "constraints": [],
+            "default": null,
+            "fields": {
+              "tags": {
+                "annotation": "list[src.schemas.emotion_analytics.EmotionTag]",
+                "constraints": [],
+                "default": null,
+                "fields": {
+                  "avg_intensity": {
+                    "annotation": "float",
+                    "constraints": [],
+                    "default": null,
+                    "required": true
+                  },
+                  "count": {
+                    "annotation": "int",
+                    "constraints": [],
+                    "default": null,
+                    "required": true
+                  },
+                  "emotion_type": {
+                    "annotation": "str",
+                    "constraints": [],
+                    "default": null,
+                    "required": true
+                  },
+                  "percentage": {
+                    "annotation": "float",
+                    "constraints": [],
+                    "default": null,
+                    "required": true
+                  }
+                },
+                "required": true
+              },
+              "time_range": {
+                "annotation": "dict[str, str] | None",
+                "constraints": [],
+                "default": null,
+                "required": true
+              },
+              "total_count": {
+                "annotation": "int",
+                "constraints": [],
+                "default": null,
+                "required": true
+              }
+            },
+            "required": true
+          },
+          "error": {
+            "annotation": "str",
+            "constraints": [],
+            "default": "",
+            "required": false
+          },
+          "msg": {
+            "annotation": "str",
+            "constraints": [],
+            "default": "OK",
+            "required": false
+          },
+          "time": {
+            "annotation": "int",
+            "constraints": [],
+            "default": "<factory:now_ms#5bec5d10ddf5>",
+            "required": false
+          }
+        },
+        "model": "src.common.responses.ApiResponse[EmotionTagsData]",
+        "status_code": 200
+      }
+    },
+    "POST /internal/v1/memory/emotion-memory/wordcloud": {
+      "endpoint": "wordcloud",
+      "parameters": {
+        "body:body": {
+          "annotation": "src.modules.emotion_analytics.schemas.EmotionWordcloudRequest",
+          "constraints": [],
+          "default": null,
+          "fields": {
+            "end_user_id": {
+              "annotation": "str",
+              "constraints": [
+                "MinLen(min_length=1)"
+              ],
+              "default": null,
+              "required": true
+            },
+            "limit": {
+              "annotation": "int",
+              "constraints": [
+                "Ge(ge=1)",
+                "Le(le=200)"
+              ],
+              "default": 50,
+              "required": false
+            }
+          },
+          "in": "body",
+          "required": true
+        }
+      },
+      "response": {
+        "declared": [],
+        "fields": {
+          "code": {
+            "annotation": "int",
+            "constraints": [],
+            "default": 0,
+            "required": false
+          },
+          "data": {
+            "annotation": "src.schemas.emotion_analytics.EmotionWordcloudData",
+            "constraints": [],
+            "default": null,
+            "fields": {
+              "keywords": {
+                "annotation": "list[src.schemas.emotion_analytics.EmotionKeyword]",
+                "constraints": [],
+                "default": null,
+                "fields": {
+                  "avg_intensity": {
+                    "annotation": "float",
+                    "constraints": [],
+                    "default": null,
+                    "required": true
+                  },
+                  "emotion_type": {
+                    "annotation": "str",
+                    "constraints": [],
+                    "default": null,
+                    "required": true
+                  },
+                  "frequency": {
+                    "annotation": "int",
+                    "constraints": [],
+                    "default": null,
+                    "required": true
+                  },
+                  "keyword": {
+                    "annotation": "str",
+                    "constraints": [],
+                    "default": null,
+                    "required": true
+                  }
+                },
+                "required": true
+              },
+              "total_keywords": {
+                "annotation": "int",
+                "constraints": [],
+                "default": null,
+                "required": true
+              }
+            },
+            "required": true
+          },
+          "error": {
+            "annotation": "str",
+            "constraints": [],
+            "default": "",
+            "required": false
+          },
+          "msg": {
+            "annotation": "str",
+            "constraints": [],
+            "default": "OK",
+            "required": false
+          },
+          "time": {
+            "annotation": "int",
+            "constraints": [],
+            "default": "<factory:now_ms#5bec5d10ddf5>",
+            "required": false
+          }
+        },
+        "model": "src.common.responses.ApiResponse[EmotionWordcloudData]",
         "status_code": 200
       }
     }

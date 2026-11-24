@@ -37,15 +37,41 @@ MATCH (s:SceneSummary {id: $scene_summary_id, end_user_id: $end_user_id})
 RETURN s.source_message_ids AS source_message_ids
 """
 
-SCENE_SUMMARY_INACTIVE_COUNT = """
-MATCH (s:SceneSummary {end_user_id: $end_user_id, community_status: 'INACTIVE'})
+_PENDING_SCENE = """
+s.community_eligibility = 'ELIGIBLE'
+AND s.community_status = 'INACTIVE'
+AND s.scene_community_id IS NULL
+"""
+
+
+def _utc_local_datetime(expression: str) -> str:
+    return (
+        f"CASE WHEN {expression} IS :: ZONED DATETIME NOT NULL "
+        f"THEN localdatetime(datetime({{datetime: {expression}, timezone: 'UTC'}})) "
+        f"ELSE {expression} END"
+    )
+
+
+SCENE_SUMMARY_PENDING_USERS = f"""
+MATCH (s:SceneSummary)
+WHERE {_PENDING_SCENE}
+  AND s.end_user_id > $after_end_user_id
+RETURN DISTINCT s.end_user_id AS end_user_id
+ORDER BY end_user_id
+LIMIT 200
+"""
+
+SCENE_SUMMARY_INACTIVE_COUNT = f"""
+MATCH (s:SceneSummary {{end_user_id: $end_user_id}})
+WHERE {_PENDING_SCENE}
 RETURN count(s) AS inactive_count
 """
 
-SCENE_SUMMARY_INACTIVE_BATCH = """
-MATCH (s:SceneSummary {end_user_id: $end_user_id, community_status: 'INACTIVE'})
+SCENE_SUMMARY_INACTIVE_BATCH = f"""
+MATCH (s:SceneSummary {{end_user_id: $end_user_id}})
+WHERE {_PENDING_SCENE}
 WITH s
-ORDER BY s.created_at ASC, s.id ASC
+ORDER BY {_utc_local_datetime("s.created_at")} ASC, s.id ASC
 LIMIT $batch_size
 RETURN properties(s) AS scene_summary
 """
@@ -72,32 +98,32 @@ RETURN s.scene_community_id AS scene_community_id,
 ORDER BY s.created_at ASC, s.id ASC
 """
 
-SCENE_COMMUNITY_UPSERT_BATCH = """
+SCENE_COMMUNITY_UPSERT_BATCH = f"""
 UNWIND $communities AS row
-MERGE (c:SceneCommunity {id: row.id, end_user_id: $end_user_id})
+MERGE (c:SceneCommunity {{id: row.id, end_user_id: $end_user_id}})
 ON CREATE SET c.created_at = row.created_at
 WITH c, row, c.created_at AS original_created_at
 SET c += row,
-    c.created_at = localdatetime(original_created_at)
+    c.created_at = {_utc_local_datetime("original_created_at")}
 RETURN elementId(c) AS element_id,
        toString(c.id) AS node_id
 ORDER BY node_id
 """
 
-SCENE_SUMMARY_ASSIGN_BATCH = """
+SCENE_SUMMARY_ASSIGN_BATCH = f"""
 UNWIND $assignments AS row
-MATCH (s:SceneSummary {
+MATCH (s:SceneSummary {{
     id: row.scene_summary_id,
-    end_user_id: $end_user_id,
-    community_status: 'INACTIVE'
-})
-MATCH (c:SceneCommunity {id: row.scene_community_id, end_user_id: $end_user_id})
+    end_user_id: $end_user_id
+}})
+WHERE {_PENDING_SCENE}
+MATCH (c:SceneCommunity {{id: row.scene_community_id, end_user_id: $end_user_id}})
 SET s.scene_community_id = c.id,
     s.community_category_l1 = row.category_l1,
     s.community_status = 'ACTIVE',
-    s.started_at = localdatetime(s.started_at),
-    s.ended_at = localdatetime(s.ended_at),
-    s.created_at = localdatetime(s.created_at),
+    s.started_at = {_utc_local_datetime("s.started_at")},
+    s.ended_at = {_utc_local_datetime("s.ended_at")},
+    s.created_at = {_utc_local_datetime("s.created_at")},
     s.updated_at = row.updated_at
 RETURN elementId(s) AS element_id,
        toString(s.id) AS node_id
@@ -195,23 +221,22 @@ class SceneStorage:
         self.outbox_repository = outbox_repository
 
     async def _publish(self, identities: Sequence[SceneMutationIdentity]) -> None:
+        if not identities:
+            return
+        # Keep identities in the same order as the event IDs in OutboxEnqueueError.
+        ordered = sorted(identities, key=lambda item: (item.label.value, item.node_id))
         events = [
             OutboxEventInput(
                 label=identity.label,
                 node_id=identity.node_id,
                 operation=OutboxOperation.UPSERT,
             )
-            for identity in sorted(
-                identities,
-                key=lambda item: (item.label.value, item.node_id),
-            )
+            for identity in ordered
         ]
-        if not events:
-            return
         try:
             await enqueue_events(events, repository=self.outbox_repository)
         except OutboxEnqueueError as exc:
-            raise SceneStorageOutboxError(exc, identities) from None
+            raise SceneStorageOutboxError(exc, ordered) from None
 
     async def create_scene_summary_if_absent(
         self,
@@ -264,12 +289,19 @@ class SceneStorage:
             return None
         return list(rows[0].get("source_message_ids") or [])
 
+    async def list_pending_user_ids(self, after_end_user_id: str) -> list[str]:
+        rows = await self.client.execute_query(
+            SCENE_SUMMARY_PENDING_USERS,
+            after_end_user_id=after_end_user_id,
+        )
+        return [_nonblank(row["end_user_id"], "end_user_id") for row in rows]
+
     async def count_inactive(self, end_user_id: str) -> int:
         rows = await self.client.execute_query(
             SCENE_SUMMARY_INACTIVE_COUNT,
             end_user_id=_nonblank(end_user_id, "end_user_id"),
         )
-        return int(rows[0].get("inactive_count") or 0) if rows else 0
+        return rows[0]["inactive_count"]
 
     async def load_inactive_batch(
         self,

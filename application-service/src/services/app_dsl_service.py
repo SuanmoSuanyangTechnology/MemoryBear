@@ -289,15 +289,21 @@ class AppDslService:
     def _model_ref(self, model_config_id) -> dict | None:
         if not model_config_id:
             return None
-        m = get_model_config_row(self.db, model_config_id)
+        raw_id = str(model_config_id)
+        try:
+            model_uuid = uuid.UUID(raw_id)
+        except ValueError:
+            # Keep the unresolved ID so import can clear it and warn the user.
+            return {"id": raw_id}
+        m = get_model_config_row(self.db, model_uuid)
         if m:
             return {
-                "id": str(model_config_id),
+                "id": raw_id,
                 "name": m.name,
                 "provider": m.provider,
                 "type": m.type,
             }
-        return {"id": str(model_config_id)}
+        return {"id": raw_id}
 
     def _kb_ref(self, kb_id) -> dict | None:
         if not kb_id:

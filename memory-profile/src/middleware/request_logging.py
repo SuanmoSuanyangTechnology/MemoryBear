@@ -11,6 +11,25 @@ from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 logger = logging.getLogger("memory.access")
 
+#: Liveness/readiness/metrics probes are high-frequency and operationally
+#: noisy; they stay in the metrics layer but are excluded from the access log.
+_HEALTH_PATH_PREFIXES: tuple[str, ...] = ("/health", "/internal/v1/health")
+
+
+def _is_health_path(value: str | None) -> bool:
+    if not value:
+        return False
+    return any(
+        value == candidate or value.startswith(f"{candidate}/")
+        for candidate in _HEALTH_PATH_PREFIXES
+    )
+
+
+def _is_health_request(scope: Scope) -> bool:
+    return _is_health_path(_route_template(scope)) or _is_health_path(
+        scope.get("path")
+    )
+
 
 def _route_template(scope: Scope) -> str:
     route = getattr(scope.get("route"), "path", None)
@@ -33,11 +52,15 @@ def _level(status_code: int, completion: str) -> int:
 class RequestLoggingMiddleware:
     """ASGI access logger shared by all current and future Memory modules."""
 
-    def __init__(self, app: ASGIApp) -> None:
+    def __init__(self, app: ASGIApp, *, log_health: bool = False) -> None:
         self.app = app
+        self.log_health = log_health
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+        if not self.log_health and _is_health_request(scope):
             await self.app(scope, receive, send)
             return
 

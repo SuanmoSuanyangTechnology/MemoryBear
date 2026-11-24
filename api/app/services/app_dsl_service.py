@@ -182,8 +182,16 @@ class AppDslService:
     def _model_ref(self, model_config_id) -> Optional[dict]:
         if not model_config_id:
             return None
-        m = self.db.query(ModelConfig).filter(ModelConfig.id == model_config_id).first()
-        return {"id": str(model_config_id), "name": m.name, "provider": m.provider, "type": m.type} if m else {"id": str(model_config_id)}
+        raw_id = str(model_config_id)
+        try:
+            model_uuid = uuid.UUID(raw_id)
+        except ValueError:
+            # 保留待解析的 ID，导入时会置空并提示用户重新配置。
+            return {"id": raw_id}
+        m = self.db.query(ModelConfig).filter(ModelConfig.id == model_uuid).first()
+        if m:
+            return {"id": raw_id, "name": m.name, "provider": m.provider, "type": m.type}
+        return {"id": raw_id}
 
     def _kb_ref(self, kb_id) -> Optional[dict]:
         if not kb_id:

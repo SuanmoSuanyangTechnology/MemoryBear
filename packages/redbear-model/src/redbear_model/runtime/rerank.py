@@ -19,6 +19,10 @@ from redbear_model.contracts import (
     TextEmbeddingContent,
 )
 from redbear_model.errors import UnsupportedModelProviderError
+from redbear_model.providers.bedrock import (
+    build_bedrock_rerank_params,
+    load_bedrock_rerank_class,
+)
 from redbear_model.providers.dashscope import (
     is_qwen3_vl_reranker,
     load_dashscope_rerank_class,
@@ -52,12 +56,16 @@ def _normalize_jina_rerank_url(base_url: str | None) -> str:
 
 
 class _EndpointBoundSession:
-    def __init__(self, session: Any, endpoint: str):
+    def __init__(self, session: Any, endpoint: str, timeout: float):
         self._session = session
         self._endpoint = endpoint
+        self._timeout = timeout
 
     def post(self, _url: str, **kwargs: Any) -> Any:
-        return self._session.post(self._endpoint, **kwargs)
+        kwargs.setdefault("timeout", self._timeout)
+        response = self._session.post(self._endpoint, **kwargs)
+        response.raise_for_status()
+        return response
 
     def __getattr__(self, name: str) -> Any:
         return getattr(self._session, name)
@@ -106,6 +114,8 @@ class RedBearRerank(BaseDocumentCompressor):
 
     def _create_model(self, config: ResolvedModelConfig):
         if config.provider in _JINA_PROVIDERS:
+            if config.provider is ModelProvider.XINFERENCE and not config.base_url:
+                raise ValueError("Xinference rerank requires a deployment URL")
             instance = _load_jina_rerank_class()(
                 model=config.model_name,
                 jina_api_key=config.api_key.get_secret_value(),
@@ -113,6 +123,7 @@ class RedBearRerank(BaseDocumentCompressor):
             instance.session = _EndpointBoundSession(
                 instance.session,
                 _normalize_jina_rerank_url(config.base_url),
+                config.runtime.timeout_s,
             )
             return instance
         if config.provider is ModelProvider.DASHSCOPE:
@@ -124,6 +135,10 @@ class RedBearRerank(BaseDocumentCompressor):
             if hasattr(instance, "model"):
                 instance.model = config.model_name
             return instance
+        if config.provider is ModelProvider.BEDROCK:
+            # Bedrock rerank is a separate service (bedrock-agent-runtime) keyed by
+            # model ARN, not by model id — the params builder does that translation.
+            return load_bedrock_rerank_class()(**build_bedrock_rerank_params(config))
         raise UnsupportedModelProviderError(config.provider.value)
 
     def compress_documents(
@@ -154,6 +169,8 @@ class RedBearRerank(BaseDocumentCompressor):
     ) -> list[dict[str, Any]]:
         started = time.perf_counter()
         try:
+            if not documents or top_n == 0:
+                return []
             if self._is_qwen3_vl:
                 views = [
                     RerankCandidateView(
@@ -175,6 +192,11 @@ class RedBearRerank(BaseDocumentCompressor):
                         top_n=resolved_top_n,
                     )
                 ]
+            if self._config.provider in {ModelProvider.BEDROCK, ModelProvider.XINFERENCE}:
+                limit = len(documents) if top_n is None or top_n < 0 else top_n
+                top_n = min(limit, len(documents))
+                if self._config.provider is ModelProvider.BEDROCK:
+                    top_n = min(top_n, 1000)
             return self._model.rerank(
                 documents=documents,
                 query=query,
@@ -233,7 +255,11 @@ class RedBearRerank(BaseDocumentCompressor):
         close = getattr(self._model, "close", None)
         if callable(close):
             return close
-        session = getattr(self._model, "session", None)
+        session = (
+            getattr(self._model, "client", None)
+            if self._config.provider is ModelProvider.BEDROCK
+            else getattr(self._model, "session", None)
+        )
         close = getattr(session, "close", None)
         return close if callable(close) else None
 

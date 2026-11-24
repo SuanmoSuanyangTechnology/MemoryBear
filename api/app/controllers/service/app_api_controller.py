@@ -359,6 +359,9 @@ async def chat(
     """
     Agent/Workflow 聊天接口
 
+    对外画像仅包含 aliases_name、description 和 13 个通用画像键；旧画像字段
+    不在非流式结果或 profile_loaded 事件中返回。
+
     - 不传 version：使用当前生效版本（current_release，回滚后为回滚目标版本）
     - 传 version=release_id：使用指定版本uuid的历史快照，例如 {"version": "{{release_id}}"}
     """

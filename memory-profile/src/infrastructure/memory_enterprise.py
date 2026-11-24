@@ -28,6 +28,16 @@ from src.config import ProfileSettings
 MEMORY_LIMITS_PATH = "/internal/v1/quota/tenants/{tenant_id}/memory-limits"
 
 
+#: Bounded metadata-scope endpoint (the enterprise service owns the tables).
+METADATA_SCOPE_PATH = "/internal/v1/ontology/metadata-scope"
+
+
+#: Retrieval-failure alerts handed to the enterprise notification center. The
+#: enterprise service owns the Redis obligation and the Celery dispatch; this
+#: call is transport only.
+RETRIEVAL_ALERT_PATH = "/internal/v1/notifications/retrieval-alerts"
+
+
 class MemoryEnterpriseManager:
     """Lazily own the enterprise-service HTTP pool."""
 
@@ -91,3 +101,81 @@ class MemoryEnterpriseManager:
         self._loop = None
         if client is not None:
             await client.aclose()
+    async def metadata_scope(
+        self, *, app_id: UUID, end_user_id: UUID
+    ) -> dict[str, Any] | None:
+        """Resolve one app's ontology boundary for an end user.
+
+        Returns ``None`` when the service has no binding for the pair; transport
+        or payload failures raise so the caller can fall back to default_only.
+        """
+
+        response = await (await self.client()).get(
+            METADATA_SCOPE_PATH,
+            params={"app_id": str(app_id), "end_user_id": str(end_user_id)},
+        )
+        response.raise_for_status()
+        payload = response.json()
+        if not isinstance(payload, dict):
+            raise ValueError("memory-enterprise returned an invalid metadata scope")
+        scope = payload.get("scope")
+        return scope if isinstance(scope, dict) else None
+
+    async def scene_names(
+        self, *, tenant_id: UUID, scene_ids: list[str]
+    ) -> dict[str, str]:
+        """Scene id → name for the tenant's visible scenes (enterprise-owned)."""
+
+        if not scene_ids:
+            return {}
+        response = await (await self.client()).post(
+            "/internal/v1/ontology/scene-names",
+            headers={"X-Tenant-Id": str(tenant_id)},
+            json={"scene_ids": scene_ids},
+        )
+        response.raise_for_status()
+        payload = response.json()
+        names = payload.get("names") if isinstance(payload, dict) else None
+        return {str(key): str(value) for key, value in (names or {}).items()}
+
+    async def report_retrieval_alert(
+        self,
+        *,
+        tenant_id: str,
+        workspace_id: str,
+        end_user_id: str,
+        operation_id: str,
+        error_code: str,
+        stage: str,
+        impact: str,
+        model_type: str,
+    ) -> dict[str, Any]:
+        """Hand one degraded-retrieval alert to the enterprise service.
+
+        The enterprise service persists the notification obligation and
+        dispatches the API worker's emit task. Raises on a transport failure,
+        a business rejection (non-zero ``code``) or an unusable payload; the
+        caller treats the alert as not delivered.
+        """
+
+        response = await (await self.client()).post(
+            RETRIEVAL_ALERT_PATH,
+            json={
+                "tenant_id": tenant_id,
+                "workspace_id": workspace_id,
+                "end_user_id": end_user_id,
+                "operation_id": operation_id,
+                "error_code": error_code,
+                "stage": stage,
+                "impact": impact,
+                "model_type": model_type,
+            },
+        )
+        response.raise_for_status()
+        payload = response.json()
+        if not isinstance(payload, dict) or payload.get("code") != 0:
+            raise ValueError("memory-enterprise rejected the retrieval alert")
+        data = payload.get("data")
+        if not isinstance(data, dict):
+            raise ValueError("memory-enterprise returned an unexpected alert payload")
+        return data
