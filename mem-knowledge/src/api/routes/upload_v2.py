@@ -24,6 +24,7 @@ from ...services.qa_import import dispatch_qa_import, prepare_qa_import_resource
 from ...services.upload_deduplication import discard_unpublished_qa_upload, save_new_upload
 from ...tasks.dispatch import TaskDispatcher, TaskNotPublishedError
 from ..dependencies import Principal, get_principal, get_runtime, get_source
+from ..knowledge_capacity import check_workspace_capacity
 from ..schemas.chunk import KnowledgeRetrievalSource
 from ..upload_contract import (
     GATEWAY_DOCUMENT_UPLOAD_PATH,
@@ -62,11 +63,11 @@ async def read_upload(file: UploadFile, runtime: ProcessRuntime) -> bytes:
 
 
 @router.post(
-    UploadKind.DOCUMENT, status_code=201, responses=upload_responses(),
+    UploadKind.DOCUMENT, status_code=201, responses=upload_responses(outer_status=402),
     response_model=UploadCreated[UploadedDocument],
 )
 @gateway_router.post(
-    GATEWAY_DOCUMENT_UPLOAD_PATH, status_code=201, responses=upload_responses(),
+    GATEWAY_DOCUMENT_UPLOAD_PATH, status_code=201, responses=upload_responses(outer_status=402),
     response_model=UploadCreated[UploadedDocument],
 )
 async def upload_document(
@@ -77,6 +78,7 @@ async def upload_document(
     principal: Annotated[Principal, Depends(get_principal)],
     runtime: Annotated[ProcessRuntime, Depends(get_runtime)],
 ) -> dict:
+    await check_workspace_capacity(request, runtime, principal)
     content = await read_upload(file, runtime)
     filename = file.filename or ""
     storage = KnowledgeFileStorage(runtime.storage)
