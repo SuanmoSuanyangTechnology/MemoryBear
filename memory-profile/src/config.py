@@ -97,7 +97,6 @@ class ProfileSettings(BaseSettings):
         "http://127.0.0.1:8080", validation_alias="MODEL_SERVICE_BASE_URL"
     )
     # Scene continuity BERT probe used only by the scene/split-demo endpoint.
-    # This is the single model credential this process holds; see README.
     scene_continuity_url: str = Field("", validation_alias="SCENE_CONTINUITY_URL")
     scene_continuity_api_key: str = Field(
         "", validation_alias="SCENE_CONTINUITY_API_KEY"
@@ -107,6 +106,15 @@ class ProfileSettings(BaseSettings):
     )
     scene_continuity_timeout_seconds: float = Field(
         2.0, ge=0.1, validation_alias="SCENE_CONTINUITY_TIMEOUT_SECONDS"
+    )
+    emotion_url: str = Field("", validation_alias="BERT_URL")
+    emotion_api_key: SecretStr = Field(SecretStr(""), validation_alias="FAST_WRITE_EMOTION_API_KEY")
+    emotion_model: str = Field("", validation_alias="FAST_WRITE_EMOTION_MODEL")
+    emotion_http_timeout_seconds: float = Field(
+        5.0, validation_alias="FAST_WRITE_EMOTION_HTTP_TIMEOUT_SECONDS"
+    )
+    emotion_total_timeout_seconds: float = Field(
+        3.0, validation_alias="FAST_WRITE_EMOTION_TOTAL_TIMEOUT_SECONDS"
     )
     model_service_connect_timeout_seconds: float = Field(
         5.0, validation_alias="MODEL_SERVICE_INVOKE_CONNECT_TIMEOUT_SECONDS"
@@ -127,9 +135,8 @@ class ProfileSettings(BaseSettings):
         20, validation_alias="MODEL_SERVICE_MAX_KEEPALIVE_CONNECTIONS"
     )
 
-    # 企业版配额由闭源 memory-enterprise 服务持有（套餐/资源包表），本服务只查询
-    # 生效额度。留空 base URL 视为社区版；查询失败同样回落免费版。
-
+    # 企业版配额和默认情绪策略由 memory-enterprise 持有。
+    # 未配置服务或配额查询失败时，配额回落到社区免费版。
     memory_enterprise_base_url: str = Field("", validation_alias="MEMORY_ENTERPRISE_BASE_URL")
     memory_enterprise_timeout_seconds: float = Field(
         3.0, gt=0, validation_alias="MEMORY_ENTERPRISE_TIMEOUT_SECONDS"
@@ -321,6 +328,11 @@ class ProfileSettings(BaseSettings):
         if parsed.query or parsed.fragment:
             raise ValueError("MODEL_SERVICE_BASE_URL must not contain query or fragment")
         return value
+
+    @field_validator("emotion_http_timeout_seconds", "emotion_total_timeout_seconds")
+    @classmethod
+    def normalize_emotion_timeout(cls, value: float) -> float:
+        return max(0.1, value)
 
     @field_validator("memory_enterprise_base_url")
     @classmethod
