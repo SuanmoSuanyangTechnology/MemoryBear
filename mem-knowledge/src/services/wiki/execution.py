@@ -27,10 +27,10 @@ def dispatcher(runtime):
 def publish_map(runtime, delivery, *, terminal_on_failure=False):
     if not delivery or not delivery.get("publish", True):
         return
-    from .batch import batch_enabled, wake_batch
+    from .batch import wake_batch
 
     try:
-        if batch_enabled(runtime.settings, delivery["kb_id"]):
+        if runtime.settings.wiki_batch_enabled(delivery["kb_id"]):
             wake_batch(runtime, delivery["kb_id"])
         else:
             dispatcher(runtime).send_sync(

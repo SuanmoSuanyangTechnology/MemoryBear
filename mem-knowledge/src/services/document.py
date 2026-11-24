@@ -281,10 +281,9 @@ async def apply_document_update(
         wiki_pages = await db.run_sync(lambda session: cancel(session, knowledge.id, document.id))
     elif plan.status_changed:
         from ..bootstrap import get_settings
-        from ..repositories.wiki.common import as_uuid
         from ..repositories.wiki.state import reenable, withdraw
 
-        if as_uuid(knowledge.id) in get_settings().kb_wiki_batch_kbs:
+        if get_settings().wiki_batch_enabled(knowledge.id):
             if document.status == 1:
                 wiki_delivery = await db.run_sync(lambda s: reenable(s, knowledge.id, document.id))
             else:
