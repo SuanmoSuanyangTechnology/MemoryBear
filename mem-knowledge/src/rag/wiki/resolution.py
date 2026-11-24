@@ -3,8 +3,8 @@
 import logging
 
 from ...tasks.observability import current_parent_task_id
-from .config import normalize_name, source_reference_key
-from .contracts import LocalIdentityDecision
+from .config import WikiError, normalize_name, source_reference_key
+from .contracts import IdentityEvidenceReview, LocalIdentityDecision
 from .identity import merge_candidate
 from .ontology import ONTOLOGY_VERSION
 
@@ -48,36 +48,77 @@ def _qualifier(label, side):
     return label if any(label in quote for quote in side["evidence"]) else None
 
 
+def _review_evidence(model, payload):
+    try:
+        review = model.call(
+            "wiki_identity_evidence_review_v1", payload, IdentityEvidenceReview, repair_attempts=0,
+        )
+    except WikiError as exc:
+        if exc.code not in {
+            "WIKI_MODEL_OUTPUT_INVALID", "WIKI_MODEL_OUTPUT_TRUNCATED",
+            "WIKI_CONTEXT_BUDGET_EXCEEDED",
+        }:
+            raise
+        logger.warning("Wiki 身份复核无法采用 task_id=%s reason=%s", current_parent_task_id(), exc)
+        return {"decision": "insufficient"}, False
+    quote = (review.pop("evidence_quote", None) or "").strip()
+    grounded = bool(quote) and any(
+        quote in passage for side in ("left", "right") for passage in payload[side]["evidence"]
+    )
+    return review, grounded
+
+
 def decide(model, snapshot, left, right):
     sides = {"left": _conflict_side(left), "right": _conflict_side(right)}
+    payload = {**sides, "language": snapshot["language"]}
     result = model.call(
-        LOCAL_IDENTITY_STAGE, {**sides, "language": snapshot["language"]},
+        LOCAL_IDENTITY_STAGE, payload,
         LocalIdentityDecision, repair_attempts=0,
     )
+    raw_decision = result["decision"]
+    review_decision = None
+    grounded = None
+    naming_fallback = False
+    if raw_decision == "insufficient" and (sides["left"]["evidence"] or sides["right"]["evidence"]):
+        review, grounded = _review_evidence(model, payload)
+        review_decision = review["decision"]
+        if grounded and review_decision != "insufficient":
+            result = review
+
+    left_label, right_label = result.get("left_label"), result.get("right_label")
     if result["decision"] == "different_objects":
-        for key in ("left", "right"):
-            result[f"{key}_label"] = _qualifier(result.get(f"{key}_label"), sides[key])
-        if (
-            not result["right_label"]
-            or ("page_id" not in left and not result["left_label"])
-            or (result["left_label"] and result["left_label"] == result["right_label"])
-        ):
-            result["decision"] = "insufficient"
+        if normalize_name(left["name"]) != normalize_name(right["name"]):
+            # 别名相交会触发身份判断，但不同的主标题可以直接区分两页。
+            result["left_label"] = result["right_label"] = None
+        else:
+            result["left_label"] = _qualifier(left_label, sides["left"])
+            result["right_label"] = _qualifier(right_label, sides["right"])
+            if (
+                not result["right_label"]
+                or ("page_id" not in left and not result["left_label"])
+                or (result["left_label"] and result["left_label"] == result["right_label"])
+            ):
+                # 已确认身份不同，但同名页缺少可用限定词时沿用约定的合并处理。
+                naming_fallback = True
+                result["decision"] = "insufficient"
     logger.info(
         "Wiki 局部消歧 task_id=%s kb_id=%s document_id=%s left=%s right=%s page_id=%s "
-        "decision=%s preferred=%s",
+        "raw_decision=%s review_decision=%s review_quote_verified=%s "
+        "left_label=%r right_label=%r naming_fallback=%s decision=%s preferred=%s",
         current_parent_task_id(), snapshot.get("kb_id"), snapshot.get("document_id"),
-        left["name"], right["name"], left.get("page_id"), result["decision"],
-        result.get("preferred"),
+        left["name"], right["name"], left.get("page_id"), raw_decision, review_decision, grounded,
+        left_label, right_label, naming_fallback, result["decision"], result.get("preferred"),
     )
     return result
 
 
 def qualify(topic, label):
+    topic["disambiguated"] = True
+    if label is None:
+        return
     base = topic.setdefault("original_name", topic["name"])
     topic["aliases"] = sorted(set([*topic["aliases"], base]))
     topic["name"] = topic["title"] = f"{base}（{label}）"
-    topic["disambiguated"] = True
 
 
 def resolve_candidates(model, snapshot, topics):

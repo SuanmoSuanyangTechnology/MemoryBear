@@ -110,6 +110,7 @@ from app.models import App, AppRelease, Document, File, Knowledge, User, Workspa
 from app.models.end_user_model import EndUser
 from app.models.file_model import FILE_ROLE_SOURCE
 from app.repositories.end_user_repository import (
+    EndUserRepository,
     count_inactive_end_users_by_workspace,
     get_all_active_workspaces,
     get_recently_active_end_user_ids_page,
@@ -7722,7 +7723,7 @@ def generate_scene_summary(
         close_reason=close_reason,
     )
     started_at = time.monotonic()
-    stage = "generate_summary"
+    stage = "check_end_user"
     loop = set_asyncio_event_loop()
 
     async def _run():
@@ -7734,7 +7735,15 @@ def generate_scene_summary(
             await storage_client.close()
 
     try:
-        result = loop.run_until_complete(_run())
+        with get_db_context() as db:
+            active_user_ids = EndUserRepository(db).filter_existing_ids(
+                [uuid.UUID(end_user_id)]
+            )
+        if active_user_ids:
+            stage = "generate_summary"
+            result = loop.run_until_complete(_run())
+        else:
+            result = {"status": "skipped", "reason": "inactive_or_missing_end_user"}
         if result.get("community_dispatch_required"):
             stage = "dispatch_scene_community"
             community_task = run_scene_community_incremental.apply_async(
@@ -7801,10 +7810,23 @@ def run_scene_community_incremental(self, end_user_id: str, trigger: str = "thre
 
     async def _run():
         nonlocal stage
-        stage = "load_config"
+        stage = "check_end_user"
         with get_db_context() as db:
+            workspace_id = db.execute(
+                select(EndUser.workspace_id).where(
+                    EndUser.id == uuid.UUID(end_user_id),
+                    EndUser.is_active.is_(True),
+                )
+            ).scalar_one_or_none()
+            if workspace_id is None:
+                return {
+                    "status": "skipped",
+                    "reason": "inactive_or_missing_end_user",
+                    "dispatch_next": False,
+                }
+            stage = "load_config"
             config_service = MemoryConfigService(db)
-            current_config_id = config_service.get_config_id_by_end_user(end_user_id)
+            current_config_id = config_service.get_workspace_active_config_id(workspace_id)
             memory_config = config_service.load_memory_config(current_config_id)
 
         stage = "connect_neo4j"
@@ -7916,7 +7938,7 @@ def scan_scene_community_pending():
         expire=300,
         timeout=0,
     )
-    stats = dict(pages=0, candidates=0, dispatched=0, dispatch_failed=0)
+    stats = dict(pages=0, candidates=0, skipped=0, dispatched=0, dispatch_failed=0)
     if not lock.acquire():
         logger.info("[SceneCommunity] scheduled scan skipped: reason=lock_held")
         return {**stats, "skipped_due_to_lock": True}
@@ -7933,7 +7955,24 @@ def scan_scene_community_pending():
                     break
                 stats["pages"] += 1
                 stats["candidates"] += len(user_ids)
+                user_uuids = {}
                 for end_user_id in user_ids:
+                    try:
+                        user_uuids[end_user_id] = uuid.UUID(end_user_id)
+                    except ValueError:
+                        stats["skipped"] += 1
+                        logger.warning(
+                            "[SceneCommunity] invalid end-user ID in pending scan: user=%s",
+                            end_user_id,
+                        )
+                with get_db_context() as db:
+                    active_user_ids = EndUserRepository(db).filter_existing_ids(
+                        list(user_uuids.values())
+                    )
+                for end_user_id, user_uuid in user_uuids.items():
+                    if str(user_uuid) not in active_user_ids:
+                        stats["skipped"] += 1
+                        continue
                     lock.ensure_valid()
                     try:
                         run_scene_community_incremental.apply_async(
