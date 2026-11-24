@@ -23,6 +23,7 @@ from src.modules.perceptual import router as perceptual_router
 from src.modules.short import router as short_router
 from src.modules.value_ranking import router as value_ranking_router
 from src.modules.working_memory import router as working_memory_router
+from src.modules.write import router as write_router
 
 router = APIRouter(prefix="/internal/v1")
 router.include_router(health_router)
@@ -34,6 +35,7 @@ router.include_router(display_router)
 router.include_router(perceptual_router)
 router.include_router(implicit_memory_router)
 router.include_router(working_memory_router)
+router.include_router(write_router)
 router.include_router(explicit_memory_router)
 router.include_router(files_router)
 router.include_router(episodic_memory_router)

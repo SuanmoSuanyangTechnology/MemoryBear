@@ -299,8 +299,11 @@ Quota limits are owned by this service: the community free plan comes from
 `QUOTA_PRE_USER_MEMORY_WRITE_QPS_LIMIT` (same names as the API). When
 `MEMORY_ENTERPRISE_BASE_URL` points at the closed-source `memory-enterprise`
 service, the effective plan and resource-pack grants are queried over HTTP with
-`X-Internal-Token: MEMORY_ENTERPRISE_TOKEN`; an unconfigured or unreachable
-service falls back to the free plan.
+a service-to-service internal JWT (`iss=memory-profile`,
+`aud=MEMORY_ENTERPRISE_AUDIENCE`) signed by the shared
+`INTERNAL_ISSUER_PRIVATE_KEY`; the target verifies it through identity's JWKS
+and its caller ACL. An unconfigured or unreachable service falls back to the
+free plan.
 
 This service must use the same Redis logical DB as the API (the shared
 deployment uses `REDIS_DB=3`) so keys written by API workers stay visible.

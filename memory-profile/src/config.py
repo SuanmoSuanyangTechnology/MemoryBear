@@ -17,6 +17,12 @@ from pydantic_settings import BaseSettings
 from sqlalchemy.engine import make_url
 
 
+def _redis_url_with_db(url: str, db: int) -> str:
+    """Return ``url`` pointed at logical Redis database ``db``."""
+
+    return urlparse(url)._replace(path=f"/{db}").geturl()
+
+
 def _as_asyncpg_url(value: str) -> str:
     url = make_url(value)
     if url.get_backend_name() not in {"postgres", "postgresql"}:
@@ -29,6 +35,10 @@ class ProfileSettings(BaseSettings):
 
     metadata_migration_enabled: bool = Field(
         False, validation_alias="JOBS_METADATA_MIGRATION_ENABLED"
+    )
+    #: Wall-clock budget of one in-merge metadata migration (API parity).
+    metadata_migration_timeout_seconds: int = Field(
+        60, ge=1, validation_alias="METADATA_MIGRATION_TIMEOUT_SECONDS"
     )
 
     service_name: str = Field("memory-profile", validation_alias="PROFILE_SERVICE_NAME")
@@ -119,11 +129,17 @@ class ProfileSettings(BaseSettings):
 
     # 企业版配额由闭源 memory-enterprise 服务持有（套餐/资源包表），本服务只查询
     # 生效额度。留空 base URL 视为社区版；查询失败同样回落免费版。
+
     memory_enterprise_base_url: str = Field("", validation_alias="MEMORY_ENTERPRISE_BASE_URL")
     memory_enterprise_timeout_seconds: float = Field(
         3.0, gt=0, validation_alias="MEMORY_ENTERPRISE_TIMEOUT_SECONDS"
     )
-    memory_enterprise_token: str = Field("", validation_alias="MEMORY_ENTERPRISE_TOKEN")
+    #: Audience for the service-to-service internal JWT (the enterprise
+    #: service's ``AUTH_SERVICE_NAME`` / ACL target). Signed with the same
+    #: ``INTERNAL_ISSUER_PRIVATE_KEY`` as file-service uploads.
+    memory_enterprise_audience: str = Field(
+        "mem-enterprise", validation_alias="MEMORY_ENTERPRISE_AUDIENCE"
+    )
 
     # 免费版额度：memory-profile 自己维护，变量名与 api 的 QUOTA_* 保持一致，
     # 一个部署值即可覆盖三个服务。企业版订阅值由 memory-enterprise 返回，
@@ -170,14 +186,6 @@ class ProfileSettings(BaseSettings):
     write_gateway_wait_seconds: float = Field(
         120.0, validation_alias="WRITE_GATEWAY_WAIT_SECONDS"
     )
-    # Option A（A2 分片）：写批次的“消息落库/seq”步骤执行位置。
-    # - api（默认）：保持 A1 行为，全部写流程在 api worker；
-    # - memory_jobs：仅落库步骤投递到 memory-jobs admission，其余仍在 api。
-    # 默认 api 即为回滚开关：改成 api 立即恢复 A1 路径。
-    # A2 S4b：图写入（WritePipeline）等待执行的派发位置；默认 api，可回滚。
-    # A2 S5d：RAG（ES 直写）执行位置；默认 api，可回滚。
-    # 留空时沿用 resolved_redis_url（业务 Redis，与 memory-jobs 的 admission
-    # keyspace 同库）；跨集群部署时显式指向 memory-jobs 使用的业务 Redis。
     migration_database_url: str | None = Field(
         None,
         validation_alias="PROFILE_MIGRATION_DATABASE_URL",
@@ -232,6 +240,9 @@ class ProfileSettings(BaseSettings):
     redis_port: int = Field(6379, validation_alias="REDIS_PORT")
     redis_password: str | None = Field(None, validation_alias="REDIS_PASSWORD")
     redis_db: int = Field(1, validation_alias="REDIS_DB")
+    #: The API's Celery-result-backend DB; the merge write lock lives there so
+    #: API and memory-jobs writers take the same lock.
+    redis_db_celery_backend: int = Field(4, validation_alias="REDIS_DB_CELERY_BACKEND")
     redis_pool_size: int = Field(100, validation_alias="PROFILE_REDIS_POOL_SIZE")
 
     elasticsearch_host: str = Field("https://127.0.0.1", validation_alias="ELASTICSEARCH_HOST")
@@ -389,14 +400,16 @@ class ProfileSettings(BaseSettings):
         return f"redis://{password}{self.redis_host}:{self.redis_port}/{self.redis_db}"
 
     @property
-    def resolved_write_ingest_admission_redis_url(self) -> str:
-        """Redis URL backing the memory-jobs admission keyspace.
+    def memory_write_redis_url(self) -> str:
+        """Redis URL of the Celery-backend DB that holds the merge write lock."""
 
-        Falls back to the business Redis URL because the admission keyspace lives
-        in the same logical database as the business data by default.
-        """
-
-        return self.write_ingest_admission_redis_url or self.resolved_redis_url
+        if self.redis_url:
+            return _redis_url_with_db(self.redis_url, self.redis_db_celery_backend)
+        password = f":{quote_plus(self.redis_password)}@" if self.redis_password else ""
+        return (
+            f"redis://{password}{self.redis_host}:{self.redis_port}/"
+            f"{self.redis_db_celery_backend}"
+        )
 
     def _deployment_scoped_name(self, explicit: str, base: str, env_name: str) -> str:
         """Resolve a deployment-scoped Redis name from an override or DB_NAME."""
