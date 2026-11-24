@@ -3,7 +3,7 @@
 import logging
 
 from ...tasks.observability import current_parent_task_id
-from .config import normalize_name, source_reference_key
+from .config import WikiError, normalize_name, source_reference_key
 from .contracts import IdentityEvidenceReview, LocalIdentityDecision
 from .identity import merge_candidate
 from .ontology import ONTOLOGY_VERSION
@@ -49,10 +49,19 @@ def _qualifier(label, side):
 
 
 def _review_evidence(model, payload):
-    review = model.call(
-        "wiki_identity_evidence_review_v1", payload, IdentityEvidenceReview, repair_attempts=0,
-    )
-    quote = (review.get("evidence_quote") or "").strip()
+    try:
+        review = model.call(
+            "wiki_identity_evidence_review_v1", payload, IdentityEvidenceReview, repair_attempts=0,
+        )
+    except WikiError as exc:
+        if exc.code not in {
+            "WIKI_MODEL_OUTPUT_INVALID", "WIKI_MODEL_OUTPUT_TRUNCATED",
+            "WIKI_CONTEXT_BUDGET_EXCEEDED",
+        }:
+            raise
+        logger.warning("Wiki 身份复核无法采用 task_id=%s reason=%s", current_parent_task_id(), exc)
+        return {"decision": "insufficient"}, False
+    quote = (review.pop("evidence_quote", None) or "").strip()
     grounded = bool(quote) and any(
         quote in passage for side in ("left", "right") for passage in payload[side]["evidence"]
     )
@@ -69,6 +78,7 @@ def decide(model, snapshot, left, right):
     raw_decision = result["decision"]
     review_decision = None
     grounded = None
+    naming_fallback = False
     if raw_decision == "insufficient" and (sides["left"]["evidence"] or sides["right"]["evidence"]):
         review, grounded = _review_evidence(model, payload)
         review_decision = review["decision"]
@@ -89,22 +99,23 @@ def decide(model, snapshot, left, right):
                 or (result["left_label"] and result["left_label"] == result["right_label"])
             ):
                 # 已确认身份不同，但同名页缺少可用限定词时沿用约定的合并处理。
-                result["decision"] = "merge_undistinguished_titles"
+                naming_fallback = True
+                result["decision"] = "insufficient"
     logger.info(
         "Wiki 局部消歧 task_id=%s kb_id=%s document_id=%s left=%s right=%s page_id=%s "
         "raw_decision=%s review_decision=%s review_quote_verified=%s "
-        "left_label=%r right_label=%r decision=%s preferred=%s",
+        "left_label=%r right_label=%r naming_fallback=%s decision=%s preferred=%s",
         current_parent_task_id(), snapshot.get("kb_id"), snapshot.get("document_id"),
         left["name"], right["name"], left.get("page_id"), raw_decision, review_decision, grounded,
-        left_label, right_label, result["decision"], result.get("preferred"),
+        left_label, right_label, naming_fallback, result["decision"], result.get("preferred"),
     )
     return result
 
 
 def qualify(topic, label):
-    topic["disambiguated"] = True
     if label is None:
         return
+    topic["disambiguated"] = True
     base = topic.setdefault("original_name", topic["name"])
     topic["aliases"] = sorted(set([*topic["aliases"], base]))
     topic["name"] = topic["title"] = f"{base}（{label}）"
@@ -154,6 +165,8 @@ def resolve_against_pages(model, snapshot, topic, pages):
             continue
         result = decide(model, snapshot, page, topic)
         if result["decision"] == "different_objects":
+            # 与库内旧页已判为不同对象，即使无需改名也要跳过该页的模糊匹配。
+            topic["disambiguated"] = True
             qualify(topic, result["right_label"])
             continue
         topic["existing_page_id"] = page["page_id"]
