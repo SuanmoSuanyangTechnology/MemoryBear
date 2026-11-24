@@ -3,12 +3,14 @@
 import enum
 import uuid
 
-from sqlalchemy import JSON, Column, DateTime, Integer, String
+from sqlalchemy import JSON, Column, DateTime, ForeignKey, Integer, String
 from sqlalchemy.dialects.postgresql import UUID
 
 from ...db import KnowledgeBase
 from ...rag.parser_config import build_default_knowledge_parser_config
 from ...utils.datetime_utils import utcnow_naive
+from ..references.model_registry import ModelConfig
+from ..references.user import User
 
 
 class KnowledgeType(enum.StrEnum):
@@ -53,7 +55,9 @@ class Knowledge(KnowledgeBase):
         comment="user-defined external identifier, workspace-unique",
     )
     workspace_id = Column(UUID(as_uuid=True), nullable=False, comment="workspaces.id")
-    created_by = Column(UUID(as_uuid=True), nullable=False, comment="users.id")
+    created_by = Column(
+        UUID(as_uuid=True), ForeignKey(User.__table__.c.id), nullable=False, comment="users.id",
+    )
     parent_id = Column(
         UUID(as_uuid=True),
         nullable=True,
@@ -71,25 +75,39 @@ class Knowledge(KnowledgeBase):
     )
     embedding_id = Column(
         UUID(as_uuid=True),
+        ForeignKey(ModelConfig.__table__.c.id, ondelete="SET NULL"),
         nullable=True,
         comment="default embedding model ID",
     )
     reranker_id = Column(
         UUID(as_uuid=True),
+        ForeignKey(ModelConfig.__table__.c.id, ondelete="SET NULL"),
         nullable=True,
         comment="default reranker model ID",
     )
-    llm_id = Column(UUID(as_uuid=True), nullable=True, comment="default llm model ID")
+    llm_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey(ModelConfig.__table__.c.id, ondelete="SET NULL"),
+        nullable=True,
+        comment="default llm model ID",
+    )
     image2text_id = Column(
         UUID(as_uuid=True),
+        ForeignKey(ModelConfig.__table__.c.id, ondelete="SET NULL"),
         nullable=True,
         comment="default image2text model ID",
     )
     audio2text_id = Column(
-        UUID(as_uuid=True), nullable=True, comment="audio transcription model ID"
+        UUID(as_uuid=True),
+        ForeignKey(ModelConfig.__table__.c.id, ondelete="SET NULL"),
+        nullable=True,
+        comment="audio transcription model ID",
     )
     video2text_id = Column(
-        UUID(as_uuid=True), nullable=True, comment="video understanding model ID"
+        UUID(as_uuid=True),
+        ForeignKey(ModelConfig.__table__.c.id, ondelete="SET NULL"),
+        nullable=True,
+        comment="video understanding model ID",
     )
     doc_num = Column(Integer, default=0, comment="doc num")
     chunk_num = Column(Integer, default=0, comment="chunk num")
