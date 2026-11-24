@@ -61,7 +61,9 @@ def _job_runner(registration: JobRegistration) -> Callable[..., dict[str, Any]]:
         response = serialize(
             handler.handle(payload, attempt_token=str(self.request.id or ""))
         )
-        response["task_id"] = self.request.id
+        # The admission dispatch report names the *work* task it published;
+        # keep that id instead of overwriting it with this attempt's own.
+        response.setdefault("task_id", self.request.id)
         return response
 
     # The wire name is explicit; a readable function name only helps traces.

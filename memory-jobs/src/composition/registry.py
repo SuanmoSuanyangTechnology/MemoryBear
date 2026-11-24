@@ -21,10 +21,12 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
+from src.composition.admission import build_admission_wiring
 from src.composition.emotion import build_emotion_wiring
 from src.composition.forgetting import build_forgetting_wiring
 from src.composition.interest import build_interest_wiring
 from src.composition.metadata_migration import build_metadata_migration_wiring
+from src.composition.outbox import build_outbox_wiring
 from src.composition.profile_cache import build_profile_cache_wiring
 from src.composition.rag_profile import build_rag_profile_wiring
 from src.composition.shared import SharedDependencies
@@ -49,4 +51,6 @@ MODULES: tuple[DomainModule, ...] = (
     DomainModule(name="profile_cache", build=build_profile_cache_wiring),
     DomainModule(name="metadata_migration", build=build_metadata_migration_wiring),
     DomainModule(name="interest", build=build_interest_wiring),
+    DomainModule(name="admission", build=build_admission_wiring),
+    DomainModule(name="outbox", build=build_outbox_wiring),
 )

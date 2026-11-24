@@ -46,15 +46,85 @@ class TaskName(StrEnum):
     EMOTION_SUGGESTIONS_GENERATE = "memory_jobs.emotion.suggestions_generate"
     FORGETTING_TRIGGER = "memory_jobs.forgetting.trigger"
     WORKING_MEMORY_DETAIL_GENERATE = "memory_jobs.working_memory.detail_generate"
+    #: Dispatch one admitted unit (producer trigger or completion advance).
+    ADMISSION_DISPATCH = "memory_jobs.admission.dispatch"
+    #: Periodic sweep: expire dead attempts and wake units with queued work.
+    ADMISSION_RECOVER = "memory_jobs.admission.recover"
+    #: Periodic sweep projecting Neo4j memory-node changes into Elasticsearch.
+    OUTBOX_PROJECTION = "memory_jobs.outbox.projection"
+    #: Daily retention cleanup of terminal outbox rows.
+    OUTBOX_CLEANUP = "memory_jobs.outbox.cleanup"
+    #: A2 slice 1: persist one admitted write batch into ``memory_messages``.
+    WRITE_INGEST = "memory_jobs.write.ingest"
+    #: A2 S4a: dispatch one graph-write unit (pipeline shell).
+    WRITE_GRAPH = "memory_jobs.write.graph"
+    #: A2 S5c: write one RAG memory document (embedding + ES upsert).
+    WRITE_RAG = "memory_jobs.write.rag"
+    #: A2 S7a: 1 message -> 1 :Dialogue node (clean + embedding + MERGE).
+    WRITE_FAST = "memory_jobs.write.fast"
+    #: Incrementally assign newly extracted entities to communities.
+    COMMUNITY_CLUSTER_INCREMENTAL = "memory_jobs.community.cluster_incremental"
+
+    #: Layer 2 reflection: periodic sweep that dispatches ``REFLECTION_LAYER2``
+    #: for every active user whose ``end_users.reflection_time`` is older than
+    #: the workspace config's ``iteration_period``.
+    REFLECTION_LAYER2_SCAN = "memory_jobs.reflection.layer2_scan"
+    #: One user's Layer 2 inspection (unresolved entities, alias merge, entity
+    #: dedup, metadata extraction, description merge), behind the per-user write
+    #: lock.
+    REFLECTION_LAYER2 = "memory_jobs.reflection.layer2"
+    #: Periodic sweep that dispatches ``REFLECTION_DEDUP`` (low-frequency full
+    #: scan dedup) once a day.
+    REFLECTION_DEDUP_SCAN = "memory_jobs.reflection.dedup_scan"
+    #: One user's full-scan entity dedup, grouped by entity type.
+    REFLECTION_DEDUP = "memory_jobs.reflection.dedup"
+    #: Periodic sweep of the reflection retry ZSets: re-dispatches users whose
+    #: backoff elapsed and reaps workers whose lease expired.
+    REFLECTION_RETRY_SCAN = "memory_jobs.reflection.retry_scan"
+    #: Workspace-wide reflection over app/config/end-user triples, published by
+    #: memory-profile on behalf of the profile front.
+    REFLECTION_WORKSPACE = "memory_jobs.reflection.workspace"
+    #: One trial run of the conflict-detection reflection engine for a config,
+    #: published on behalf of the profile front.
+    REFLECTION_RUN = "memory_jobs.reflection.run"
+
+
+class EnterpriseTaskName(StrEnum):
+    """Tasks registered only by the enterprise memory-jobs worker.
+
+    The wire names stay in this contract-only package so the producer and the
+    worker cannot drift, but no open build registers them. The enterprise
+    package ``enterprise_ext.memory_jobs`` contributes these tasks, their
+    routes and their handlers through ``JOBS_EXTENSION_MODULES``.
+
+    Prompt-workbench units run on their own queue so a long GEPA search or a
+    large answer batch cannot starve memory tasks.
+    """
+
+    PROMPT_WORKBENCH_VARIABLES_IMPORT = "memory_jobs.prompt_workbench.variables_import"
+    PROMPT_WORKBENCH_CASES_GENERATE = "memory_jobs.prompt_workbench.cases_generate"
+    PROMPT_WORKBENCH_ANSWERS_GENERATE = "memory_jobs.prompt_workbench.answers_generate"
+    PROMPT_WORKBENCH_REVIEWS_GENERATE = "memory_jobs.prompt_workbench.reviews_generate"
+    PROMPT_WORKBENCH_OPTIMIZE = "memory_jobs.prompt_workbench.optimize"
 
 
 class QueueName(StrEnum):
     """Broker queues owned by memory-jobs."""
 
-    #: memory-jobs ordinary queue (migration do has its own queue):
+#: memory-jobs ordinary queue (migration do has its own queue):
     #: so no other service's worker ever receives a task name it does not know.
     MEMORY_JOBS = "memory_jobs_tasks"
     METADATA_MIGRATION = "metadata_migration_tasks"
+    #: Storage-outbox projection queue. The scan runs every few seconds and the
+    #: projection calls Neo4j/Elasticsearch, so it gets its own worker instead of
+    #: competing with memory work for the same threads.
+    MEMORY_PROJECTION = "memory_projection_tasks"
+    #: Prompt-workbench execution queue. Deploy a separate worker for it; the
+    #: units are model-bound and must not share a thread pool with memory work.
+    PROMPT_WORKBENCH = "prompt_workbench_tasks"
+    #: Dispatch-admission queue. Its units only wake a unit or finish an
+    #: attempt, so they must not queue behind the work they are admitting.
+    MEMORY_ADMISSION = "memory_admission_tasks"
 
 
 #: Highest priority number the queues are declared with (AMQP
@@ -92,18 +162,51 @@ class TaskPriority(IntEnum):
 PRIORITY_STEPS: tuple[int, ...] = (0, 3, 6, 9)
 
 
-#: ``task name -> queue``. memory-jobs renders it into Celery's ``task_routes``
-#: and producers publish with the queue this table names for their task.
+#: Tasks that run on the dispatch-admission queue instead of the work queue.
+_ADMISSION_TASKS = frozenset(
+    {
+        TaskName.ADMISSION_DISPATCH.value,
+        TaskName.ADMISSION_RECOVER.value,
+    }
+)
+
+#: Tasks that run on the storage-outbox projection queue.
+_PROJECTION_TASKS = frozenset(
+    {
+        TaskName.OUTBOX_PROJECTION.value,
+        TaskName.OUTBOX_CLEANUP.value,
+    }
+)
+
+
+def _queue_for(task: TaskName) -> str:
+    if task.value in _ADMISSION_TASKS:
+        return QueueName.MEMORY_ADMISSION.value
+    if task.value in _PROJECTION_TASKS:
+        return QueueName.MEMORY_PROJECTION.value
+    return QueueName.MEMORY_JOBS.value
+
+
+#: ``task name -> queue`` for the open build. memory-jobs renders it into
+#: Celery's ``task_routes`` and producers publish with the queue this table
+#: names for their task. Enterprise-only tasks add their entries through
+#: ``src.extensions``; their queue names still come from :class:`QueueName`.
 #: Migration do is explicitly routed to its dedicated queue.
-TASK_ROUTES: dict[str, str] = {task.value: QueueName.MEMORY_JOBS.value for task in TaskName}
+TASK_ROUTES: dict[str, str] = {task.value: _queue_for(task) for task in TaskName}
 TASK_ROUTES[TaskName.METADATA_MIGRATION_DO.value] = QueueName.METADATA_MIGRATION.value
 
 
 __all__ = [
     "MAX_PRIORITY",
     "PRIORITY_STEPS",
+    "EnterpriseTaskName",
     "QueueName",
     "TASK_ROUTES",
     "TaskName",
     "TaskPriority",
 ]
+
+
+
+
+

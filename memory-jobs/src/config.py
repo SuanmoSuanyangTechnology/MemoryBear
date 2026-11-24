@@ -244,6 +244,83 @@ class JobsSettings(BaseSettings):
         20, validation_alias="MODEL_SERVICE_MAX_KEEPALIVE_CONNECTIONS"
     )
 
+    # ------------------------------------------------------ dispatch admission
+    #: Periodic sweep of the dispatch-admission layer: expire attempts whose
+    #: result is unknown, re-arm units with queued-but-idle work and wake them.
+    #: Producers admit submissions through the same ``task_bridge.mem_admission``
+    #: contract; these knobs only tune the worker.
+    admission_recover_enabled: bool = Field(
+        True, validation_alias="JOBS_ADMISSION_RECOVER_ENABLED"
+    )
+    admission_recover_interval_seconds: int = Field(
+        15, ge=1, validation_alias="JOBS_ADMISSION_RECOVER_INTERVAL_SECONDS"
+    )
+    #: An attempt older than this is expired even when the Celery result backend
+    #: still reports nothing about it. Keep it above the task budget so a
+    #: legitimate long unit is not expired while it is still running.
+    admission_attempt_timeout_seconds: int = Field(
+        7800, ge=1, validation_alias="JOBS_ADMISSION_ATTEMPT_TIMEOUT_SECONDS"
+    )
+    #: Running attempts examined per recovery sweep.
+    admission_pending_batch: int = Field(
+        500, ge=1, validation_alias="JOBS_ADMISSION_PENDING_BATCH"
+    )
+    #: Ready units woken per recovery sweep.
+    admission_ready_batch: int = Field(
+        200, ge=1, validation_alias="JOBS_ADMISSION_READY_BATCH"
+    )
+    #: Active units examined per recovery sweep (the re-arm rescan).
+    admission_scan_units: int = Field(
+        1000, ge=1, validation_alias="JOBS_ADMISSION_SCAN_UNITS"
+    )
+    #: TTL of the recovery heartbeat key; producers read it to decide whether
+    #: the worker side of the admission layer is alive.
+    admission_heartbeat_ttl_seconds: int = Field(
+        60, ge=1, validation_alias="JOBS_ADMISSION_HEARTBEAT_TTL_SECONDS"
+    )
+
+    # --------------------------------------------------------- storage outbox
+    #: Take over the API's storage-outbox projection loop (the ``scan-outbox-
+    #: projection`` and ``cleanup-outbox`` beat entries). The consumer side runs
+    #: here, so it is on by default; the remaining knobs reuse the API's exact
+    #: env names so the existing deployment config needs no rename.
+    outbox_projection_enabled: bool = Field(
+        True, validation_alias="JOBS_OUTBOX_PROJECTION_ENABLED"
+    )
+    #: Beat interval of one projection batch, in seconds. Also the entry's
+    #: expiry: a backlog message is superseded by the next run.
+    outbox_scan_interval_seconds: int = Field(
+        5, ge=1, le=3600, validation_alias="OUTBOX_SCAN_INTERVAL_SECONDS"
+    )
+    #: Events claimed (and cleanup rows deleted) per batch/statement.
+    outbox_batch_size: int = Field(
+        100, ge=1, le=1000, validation_alias="OUTBOX_BATCH_SIZE"
+    )
+    #: Lease lifetime: a row whose heartbeat is older than this is reclaimable.
+    #: The heartbeat renewal cadence is derived from it (``min(10, timeout/3)``).
+    outbox_processing_timeout_seconds: int = Field(
+        300, ge=30, le=3600, validation_alias="OUTBOX_PROCESSING_TIMEOUT_SECONDS"
+    )
+    #: Days a ``processed`` row is kept; mirrors the API's history window.
+    outbox_retention_days: int = Field(
+        30, ge=1, le=3650, validation_alias="OUTBOX_RETENTION_DAYS"
+    )
+    #: Days a ``failed`` row is kept: longer, because it is the only trace of a
+    #: projection that never landed.
+    outbox_failed_retention_days: int = Field(
+        60, ge=1, le=3650, validation_alias="OUTBOX_FAILED_RETENTION_DAYS"
+    )
+    #: UTC hour of the daily retention cleanup (18 UTC matches the API, i.e.
+    #: 02:00 Beijing time).
+    outbox_cleanup_hour: int = Field(
+        18, ge=0, le=23, validation_alias="OUTBOX_CLEANUP_HOUR"
+    )
+    #: Longest error text persisted on a failed row; kept bounded so a driver
+    #: message cannot bloat the event row or the logs.
+    outbox_error_max_length: int = Field(
+        4096, ge=64, le=16384, validation_alias="OUTBOX_ERROR_MAX_LENGTH"
+    )
+
     # ------------------------------------------------------------ Elasticsearch
     elasticsearch_host: str = Field(
         "https://127.0.0.1", validation_alias="ELASTICSEARCH_HOST"

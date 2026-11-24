@@ -29,11 +29,15 @@ dependencies = [
     # Task names, the owned queue and the task->queue table shared with the
     # producer (memory-profile). Contract only: no transport, no extra deps.
     "task-bridge-sdk[mem-router]",
+    # Shared Memory labels / Elasticsearch index schema / document
+    # normalization with the API (pure Python, no runtime dependencies).
+    "memory-storage-schema",
 ]
 
 [tool.uv.sources]
 redbear-model = { path = "../packages/redbear-model" }
 task-bridge-sdk = { path = "../packages/task-bridge-sdk" }
+memory-storage-schema = { path = "../packages/memory-storage-schema" }
 
 [dependency-groups]
 dev = [
@@ -46,6 +50,8 @@ packages = ["src"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# Exercise the checked-in contracts/packages, not stale installed wheels.
+pythonpath = ["../packages/task-bridge-sdk/src", "../packages/memory-storage-schema/src"]
 
 [tool.ruff]
 line-length = 100

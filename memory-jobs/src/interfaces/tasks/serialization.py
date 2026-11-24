@@ -34,6 +34,8 @@ from src.application.forgetting.dto import ForgettingResult
 from src.application.interest.generate import InterestDistributionResult
 from src.application.jobs.health_ping import HealthReport
 from src.application.jobs.interest_prewarm import PrewarmJobResult
+from src.application.ports.admission.admission import DispatchReport, RecoverReport
+from src.application.ports.outbox.outbox import CleanupReport, ProjectionReport
 from src.application.profile_cache.generate import ProfileCacheResult
 from src.application.rag_profile.dto import RAGProfileResult
 from src.application.working_memory.dto import ConversationDetailResult
@@ -122,6 +124,46 @@ def _metadata_migration(result: MetadataMigrationResult) -> dict[str, Any]:
     }
 
 
+def _admission_dispatch(report: DispatchReport) -> dict[str, Any]:
+    return {
+        "status": report.status,
+        "unit_key": report.unit_key,
+        "task_id": report.task_id,
+        "reason": report.reason,
+    }
+
+
+def _admission_recover(report: RecoverReport) -> dict[str, Any]:
+    return {
+        "status": report.status,
+        "expired": report.expired,
+        "finalized": report.finalized,
+        "scanned_units": report.scanned_units,
+        "woke": report.woke,
+        "errors": report.errors,
+    }
+
+
+def _outbox_projection(report: ProjectionReport) -> dict[str, Any]:
+    # Same counters the API's ``scan_outbox_projection`` returns; operational,
+    # no caller parses them.
+    return {
+        "claimed": report.claimed,
+        "processed": report.processed,
+        "failed": report.failed,
+        "lost": report.lost,
+        "expired": report.expired,
+    }
+
+
+def _outbox_cleanup(report: CleanupReport) -> dict[str, Any]:
+    # Same counters the API's ``cleanup_outbox`` returns.
+    return {
+        "processed": report.processed,
+        "failed": report.failed,
+    }
+
+
 _SERIALIZERS: dict[type, Callable[[Any], dict[str, Any]]] = {
     RAGProfileResult: lambda result: {"data": result.data},
     EmotionSuggestionsResult: lambda result: {"data": result.data},
@@ -135,6 +177,10 @@ _SERIALIZERS: dict[type, Callable[[Any], dict[str, Any]]] = {
     PrewarmJobResult: _prewarm,
     MetadataMigrationScanReport: _metadata_migration_scan,
     MetadataMigrationResult: _metadata_migration,
+    DispatchReport: _admission_dispatch,
+    RecoverReport: _admission_recover,
+    ProjectionReport: _outbox_projection,
+    CleanupReport: _outbox_cleanup,
 }
 
 

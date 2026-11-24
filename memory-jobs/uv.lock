@@ -1,5 +1,5 @@
 version = 1
-revision = 3
+revision = 5
 requires-python = "==3.12.*"
 
 [[package]]
@@ -204,6 +204,36 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/9d/8a/b618149cc5207943a0242068d7a27897f56a62947b5a039085f2a22029f8/charset_normalizer-3.5.2-cp37-abi3-win_amd64.whl", hash = "sha256:9f56f72050826f63dcee7a7f55b0a77168cb3bfc553fd405e7f8f9ece75a4036", size = 200092, upload-time = "2026-09-30T04:38:49.707Z" },
     { url = "https://files.pythonhosted.org/packages/03/cf/4c66866fa9e2b1c78e3c911516d1de497a677b7ac60f1eceda74ce777ca3/charset_normalizer-3.5.2-cp37-abi3-win_arm64.whl", hash = "sha256:40ab6bffa02ae10a0581e6c198be7d2d8ca5c2a0c64e4ed3465d766df457573e", size = 294363, upload-time = "2026-09-30T04:38:51.312Z" },
     { url = "https://files.pythonhosted.org/packages/fc/ad/d07d7862a62ffa6d79d68074d14823243dd235a77c45262acbf6adeb28bf/charset_normalizer-3.5.2-py3-none-any.whl", hash = "sha256:b6b751274acb69d77b3323d6b7dbaa3c7fdfc1eb829b7eb61d262f32e1af9685", size = 68872, upload-time = "2026-09-30T04:39:21.828Z" },
+]
+
+[[package]]
+name = "chonkie"
+version = "1.7.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "chonkie-core" },
+    { name = "httpx" },
+    { name = "numpy" },
+    { name = "tenacity" },
+    { name = "tokie" },
+    { name = "tqdm" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/c4/67/e6ceace2b2066cc38206c81e9105735975d7a58d89c9e7a871fe9acef63d/chonkie-1.7.0.tar.gz", hash = "sha256:4352aa214b66376c32523e524b94b7f1456a5e7611c48037dadb45e46f436b18", size = 190834, upload-time = "2026-07-07T10:06:02.475Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/04/c0/b5f91fb340d354a8c20e2f65d08b9dab357360da78d230e96c6d79b36a2e/chonkie-1.7.0-py3-none-any.whl", hash = "sha256:98822ca80fbf3c0775f59329a4f6b6bfedb34edff004b5e04e53c3281369b921", size = 233764, upload-time = "2026-07-07T10:06:00.824Z" },
+]
+
+[[package]]
+name = "chonkie-core"
+version = "0.10.2"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/20/17/ad31bbcfe1a7b63f76e065684a8e9cd98552d3c627fb28d8fbc05f1a9456/chonkie_core-0.10.2.tar.gz", hash = "sha256:c8e40ef8f3a034a7c5dd23a0401dce2ef2b4883f5a6a29cf94176d64b209bdbb", size = 69966, upload-time = "2026-05-28T19:16:12.4Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/56/2f/4dd88b4af9ef0e9ed31a3c6a3d8e44327c5ca22b074076830b0224e0ad58/chonkie_core-0.10.2-cp312-cp312-macosx_10_12_x86_64.whl", hash = "sha256:31f8fa3415d2e93cc3bdb1e99c3b6865278169af348c68fb2943aed2fcabc010", size = 347520, upload-time = "2026-05-28T19:15:52.331Z" },
+    { url = "https://files.pythonhosted.org/packages/b2/3f/ba4083f21b4ef52ed130a79f371fed453b7edf998bf08079694137880bff/chonkie_core-0.10.2-cp312-cp312-macosx_11_0_arm64.whl", hash = "sha256:a6d081363fbfaad0f36c66e67e6dec1c9f9850c04c0475b64b3e47084257b646", size = 336897, upload-time = "2026-05-28T19:15:53.787Z" },
+    { url = "https://files.pythonhosted.org/packages/0d/9f/cbfec0f25e35d2a5b62a9cba7a5a85cfc5349210b9f9acb40832060211e4/chonkie_core-0.10.2-cp312-cp312-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:51dbf2163dac5ad695dde3f92155c6febb9332b5fb5a174ac80ae9fc8f8ccde9", size = 387231, upload-time = "2026-05-28T19:15:54.851Z" },
+    { url = "https://files.pythonhosted.org/packages/89/c8/b0d91419730bff4566305f2c85f27fb1378e8e1e99f8e59403c6b25d43a2/chonkie_core-0.10.2-cp312-cp312-manylinux_2_28_aarch64.whl", hash = "sha256:5a09bcb56d9d9f2fa6ec84485aeecbcaa375567eea9fbec18517d2ef643b9029", size = 371506, upload-time = "2026-05-28T19:15:56.172Z" },
+    { url = "https://files.pythonhosted.org/packages/8c/c2/05c2c85b11d092f04768c41fb9cfdd27a9d27fa7e10e107188a51ce8813f/chonkie_core-0.10.2-cp312-cp312-win_amd64.whl", hash = "sha256:ac686d192c4dd7e038cea4aba59c677d45e2b1e8de8eb1dd45d269b22a4ae201", size = 229686, upload-time = "2026-05-28T19:15:57.759Z" },
 ]
 
 [[package]]
@@ -686,6 +716,15 @@ wheels = [
 ]
 
 [[package]]
+name = "langid"
+version = "1.1.6"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "numpy" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/ea/4c/0fb7d900d3b0b9c8703be316fbddffecdab23c64e1b46c7a83561d78bd43/langid-1.1.6.tar.gz", hash = "sha256:044bcae1912dab85c33d8e98f2811b8f4ff1213e5e9a9e9510137b84da2cb293", size = 1925978, upload-time = "2016-04-05T22:34:15.786Z" }
+
+[[package]]
 name = "langsmith"
 version = "0.14.12"
 source = { registry = "https://pypi.org/simple" }
@@ -739,9 +778,12 @@ version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "celery" },
+    { name = "chonkie" },
     { name = "elasticsearch" },
     { name = "greenlet" },
     { name = "jinja2" },
+    { name = "langid" },
+    { name = "memory-storage-schema" },
     { name = "neo4j" },
     { name = "psycopg", extra = ["binary"] },
     { name = "pydantic" },
@@ -751,6 +793,7 @@ dependencies = [
     { name = "redis" },
     { name = "sqlalchemy" },
     { name = "task-bridge-sdk" },
+    { name = "tqdm" },
 ]
 
 [package.dev-dependencies]
@@ -762,9 +805,12 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "celery", specifier = "==5.6.3" },
+    { name = "chonkie", specifier = ">=1.3.1" },
     { name = "elasticsearch", specifier = "==8.17.0" },
     { name = "greenlet", specifier = ">=3.1,<4" },
     { name = "jinja2", specifier = "==3.1.6" },
+    { name = "langid", specifier = "==1.1.6" },
+    { name = "memory-storage-schema", directory = "../packages/memory-storage-schema" },
     { name = "neo4j", specifier = "==6.4.0" },
     { name = "psycopg", extras = ["binary"], specifier = "==3.3.6" },
     { name = "pydantic", specifier = "==2.14.1" },
@@ -774,12 +820,26 @@ requires-dist = [
     { name = "redis", specifier = "==6.4.0" },
     { name = "sqlalchemy", specifier = "==2.1.6" },
     { name = "task-bridge-sdk", extras = ["mem-router"], directory = "../packages/task-bridge-sdk" },
+    { name = "tqdm", specifier = ">=4.64.0" },
 ]
 
 [package.metadata.requires-dev]
 dev = [
     { name = "pytest", specifier = "==9.0.3" },
     { name = "ruff", specifier = "==0.16.7" },
+]
+
+[[package]]
+name = "memory-storage-schema"
+version = "0.1.0"
+source = { directory = "../packages/memory-storage-schema" }
+
+[package.metadata]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "pytest", specifier = ">=8" },
+    { name = "ruff", specifier = ">=0.16" },
 ]
 
 [[package]]
@@ -1333,6 +1393,34 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/d4/9c/7035b0bcfaa68d1ee4803fc5be5214ad865669b05bd20e7105ae8a18afc6/tiktoken-0.14.0-cp312-cp312-musllinux_1_2_aarch64.whl", hash = "sha256:b950248272f1b303dc32986396e2dccfa10cf6d1e83ec8f0bba1776660305482", size = 1250635, upload-time = "2026-08-17T19:48:54.392Z" },
     { url = "https://files.pythonhosted.org/packages/bc/1d/69cabf18bed7f4366da076735816abce0d4db3fae491ae338a6612128777/tiktoken-0.14.0-cp312-cp312-musllinux_1_2_x86_64.whl", hash = "sha256:3de75343041a1c57333b1e707ac8a9769738241d7d6a55d39e12cf84548337c6", size = 1316085, upload-time = "2026-08-17T19:48:55.525Z" },
     { url = "https://files.pythonhosted.org/packages/bd/bd/a2e884fb1402cba5be08836590320012b2d8ada0e2eef9911a64df4bcd2d/tiktoken-0.14.0-cp312-cp312-win_amd64.whl", hash = "sha256:087538c080e5ff421abd3a0785ed63c5111d06af98e6cd0d374dbe5969147ca3", size = 941208, upload-time = "2026-08-17T19:48:56.938Z" },
+]
+
+[[package]]
+name = "tokie"
+version = "0.3.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "numpy" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/23/e1/0b568998cb07916bee9fb202d54e58cfffe85f1dc7b6251c0622ebb3ca04/tokie-0.3.0.tar.gz", hash = "sha256:8adc9bf1189574c78f3fe6bd7d1b3471a24126adbff094f454e0940b93449490", size = 369342, upload-time = "2026-11-12T06:53:29.382Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/92/d9/b649189c413622683cb233a45f5e788dff9539bac4e4d004d1a781c00ae4/tokie-0.3.0-cp312-cp312-macosx_10_12_x86_64.whl", hash = "sha256:16c8b03d908285bbe0a38725f58dd832d6d32b490d866236795cbf1c510a9afb", size = 2208609, upload-time = "2026-11-12T06:53:06.635Z" },
+    { url = "https://files.pythonhosted.org/packages/38/9f/119c49ebe6450a512f85ee563b68bc24866c201ec5fc03f4372060b12445/tokie-0.3.0-cp312-cp312-macosx_11_0_arm64.whl", hash = "sha256:eafc7865daf909ba1b1dc4cb19a7e015ae77a584224b25888f8124ce7b8222c7", size = 2075881, upload-time = "2026-11-12T06:53:08.264Z" },
+    { url = "https://files.pythonhosted.org/packages/63/80/69bc2c23e082490ba3231eb54a021599e36fa2684fe72aeef48f8efeffa8/tokie-0.3.0-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.whl", hash = "sha256:2976d93355b2275710df424145deefd5d92b777242fea75e89607e15b52ea239", size = 2373995, upload-time = "2026-11-12T06:53:09.819Z" },
+    { url = "https://files.pythonhosted.org/packages/f1/6b/a93daae7901384c0b4036e2a1eabfa3c7c06ad33e5a6ffc34a2f9aecbc66/tokie-0.3.0-cp312-cp312-manylinux_2_28_aarch64.whl", hash = "sha256:d1e9864d43060ac9e2efa797ce5de59537a58d1cefacf77205cd8697a1ba9c67", size = 2282998, upload-time = "2026-11-12T06:53:11.465Z" },
+    { url = "https://files.pythonhosted.org/packages/ff/c0/535517f447f0db715bc0b7535ba1672073e1ba507a0013eb41ab4011cec2/tokie-0.3.0-cp312-cp312-win_amd64.whl", hash = "sha256:fd58c48699908693681c1bab78114a720f4e2d6685ce2efa99cdf722485375dc", size = 2013708, upload-time = "2026-11-12T06:53:13.081Z" },
+]
+
+[[package]]
+name = "tqdm"
+version = "4.70.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "colorama", marker = "sys_platform == 'win32'" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/0d/ea/b2a5bd54b28a324dae8211928b2d730b6547500342c7e6c6dea08bd0a485/tqdm-4.70.1.tar.gz", hash = "sha256:cefd0eca11b2a37a3aee776544d4f4ae913f02688135b5556b8788dfa474afc4", size = 171846, upload-time = "2026-09-11T07:25:16.601Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/a7/03/921a3d3c75785aca9ebfbfcabfbc3a1be12e2ab5265deb026d55a5a3f83e/tqdm-4.70.1-py3-none-any.whl", hash = "sha256:c293e525e6fef9c20e8728fd4612df02a0aa31bb5fe91ecd93e123b1b7bffa73", size = 80199, upload-time = "2026-09-11T07:25:14.599Z" },
 ]
 
 [[package]]

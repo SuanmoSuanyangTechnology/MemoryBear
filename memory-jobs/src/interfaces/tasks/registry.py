@@ -18,12 +18,16 @@ from dataclasses import dataclass
 from task_bridge.mem_router import TaskName
 
 from src.application.jobs import (
+    DispatchAdmissionJob,
     DoMetadataMigrationJob,
     FanOutWorkspaceJob,
     GenerateInterestDistributionJob,
     GenerateProfileCacheJob,
+    OutboxCleanupJob,
+    OutboxProjectionJob,
     PingJob,
     PrewarmInterestDistributionsJob,
+    RecoverAdmissionsJob,
     ScanMetadataMigrationJob,
     ScanProfileCachesJob,
 )
@@ -122,4 +126,30 @@ JOBS: tuple[JobRegistration, ...] = (
             get_container().interest.prewarm
         ),
     ),
+    JobRegistration(
+        name=TaskName.ADMISSION_DISPATCH.value,
+        spec=DispatchAdmissionJob.spec,
+        build=lambda: DispatchAdmissionJob(get_container().admission.dispatch()),
+    ),
+    JobRegistration(
+        name=TaskName.ADMISSION_RECOVER.value,
+        spec=RecoverAdmissionsJob.spec,
+        build=lambda: RecoverAdmissionsJob(get_container().admission.recover()),
+    ),
+    JobRegistration(
+        name=TaskName.OUTBOX_PROJECTION.value,
+        spec=OutboxProjectionJob.spec,
+        build=lambda: OutboxProjectionJob(get_container().outbox.projection()),
+    ),
+    JobRegistration(
+        name=TaskName.OUTBOX_CLEANUP.value,
+        spec=OutboxCleanupJob.spec,
+        build=lambda: OutboxCleanupJob(get_container().outbox.cleanup()),
+    ),
 )
+
+
+def get_jobs() -> tuple[JobRegistration, ...]:
+    """Every registered job of the open build."""
+
+    return JOBS
