@@ -18,7 +18,7 @@ import { dismissFaqImportResult, showFaqImportResult } from '../FaqImportStatus'
 import type { FaqImportFailedEntryVo, FaqImportMode, FaqImportTaskVo } from '../types';
 import useFaqImportI18n from './useFaqImportI18n';
 
-const POLL_INTERVAL_MS = 800;
+const POLL_INTERVAL_MS = 2000;
 
 export type FaqImportStage = 'input' | 'submitting' | 'running' | 'done';
 
