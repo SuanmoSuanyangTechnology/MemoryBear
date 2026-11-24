@@ -5185,6 +5185,106 @@
         "status_code": 200
       }
     },
+    "POST /internal/v1/memory/emotion-reply": {
+      "endpoint": "emotion_reply",
+      "parameters": {
+        "body:body": {
+          "annotation": "src.schemas.emotion_reply.EmotionReplyRequest",
+          "config": {
+            "extra": "forbid"
+          },
+          "constraints": [],
+          "default": null,
+          "fields": {
+            "message": {
+              "annotation": "str",
+              "constraints": [
+                "StringConstraints(strip_whitespace=True, to_upper=None, to_lower=None, strict=True, min_length=1, max_length=2000, pattern=None, ascii_only=None)"
+              ],
+              "default": null,
+              "required": true
+            }
+          },
+          "in": "body",
+          "required": true
+        }
+      },
+      "response": {
+        "declared": [],
+        "fields": {
+          "code": {
+            "annotation": "int",
+            "constraints": [],
+            "default": 0,
+            "required": false
+          },
+          "data": {
+            "annotation": "src.schemas.emotion_reply.EmotionReplyData",
+            "constraints": [],
+            "default": null,
+            "fields": {
+              "avoid": {
+                "annotation": "list[str]",
+                "constraints": [],
+                "default": "<factory:list>",
+                "required": false
+              },
+              "do": {
+                "annotation": "list[str]",
+                "constraints": [],
+                "default": "<factory:list>",
+                "required": false
+              },
+              "emotion_code": {
+                "annotation": "str | None",
+                "constraints": [],
+                "default": null,
+                "required": false
+              },
+              "prompt_injection": {
+                "annotation": "str | None",
+                "constraints": [],
+                "default": null,
+                "required": false
+              },
+              "score": {
+                "annotation": "float | None",
+                "constraints": [],
+                "default": null,
+                "required": false
+              },
+              "tone": {
+                "annotation": "str | None",
+                "constraints": [],
+                "default": null,
+                "required": false
+              }
+            },
+            "required": true
+          },
+          "error": {
+            "annotation": "str",
+            "constraints": [],
+            "default": "",
+            "required": false
+          },
+          "msg": {
+            "annotation": "str",
+            "constraints": [],
+            "default": "OK",
+            "required": false
+          },
+          "time": {
+            "annotation": "int",
+            "constraints": [],
+            "default": "<factory:now_ms#5bec5d10ddf5>",
+            "required": false
+          }
+        },
+        "model": "src.common.responses.ApiResponse[EmotionReplyData]",
+        "status_code": 200
+      }
+    },
     "POST /internal/v1/memory/explicit-memory/details": {
       "endpoint": "get_explicit_memory_details",
       "parameters": {

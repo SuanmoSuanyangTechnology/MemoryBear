@@ -8,6 +8,7 @@ from src.modules.analytics import router as analytics_router
 from src.modules.dashboard import router as dashboard_router
 from src.modules.display import router as display_router
 from src.modules.emotion_analytics import router as emotion_analytics_router
+from src.modules.emotion_reply import router as emotion_reply_router
 from src.modules.episodic_memory import router as episodic_memory_router
 from src.modules.explicit_memory import router as explicit_memory_router
 from src.modules.files import router as files_router
@@ -32,6 +33,7 @@ router.include_router(memory_config_router)
 router.include_router(memory_read_router)
 router.include_router(memory_config_community_router)
 router.include_router(display_router)
+router.include_router(emotion_reply_router)
 router.include_router(perceptual_router)
 router.include_router(implicit_memory_router)
 router.include_router(working_memory_router)

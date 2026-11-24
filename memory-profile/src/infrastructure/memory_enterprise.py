@@ -1,9 +1,7 @@
 """Async client for the optional memory-enterprise service.
 
 The open build owns no enterprise tables. An enterprise deployment runs the
-closed-source ``memory-enterprise`` service, which owns the plan/subscription
-and resource-pack tables, and points this service at it — so this process never
-reads a schema it does not own.
+closed-source ``memory-enterprise`` service for quotas and ontology data.
 
 Calls authenticate with a **service-to-service internal JWT**, the same mechanism
 memory-profile already uses for file-service uploads: `LocalTokenIssuer` signs an
@@ -13,9 +11,7 @@ verifies it through identity's JWKS and its caller ACL. No shared
 ``X-Internal-Token`` is sent: the target rejects two credentials at once, and the
 JWT carries the tenant each call acts for.
 
-This module is transport only: it raises on failure. The fallback policy (use
-the community free plan instead of failing the request) lives in
-``src/services/quota``.
+This module is transport only. Each use case decides how to handle failures.
 
 The HTTP pool is per event loop (httpx ``AsyncClient`` connections are bound to
 the loop that created them) and is created lazily on first use, mirroring
@@ -33,7 +29,9 @@ import httpx
 from auth_sdk.schema import UserContext
 from auth_sdk.token import LocalTokenIssuer
 
+from src.common.responses import ApiResponse
 from src.config import ProfileSettings
+from src.schemas.emotion_reply import EmotionPolicy
 
 logger = logging.getLogger(__name__)
 
@@ -43,6 +41,9 @@ MEMORY_LIMITS_PATH = "/internal/v1/quota/tenants/{tenant_id}/memory-limits"
 
 #: Bounded metadata-scope endpoint (the enterprise service owns the tables).
 METADATA_SCOPE_PATH = "/internal/v1/ontology/metadata-scope"
+
+#: System-default emotion policy endpoint.
+DEFAULT_EMOTION_POLICY_PATH = "/internal/v1/ontology/default-emotion-policies/{emotion_code}"
 
 
 #: Retrieval-failure alerts handed to the enterprise notification center. The
@@ -157,6 +158,22 @@ class MemoryEnterpriseManager:
                 f"memory-enterprise returned an unexpected payload: {type(data).__name__}"
             )
         return data
+
+    async def emotion_policy(
+        self, emotion_code: str, trace_id: str, tenant_id: UUID, workspace_id: UUID
+    ) -> EmotionPolicy | None:
+        headers = self._auth_headers(tenant_id=tenant_id, workspace_id=workspace_id)
+        headers["X-Trace-Id"] = trace_id
+        async with asyncio.timeout(self._settings.memory_enterprise_timeout_seconds):
+            response = await (await self.client()).get(
+                DEFAULT_EMOTION_POLICY_PATH.format(emotion_code=emotion_code),
+                headers=headers,
+            )
+        response.raise_for_status()
+        reply = ApiResponse[EmotionPolicy | None].model_validate(response.json(), strict=True)
+        if reply.code != 0:
+            raise ValueError("memory-enterprise returned an unsuccessful emotion policy response")
+        return reply.data
 
     async def metadata_scope(
         self,
