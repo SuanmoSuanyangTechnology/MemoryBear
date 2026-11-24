@@ -29,7 +29,7 @@ from ..api.routes.messages import (
     validate_chat_body,
 )
 from ..api.schemas.common import fail
-from ..errors import BizCode, BusinessException, http_status_for
+from ..errors import BizCode, BusinessException, ChatDatabaseBusy, http_status_for
 from ..i18n import resolve_locale, translate
 from ..integrations.model.errors import ModelInvokeCancelledError
 from ..schemas.app_schema import AppChatRequest
@@ -140,6 +140,7 @@ class ChatServicer(chat_pb2_grpc.AppChatServiceServicer):
                     app_id = await resolve_app_for_chat(
                         api_key_id=principal.api_key_id,
                         workspace_id=principal.workspace_id,
+                        fail_fast=True,
                     )
                     workspace_id = principal.workspace_id
                     if workspace_id is None:
@@ -155,6 +156,19 @@ class ChatServicer(chat_pb2_grpc.AppChatServiceServicer):
                     )
                 except _RequestRejected as exc:
                     await abort_with(context, exc.http_status, exc.content)
+                except ChatDatabaseBusy as exc:
+                    http_status, content = _business_failure(exc, language)
+                    await abort_with(
+                        context,
+                        http_status,
+                        content,
+                        headers=(
+                            ("retry-after", exc.retry_after),
+                            ("content-language", language),
+                            ("x-trace-id", get_trace_id()),
+                            ("vary", "X-Language-Type, Accept-Language"),
+                        ),
+                    )
                 except BusinessException as exc:
                     http_status, content = _business_failure(exc, language)
                     await abort_with(context, http_status, content)

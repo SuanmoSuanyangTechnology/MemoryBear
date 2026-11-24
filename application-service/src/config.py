@@ -257,9 +257,14 @@ class AppServiceSettings(BaseSettings):
         validation_alias="APPLICATION_SERVICE_REDIS_POOL_SIZE",
     )
     application_service_health_probe_timeout_seconds: float = Field(
-        default=3.0,
+        default=1.0,
         gt=0,
         validation_alias="APPLICATION_SERVICE_HEALTH_PROBE_TIMEOUT_SECONDS",
+    )
+    application_service_chat_db_acquire_timeout_seconds: float = Field(
+        default=3.0,
+        gt=0,
+        validation_alias="APPLICATION_SERVICE_CHAT_DB_ACQUIRE_TIMEOUT_SECONDS",
     )
     # Key namespace of this service's own Redis entries (the instance is shared
     # with the monolith's Celery broker and cache during the coexistence period).

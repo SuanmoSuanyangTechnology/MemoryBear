@@ -479,7 +479,7 @@ async def update_file(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
 
     update_fields = update_data.dict(exclude_unset=True)
-    if "parent_id" in update_fields:
+    if {"parent_id", "file_ext"} & update_fields.keys():
         validate_file_hierarchy(
             db, db_file.kb_id, update_fields, settings.KB_FILE_FOLDER_MAX_DEPTH, db_file.id,
         )

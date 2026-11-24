@@ -156,6 +156,8 @@ async def delete_knowledgeshare_by_id_in_source_workspace_async(
     db: AsyncSession,
     knowledgeshare_id: uuid.UUID,
     source_workspace_id: uuid.UUID,
+    *,
+    commit: bool = True,
 ) -> int:
     try:
         result = await db.execute(
@@ -167,7 +169,8 @@ async def delete_knowledgeshare_by_id_in_source_workspace_async(
                 KnowledgeShare.source_workspace_id == source_workspace_id,
             )
         )
-        await db.commit()
+        if commit:
+            await db.commit()
         return result.rowcount or 0
     except Exception:
         await db.rollback()
