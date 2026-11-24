@@ -1478,8 +1478,7 @@ class AssetService:
     ) -> AppAsset:
         """条目置 `unpublished`：不再展示，引用型消费方立即失效，副本不受影响。"""
 
-        asset = self._get_asset_or_404(asset_id, tenant_id)
-        app = self.app_service._get_app_or_404(asset.source_app_id)
+        asset, app = self._get_asset_and_source_or_404(asset_id, tenant_id)
         self._assert_can_share(app, user_id, workspace_id)
 
         asset.status = AssetStatus.UNPUBLISHED
@@ -1574,10 +1573,7 @@ class AssetService:
                 data={"reason": "INVALID_SHARE_MODE"},
             )
 
-        # `_get_asset_or_404` 已经挡掉不存在 / 已取消共享（unpublished）的条目：
-        # 取消共享后列表里没有这一行，也没有可改的开关。
-        asset = self._get_asset_or_404(asset_id, tenant_id)
-        app = self.app_service._get_app_or_404(asset.source_app_id)
+        asset, app = self._get_asset_and_source_or_404(asset_id, tenant_id)
         self._assert_can_share(app, user_id, workspace_id)
 
         if asset.share_mode != share_mode:
@@ -1619,7 +1615,7 @@ class AssetService:
         条目（`update_share_mode`），不会往任何消费方的空间里写东西。
         """
 
-        asset = self._get_asset_or_404(asset_id, tenant_id)
+        asset, _ = self._get_asset_and_source_or_404(asset_id, tenant_id)
 
         target_tenant = cross_domain_read.get_workspace_tenant_id(self.db, target_workspace_id)
         if target_tenant is None:
@@ -2414,8 +2410,7 @@ class AssetService:
     ) -> dict[str, Any]:
         """详情：展示字段 + 关联技能/工具；打开即 +1 浏览（§6.1.1 口径 1）。"""
 
-        asset = self._get_asset_or_404(asset_id, tenant_id)
-        app = self.app_service._get_app_or_404(asset.source_app_id)
+        asset, app = self._get_asset_and_source_or_404(asset_id, tenant_id)
         release = self.db.get(AppRelease, asset.published_release_id)
 
         # 浏览数是展示指标，不是资源内容更新：显式把 `updated_at` 写成自身，
@@ -2730,21 +2725,27 @@ class AssetService:
                 })
         return linked_skills, linked_tools
 
-    def _get_asset_or_404(self, asset_id: uuid.UUID, tenant_id: uuid.UUID) -> AppAsset:
-        asset = self.db.scalars(
-            select(AppAsset).where(
+    def _get_asset_and_source_or_404(
+            self, asset_id: uuid.UUID, tenant_id: uuid.UUID
+    ) -> tuple[AppAsset, App]:
+        row = self.db.execute(
+            select(AppAsset, App)
+            .join(App, App.id == AppAsset.source_app_id)
+            .where(
                 AppAsset.id == asset_id,
                 AppAsset.tenant_id == tenant_id,
                 AppAsset.is_active.is_(True),
+                App.is_active.is_(True),
             )
         ).first()
-        if asset is None:
+        if row is None:
             raise ResourceNotFoundException("资源中心条目", str(asset_id))
+        asset, app = row
         if asset.status != AssetStatus.PUBLISHED:
             raise BusinessException(
                 "该资源已取消共享", BizCode.WORKSPACE_ACCESS_DENIED
             )
-        return asset
+        return asset, app
 
 
 __all__ = ["AssetService"]

@@ -36,6 +36,7 @@ logger = logging.getLogger(__name__)
 CHAT_PATH = "/v1/app/chat"
 _HEARTBEAT_FRAME = b": heartbeat\n\n"
 _QUEUE_MAXSIZE = 16
+_ERROR_RESPONSE_HEADERS = {"retry-after", "content-language", "x-trace-id", "vary"}
 _ITEM = "item"
 _ERROR = "error"
 _END = "end"
@@ -224,13 +225,21 @@ class GrpcForwarder:
     def _pre_stream_failure(
         self, route: TargetRoute, exc: grpc.aio.AioRpcError
     ) -> Response:
-        parsed = parse_error_trailers(exc.trailing_metadata() or ())
+        trailers = exc.trailing_metadata() or ()
+        parsed = parse_error_trailers(trailers)
         if parsed is not None:
             status, raw = parsed
             # The application answered: the transport is healthy even though
             # the request failed (same rule as the HTTP forwarder's 4xx path).
             self._answered(route, status)
-            return Response(content=raw, status_code=status, media_type="application/json")
+            headers = {
+                key: value
+                for key, value in trailers
+                if key in _ERROR_RESPONSE_HEADERS and isinstance(value, str)
+            }
+            return Response(
+                content=raw, status_code=status, media_type="application/json", headers=headers
+            )
         if exc.code() == grpc.StatusCode.CANCELLED:
             # 499 client-disconnect semantics: the upstream answered with no
             # envelope; relay an empty status instead of a synthetic 500.
