@@ -6,6 +6,7 @@ import json
 import logging
 import time
 from collections.abc import Callable
+from contextlib import nullcontext
 
 from langchain_core.messages import AIMessageChunk
 from pydantic import ValidationError
@@ -38,6 +39,9 @@ def request_tokens(stage, data, schema):
 class WikiModel:
     def __init__(self, runtime, ref: RemoteInvokeRef, *, model=None):
         self.settings = runtime.settings
+        self.request_slots = None
+        self.before_request = None
+        self.check_deadline = None
         if model is None:
             # Initialize the existing process-owned client before parallel first calls.
             try:
@@ -68,11 +72,18 @@ class WikiModel:
                 "continuation": continuation, "input_size": input_size,
                 "input_limit": self.settings.kb_wiki_input_tokens, "size_unit": "token",
             })
+        if self.before_request is not None:
+            self.before_request(stage)
         started = time.monotonic()
         try:
             response = AIMessageChunk(content="")
-            for chunk in self.model.stream(messages):
-                response += chunk
+            with self.request_slots or nullcontext():
+                for chunk in self.model.stream(messages):
+                    if self.check_deadline is not None:
+                        self.check_deadline()
+                    response += chunk
+        except WikiError:
+            raise
         except Exception as exc:
             from ...error_mapping import map_model_error
 

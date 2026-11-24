@@ -8,13 +8,24 @@ from kombu import Exchange, Queue
 from ..bootstrap import get_settings
 from ..config import KnowledgeSettings
 from ..rag.faq.contracts import FAQ_GENERATE_TASK, FAQ_QUEUE
-from ..rag.wiki.config import BACKFILL_TASK, MAP_TASK, REDUCE_TASK, WIKI_QUEUE
+from ..rag.wiki.config import (
+    BACKFILL_TASK,
+    BATCH_TASK,
+    MAP_QUEUE,
+    MAP_TASK,
+    PAGE_QUEUE,
+    PAGE_TASK,
+    REDUCE_TASK,
+    WIKI_QUEUE,
+)
 
 KNOWLEDGE_QUEUES = (
     "document_tasks",
     "graphrag_tasks",
     "qa_import",
     WIKI_QUEUE,
+    MAP_QUEUE,
+    PAGE_QUEUE,
     FAQ_QUEUE,
 )
 
@@ -23,6 +34,8 @@ PUBLISHABLE_KNOWLEDGE_TASK_ROUTES = {
     FAQ_GENERATE_TASK: FAQ_QUEUE,
     BACKFILL_TASK: WIKI_QUEUE,
     MAP_TASK: WIKI_QUEUE,
+    BATCH_TASK: MAP_QUEUE,
+    PAGE_TASK: PAGE_QUEUE,
     REDUCE_TASK: WIKI_QUEUE,
     "app.core.rag.tasks.parse_document": "document_tasks",
     "app.core.rag.tasks.sync_knowledge_for_kb": "document_tasks",

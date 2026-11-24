@@ -20,7 +20,7 @@ def _names(topic):
             *(normalize_name(alias) for alias in topic.get("aliases", []))}
 
 
-def reconcile(model, snapshot, topics, context):
+def reconcile(model, snapshot, topics, context, *, defer_legacy_reuse=False):
     pages = context["pages"]
     cases, shortlists = [], {}
     for topic in topics:
@@ -84,11 +84,12 @@ def reconcile(model, snapshot, topics, context):
                 by_ref[match["candidate_ref"]]["existing_page_id"] = (
                     shortlists[match["candidate_ref"]][match["page_ref"]]["page_id"]
                 )
-    _reuse_qualified_legacy_pages(topics, pages)
+    if not defer_legacy_reuse:
+        reuse_qualified_legacy_pages(topics, pages)
     return topics
 
 
-def _reuse_qualified_legacy_pages(topics, pages):
+def reuse_qualified_legacy_pages(topics, pages):
     """限定标题只区分同名候选，仍可用明确别名和归属认领唯一的未分类旧页。"""
     pending = [t for t in topics if t.get("disambiguated") and not t.get("existing_page_id")]
     if not pending:

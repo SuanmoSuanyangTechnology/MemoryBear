@@ -23,6 +23,8 @@ WORKER_ROLES = frozenset(
         "graphrag_worker",
         "qa_import_worker",
         "wiki_worker",
+        "wiki_map_worker",
+        "wiki_reduce_worker",
         "faq_worker",
     }
 )

@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Literal
 from urllib.parse import quote_plus, urlparse
+from uuid import UUID
 
 from pydantic import Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, PydanticBaseSettingsSource, SettingsConfigDict
@@ -30,6 +31,28 @@ class KnowledgeSettings(BaseSettings):
     kb_file_folder_max_depth: int = Field(
         default=4, ge=1, validation_alias="KB_FILE_FOLDER_MAX_DEPTH",
     )
+
+    kb_wiki_batch_kbs: frozenset[UUID] = Field(
+        default_factory=frozenset, validation_alias="KB_WIKI_BATCH_KBS",
+    )
+    kb_wiki_batch_size: int = Field(default=5, ge=1, le=32, validation_alias="KB_WIKI_BATCH_SIZE")
+    kb_wiki_map_workers: int = Field(default=3, ge=1, le=8, validation_alias="KB_WIKI_MAP_WORKERS")
+    kb_wiki_batch_delay_seconds: int = Field(
+        default=5, ge=0, le=60, validation_alias="KB_WIKI_BATCH_DELAY_SECONDS",
+    )
+    kb_wiki_batch_followup_seconds: int = Field(
+        default=5, ge=0, le=60, validation_alias="KB_WIKI_BATCH_FOLLOWUP_SECONDS",
+    )
+    kb_wiki_cas_retries: int = Field(default=1, ge=0, le=8, validation_alias="KB_WIKI_CAS_RETRIES")
+    kb_wiki_page_seconds: int = Field(default=300, ge=1, validation_alias="KB_WIKI_PAGE_SECONDS")
+    kb_wiki_compact_calls: int = Field(default=12, ge=0, validation_alias="KB_WIKI_COMPACT_CALLS")
+
+    @field_validator("kb_wiki_batch_kbs", mode="before")
+    @classmethod
+    def _parse_batch_kbs(cls, value):
+        if isinstance(value, str):
+            return [v.strip() for v in value.split(",") if v.strip()]
+        return value
 
     # Wiki execution budgets are ceilings, not content truncation policies.
     kb_wiki_segment_tokens: int = Field(default=32768, ge=128,
@@ -354,6 +377,8 @@ class KnowledgeSettings(BaseSettings):
         "graphrag_worker",
         "qa_import_worker",
         "wiki_worker",
+        "wiki_map_worker",
+        "wiki_reduce_worker",
         "faq_worker",
     ] = Field(default="api", validation_alias="KB_PROCESS_ROLE")
     kb_log_level: str = Field(default="INFO", validation_alias="KB_LOG_LEVEL")

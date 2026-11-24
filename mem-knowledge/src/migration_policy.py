@@ -9,6 +9,7 @@ WIKI_TABLE_NAMES = frozenset(
         "wiki_pages",
         "wiki_page_sources",
         "wiki_page_links",
+        "wiki_reduce_deliveries",
         "wiki_document_states",
         "wiki_document_page_tasks",
     }

@@ -73,17 +73,18 @@ def map_failure(session, delivery, error, settings, *, deferred=False):
     return retry
 
 
-def page_failure(session, kb_id, page_id, error, settings, *, deferred=False, snapshot=None):
+def page_failure(session, kb_id, page_id, error, settings, *, deferred=False, snapshot=None,
+                 terminal=False):
     lock_knowledge(session, kb_id)
     page = session.scalar(
         select(WikiPage).where(WikiPage.id == as_uuid(page_id), WikiPage.kb_id == as_uuid(kb_id))
     )
     if page is None:
         return False
-    if snapshot and page.row_version != snapshot["row_version"]:
+    if not terminal and snapshot and page.row_version != snapshot["row_version"]:
         return True
-    retry = None
-    if deferred and page.error_code == error.code:
+    retry = False if terminal else None
+    if not terminal and deferred and page.error_code == error.code:
         pending = session.scalar(
             select(WikiDocumentPageTask.subtask_id)
             .where(

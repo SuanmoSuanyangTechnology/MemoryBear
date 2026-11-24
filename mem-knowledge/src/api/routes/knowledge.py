@@ -415,16 +415,29 @@ async def update_knowledge(
     graph_dispatch_failed = False
     reparse_dispatch_failed = False
     if outcome.wiki_backfill_required:
-        from ...rag.wiki.config import BACKFILL_REGISTERED_HEADER, BACKFILL_TASK, WIKI_QUEUE
+        from ...rag.wiki.config import (
+            BACKFILL_REGISTERED_HEADER,
+            BACKFILL_TASK,
+            BATCH_TASK,
+            MAP_QUEUE,
+            WIKI_QUEUE,
+        )
         from ...rag.wiki.diagnostics import diagnostic_json, exception_details
-        from ...services.wiki.backfill import record_backfill_publish_failure
+        from ...services.wiki.backfill import confirm_batch_trigger, record_backfill_publish_failure
         from ...services.wiki.runtime import transaction
 
         try:
-            await dispatcher.send(BACKFILL_TASK, kwargs={
-                "kb_id": str(knowledge_id), "upper_at_ms": outcome.wiki_backfill_upper_at_ms,
-            }, queue=WIKI_QUEUE, task_id=outcome.wiki_backfill_task_id,
-                headers={BACKFILL_REGISTERED_HEADER: True})
+            if knowledge_id in runtime.settings.kb_wiki_batch_kbs:
+                await dispatcher.send(
+                    BATCH_TASK, kwargs={"kb_id": str(knowledge_id)}, queue=MAP_QUEUE,
+                    task_id=outcome.wiki_backfill_task_id,
+                    countdown=runtime.settings.kb_wiki_batch_delay_seconds,
+                )
+            else:
+                await dispatcher.send(BACKFILL_TASK, kwargs={
+                    "kb_id": str(knowledge_id), "upper_at_ms": outcome.wiki_backfill_upper_at_ms,
+                }, queue=WIKI_QUEUE, task_id=outcome.wiki_backfill_task_id,
+                    headers={BACKFILL_REGISTERED_HEADER: True})
         except Exception as exc:
             logger.error(
                 "Wiki 配置与待处理状态已保存，但补录派发失败 "
@@ -446,6 +459,11 @@ async def update_knowledge(
                     diagnostic_json(exception_details(state_exc)),
                 )
             raise KnowledgeError.from_code("KB_WIKI_BACKFILL_DISPATCH_FAILED") from exc
+        if knowledge_id in runtime.settings.kb_wiki_batch_kbs:
+            await asyncio.to_thread(
+                transaction, runtime, confirm_batch_trigger,
+                knowledge_id, outcome.wiki_backfill_task_id,
+            )
     if plan.graph_enabled_before is not None:
         try:
             await dispatch_graph_transition(
