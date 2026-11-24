@@ -3973,11 +3973,14 @@ class WorkflowService:
             message_id: uuid.UUID | None,
             human_message: str,
             human_meta: dict,
-            error: str,
+            display_message: str,
+            diagnostic: str = "",
     ) -> None:
         if not conversation_id:
             return
         from app.services.batch_persist_queue import BatchPersistQueue, PersistTask
+        # content carries the user-facing message; meta_data.error carries the
+        # diagnostic and is stripped from the v1 history response.
         await BatchPersistQueue.enqueue(PersistTask(
             task_type="save_failed_message",
             args={
@@ -3986,8 +3989,8 @@ class WorkflowService:
                 "user_message_id": uuid.uuid4(),
                 "user_message_content": human_message,
                 "files_meta": (human_meta or {}).get("files", []),
-                "error_message": "",
-                "error_detail": error,
+                "error_message": display_message,
+                "error_detail": diagnostic,
                 "sync_memory": False,
             },
         ))
@@ -6930,8 +6933,9 @@ class WorkflowService:
                             f"execution_id: {execution.execution_id}, message count: {len(final_messages)}")
             else:
                 # Persist the user-facing message; raw diagnostics stay in
-                # output_data and server logs.
-                error_msg = result.get("msg") or result.get("error") or "未知错误"
+                # output_data, server logs and meta_data.error.
+                error_msg = result.get("msg") or workflow_error_info(None)["msg"]
+                error_diagnostic = result.get("error") or ""
                 await self._patch_execution_async(
                     execution.execution_id,
                     status="failed",
@@ -6954,7 +6958,8 @@ class WorkflowService:
                 if not regenerate_mode and not skip_save:
                     messages_finalized = True
                     await self._save_failed_conversation_async(
-                        conversation_id_uuid, message_id, human_message, human_meta, error_msg
+                        conversation_id_uuid, message_id, human_message, human_meta,
+                        error_msg, error_diagnostic,
                     )
                 filtered_citations = []
 
@@ -7037,7 +7042,8 @@ class WorkflowService:
             # 若本轮消息已成功入队，不要再入队失败消息，避免重复写入
             if not skip_save and not regenerate_mode and not messages_finalized:
                 await self._save_failed_conversation_async(
-                    conversation_id_uuid, None, human_message, human_meta, error_info["msg"]
+                    conversation_id_uuid, None, human_message, human_meta,
+                    error_info["msg"], error_info["error"],
                 )
             raise BusinessException(
                 code=BizCode.INTERNAL_ERROR,
@@ -8217,8 +8223,9 @@ class WorkflowService:
                     elif status == "failed":
                         _failed_output = event.get("data", {}) or {}
                         # Persist the user-facing message; raw diagnostics stay in
-                        # output_data and server logs.
-                        error_msg = _failed_output.get("msg") or _failed_output.get("error") or "未知错误"
+                        # output_data, server logs and meta_data.error.
+                        error_msg = _failed_output.get("msg") or workflow_error_info(None)["msg"]
+                        error_diagnostic = _failed_output.get("error") or ""
                         final_messages = event.get("data", {}).get("messages", [])[init_message_length:]
                         human_message, human_meta = self._extract_human_message_and_meta(
                             final_messages, payload.message or "", files
@@ -8228,12 +8235,14 @@ class WorkflowService:
                         if not skip_save and not regenerate_mode and not messages_finalized:
                             messages_finalized = True
                             await self._save_failed_conversation_async(
-                                conversation_id_uuid, message_id, human_message, human_meta, error_msg
+                                conversation_id_uuid, message_id, human_message, human_meta,
+                                error_msg, error_diagnostic,
                             )
                         execution = await self._patch_execution_async(
                             execution.execution_id,
                             status="failed",
                             output_data=_failed_output,
+                            error_message=_failed_output.get("error"),
                             error_node_id=_error_node_id,
                         )
                         _log_run_stream_timing("workflow_end_finalize_done", status="failed")
@@ -8918,7 +8927,8 @@ class WorkflowService:
             # 否则同一 message_id 会触发 messages 主键冲突
             if not skip_save and not regenerate_mode and not messages_finalized:
                 await self._save_failed_conversation_async(
-                    conversation_id_uuid, None, human_message, human_meta, error_info["msg"]
+                    conversation_id_uuid, None, human_message, human_meta,
+                    error_info["msg"], error_info["error"],
                 )
             # On failure, update the waiting_human message in-place:
             # clear the flag and set content to the user-facing message.
@@ -8929,7 +8939,7 @@ class WorkflowService:
                     meta_data={
                         "waiting_human": False,
                         "execution_id": execution.execution_id,
-                        "error": error_info["msg"],
+                        "error": error_info["error"],
                     },
                 )
             end_event = self._emit(public, {

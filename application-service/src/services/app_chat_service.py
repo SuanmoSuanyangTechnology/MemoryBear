@@ -1073,6 +1073,9 @@ class AppChatService:
         except Exception as e:
             # Agent failed: mark the execution record failed
             elapsed_time = time.time() - start_time
+            failure_payload = error_payload(
+                e, locale=get_current_locale(), trace_id=get_trace_id()
+            )
             await self._update_agent_execution(
                 agent_exec_repo,
                 execution_id=agent_execution_id,
@@ -1081,6 +1084,23 @@ class AppChatService:
                 elapsed_time=elapsed_time,
                 error_message=str(e)[:2000],
             )
+            if not skip_save:
+                try:
+                    from .batch_persist_queue import BatchPersistQueue, PersistTask
+                    await BatchPersistQueue.enqueue(PersistTask(
+                        task_type="save_failed_message",
+                        args={
+                            "conversation_id": str(conversation_id),
+                            "user_message_id": str(user_message_id),
+                            "message_id": str(message_id),
+                            "user_message_content": message,
+                            "files_meta": [],
+                            "error_message": failure_payload["msg"],
+                            "error_detail": str(e)[:2000],
+                        },
+                    ))
+                except Exception:
+                    pass
             raise
 
         await self._record_api_key_usage(api_key_obj.id)
@@ -2476,6 +2496,9 @@ class AppChatService:
             )
         except Exception as e:
             logger.error(f"多 Agent 流式聊天失败: {str(e)}", exc_info=True)
+            failure_payload = error_payload(
+                e, locale=get_current_locale(), trace_id=get_trace_id()
+            )
             # Once save_messages is enqueued, do not enqueue
             # save_failed_message — the identical message_id would collide on
             # the messages primary key.
@@ -2490,16 +2513,14 @@ class AppChatService:
                             "message_id": str(message_id) if 'message_id' in locals() else str(uuid.uuid4()),
                             "user_message_content": message if 'message' in locals() else "",
                             "files_meta": [],
-                            "error_message": "An error occurred during generation.",
+                            "error_message": failure_payload["msg"],
                             "error_detail": str(e)[:2000],
                         },
                     ))
                 except Exception:
                     pass
             # Emit the error event
-            yield error_frame(error_payload(
-                e, locale=get_current_locale(), trace_id=get_trace_id()
-            ))
+            yield error_frame(failure_payload)
 
     async def workflow_chat(
             self,

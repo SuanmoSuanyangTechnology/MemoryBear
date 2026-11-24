@@ -1005,6 +1005,7 @@ class AppChatService:
         except Exception as e:
             # Agent 执行失败，更新记录为 failed
             elapsed_time = time.time() - start_time
+            display_error, error_detail = self._build_failure_display(e)
             await self._update_agent_execution(
                 agent_exec_repo,
                 execution_id=agent_execution_id,
@@ -1013,6 +1014,23 @@ class AppChatService:
                 elapsed_time=elapsed_time,
                 error_message=str(e)[:2000],
             )
+            if not skip_save:
+                try:
+                    from app.services.batch_persist_queue import BatchPersistQueue, PersistTask
+                    await BatchPersistQueue.enqueue(PersistTask(
+                        task_type="save_failed_message",
+                        args={
+                            "conversation_id": str(conversation_id),
+                            "user_message_id": str(user_message_id),
+                            "message_id": str(message_id),
+                            "user_message_content": message,
+                            "files_meta": [],
+                            "error_message": display_error,
+                            "error_detail": error_detail,
+                        },
+                    ))
+                except Exception:
+                    pass
             raise
 
         await self._record_api_key_usage(api_key_obj.id)
@@ -1786,7 +1804,14 @@ class AppChatService:
                 # 业务异常给的是面向用户的文案，str(e) 会带上内部错误码前缀
                 display_error = e.message
             else:
-                display_error = str(e)
+                from app.i18n.exceptions import get_current_locale
+                from error_core.messages import user_message
+
+                # 未知异常不得把 str(e) 写进用户可见内容；诊断保留在
+                # meta_data.error 与服务端日志。
+                display_error = user_message(
+                    BizCode.INTERNAL_ERROR.value, get_current_locale()
+                ) or "服务内部错误，请稍后重试"
 
             if public_error is not None:
                 logger.error(
@@ -1853,6 +1878,27 @@ class AppChatService:
         """Format a dict chunk as an SSE event string."""
         event_type = str(chunk.get("type") or "unknown")
         return f"event: {event_type}\ndata: {json.dumps(chunk, ensure_ascii=False)}\n\n"
+
+    def _build_failure_display(self, e: Exception) -> tuple[str, str]:
+        """User-facing message for content plus the truncated diagnostic."""
+        from app.core.llm_error_handler import classify_multimodal_exception
+        from app.i18n.exceptions import get_current_locale
+        from error_core.messages import user_message
+
+        public_error = classify_multimodal_exception(
+            e, debug_id=self.agent_service._build_debug_id()
+        )
+        if public_error is not None:
+            display = public_error["message"]
+        elif isinstance(e, BusinessException):
+            display = e.message
+        else:
+            # Unknown failures must not leak str(e) into user-facing content;
+            # the diagnostic stays in meta_data.error and the server logs.
+            display = user_message(
+                BizCode.INTERNAL_ERROR.value, get_current_locale()
+            ) or "服务内部错误，请稍后重试"
+        return display, str(e)[:2000]
 
     @bind_usage("app", "config.app_id")
     async def multi_agent_chat(
@@ -2292,6 +2338,7 @@ class AppChatService:
             raise
         except Exception as e:
             logger.error(f"多 Agent 流式聊天失败: {str(e)}", exc_info=True)
+            display_error, error_detail = self._build_failure_display(e)
             # 如果 save_messages 已经入队，不要再入队 save_failed_message，
             # 否则会因为相同的 message_id 导致 messages 表主键冲突。
             if not save_messages_enqueued:
@@ -2305,14 +2352,14 @@ class AppChatService:
                             "message_id": str(message_id) if 'message_id' in locals() else str(uuid.uuid4()),
                             "user_message_content": message if 'message' in locals() else "",
                             "files_meta": [],
-                            "error_message": "An error occurred during generation.",
-                            "error_detail": str(e)[:2000],
+                            "error_message": display_error,
+                            "error_detail": error_detail,
                         },
                     ))
                 except Exception:
                     pass
             # 发送错误事件
-            yield f"event: error\ndata: {json.dumps({'error': str(e)}, ensure_ascii=False)}\n\n"
+            yield f"event: error\ndata: {json.dumps({'error': display_error}, ensure_ascii=False)}\n\n"
 
     async def workflow_chat(
             self,
