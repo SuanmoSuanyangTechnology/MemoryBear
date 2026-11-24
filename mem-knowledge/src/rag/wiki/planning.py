@@ -94,18 +94,34 @@ def _reuse_qualified_legacy_pages(topics, pages):
     if not pending:
         return
     occupied = {t["existing_page_id"] for t in topics if t.get("existing_page_id")}
+    legacy_titles = defaultdict(list)
     by_identity = defaultdict(set)
     for page in pages:
         if page.get("semantic_type"):
             continue
+        legacy_titles[page["kind"], normalize_name(page["name"])].append(page["page_id"])
         scope = normalize_name(page["scope"])
         if not scope:
             continue
         for name in _names(page) - {""}:
             by_identity[page["kind"], scope, name].add(page["page_id"])
 
+    # 原标题精确命中旧页时优先绑定，防止另一个已区分的候选靠共用别名抢占同页。
+    title_claims = defaultdict(list)
+    for topic in pending:
+        if "original_name" not in topic:
+            matches = legacy_titles[topic["kind"], normalize_name(topic["name"])]
+            if len(matches) == 1:
+                title_claims[matches[0]].append(topic)
+    for page_id, topics_for_title in title_claims.items():
+        if len(topics_for_title) == 1 and page_id not in occupied:
+            topics_for_title[0]["existing_page_id"] = page_id
+            occupied.add(page_id)
+
     claims = defaultdict(list)
     for topic in pending:
+        if topic.get("existing_page_id"):
+            continue
         scope = normalize_name(topic["scope"])
         matches = set()
         for name in _names(topic):

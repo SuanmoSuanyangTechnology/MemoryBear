@@ -113,9 +113,9 @@ def decide(model, snapshot, left, right):
 
 
 def qualify(topic, label):
+    topic["disambiguated"] = True
     if label is None:
         return
-    topic["disambiguated"] = True
     base = topic.setdefault("original_name", topic["name"])
     topic["aliases"] = sorted(set([*topic["aliases"], base]))
     topic["name"] = topic["title"] = f"{base}（{label}）"
@@ -165,8 +165,6 @@ def resolve_against_pages(model, snapshot, topic, pages):
             continue
         result = decide(model, snapshot, page, topic)
         if result["decision"] == "different_objects":
-            # 与库内旧页已判为不同对象，即使无需改名也要跳过该页的模糊匹配。
-            topic["disambiguated"] = True
             qualify(topic, result["right_label"])
             continue
         topic["existing_page_id"] = page["page_id"]
