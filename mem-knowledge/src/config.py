@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from decimal import Decimal
 from pathlib import Path
 from typing import Any, Literal
 from urllib.parse import quote_plus, urlparse
@@ -527,6 +528,12 @@ class KnowledgeSettings(BaseSettings):
     )
 
     # Knowledge business environment variables
+    knowledge_capacity_quota_gib: Decimal = Field(
+        default=Decimal("0.3"),
+        ge=0,
+        allow_inf_nan=False,
+        validation_alias="QUOTA_KNOWLEDGE_CAPACITY_QUOTA",
+    )
     max_file_size: int = Field(
         default=52428800,
         ge=1,

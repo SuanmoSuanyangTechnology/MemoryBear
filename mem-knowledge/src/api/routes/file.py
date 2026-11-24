@@ -28,6 +28,7 @@ from ..dependencies import (
     get_runtime,
     get_source,
 )
+from ..knowledge_capacity import check_workspace_capacity
 from ..schemas.chunk import KnowledgeRetrievalSource
 from ..schemas.common import SuccessEnvelope, success
 from ..schemas.file import (
@@ -182,6 +183,7 @@ async def upload_file(
     parent_id: uuid.UUID,
     file: Annotated[UploadFile, UploadBody(...)],
 ) -> SuccessEnvelope[dict[str, Any]]:
+    await check_workspace_capacity(request, runtime, principal)
     contents = await file.read()
     if not contents:
         raise KnowledgeError.from_code("KB_UPLOAD_FILE_EMPTY")
