@@ -345,6 +345,38 @@ prechecks use the API's existing `app.i18n` translation service. Business codes,
 HTTP statuses, data payloads and technical exception details retain their
 existing behavior; an intentionally empty cached-profile error stays empty.
 
+## Reflection configuration preview
+
+`GET /api/memory/reflection/run?config_id=...` forwards to
+`GET /internal/v1/memory/reflection/run`. This management endpoint is not added
+to the API-key contract. The API retains authentication and waits up to 600
+seconds for the preview; there is no local fallback or memory-jobs task.
+
+`modules/reflection` adapts HTTP, and `services/memory_config_trial/reflection.py`
+owns the preview. It uses packaged sample data and prompts, calls model-service
+through `ProfileChatModel`, and never reads or writes live memory in Neo4j.
+The read repository scopes configuration access to the active workspace and its
+tenant. This endpoint alone retains legacy integer `config_id_old` compatibility;
+the existing memory-config endpoints remain UUID-only.
+
+Model selection retains the literal `workspace.llm` value, even when previewing
+an inactive configuration. It does not use `reflection_model_id`, the active
+config pointer, or a model preset. Missing, inaccessible or disabled models
+produce HTTP 500; the legacy code's documented default-model fallback was not
+implemented by its invoke client. Detection/resolution failures retain the
+legacy HTTP 200 envelope with `data.success=false`; missing or out-of-scope
+configurations return HTTP 404. English output now retains `baseline`, nullable
+assessment results can be translated safely, and failure duration uses one
+monotonic clock.
+
+The regression suite compares Chinese output and prompts against the legacy
+preview, exercises both ID types and isolation predicates, and checks HTTP and
+API proxy behavior without calling external services:
+
+```bash
+PYTHONPATH=../packages/task-bridge-sdk/src:. .venv/bin/python -m pytest tests/test_reflection_trial.py -q
+```
+
 ## Scene community graph
 
 The scene community graph follows the same entry chain as the other analytics

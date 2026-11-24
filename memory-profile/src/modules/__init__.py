@@ -21,6 +21,7 @@ from src.modules.memory_config import (
 from src.modules.memory_config import router as memory_config_router
 from src.modules.memory_read import router as memory_read_router
 from src.modules.perceptual import router as perceptual_router
+from src.modules.reflection import router as reflection_router
 from src.modules.short import router as short_router
 from src.modules.value_ranking import router as value_ranking_router
 from src.modules.working_memory import router as working_memory_router
@@ -35,6 +36,7 @@ router.include_router(memory_config_community_router)
 router.include_router(display_router)
 router.include_router(emotion_reply_router)
 router.include_router(perceptual_router)
+router.include_router(reflection_router)
 router.include_router(implicit_memory_router)
 router.include_router(working_memory_router)
 router.include_router(write_router)
