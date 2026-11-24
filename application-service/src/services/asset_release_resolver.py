@@ -135,7 +135,7 @@ class AssetReleaseResolver:
         self.db = db
 
     def resolve(self, *, app_id: uuid.UUID, workspace_id: uuid.UUID | None) -> ResolvedRelease:
-        app = self.db.scalar(select(App).where(App.id == app_id))
+        app = self.db.scalar(select(App).where(App.id == app_id, App.is_active.is_(True)))
         if app is None:
             raise BusinessException("应用不存在", BizCode.APP_NOT_FOUND)
 
@@ -209,7 +209,7 @@ class AsyncAssetReleaseResolver:
     async def resolve(
         self, *, app_id: uuid.UUID, workspace_id: uuid.UUID | None
     ) -> ResolvedRelease:
-        app = await self.db.scalar(select(App).where(App.id == app_id))
+        app = await self.db.scalar(select(App).where(App.id == app_id, App.is_active.is_(True)))
         if app is None:
             raise BusinessException("应用不存在", BizCode.APP_NOT_FOUND)
 
