@@ -22,6 +22,7 @@ from src.modules.memory_config import router as memory_config_router
 from src.modules.memory_read import router as memory_read_router
 from src.modules.perceptual import router as perceptual_router
 from src.modules.reflection import router as reflection_router
+from src.modules.reflection_logs.routes import router as reflection_logs_router
 from src.modules.short import router as short_router
 from src.modules.value_ranking import router as value_ranking_router
 from src.modules.working_memory import router as working_memory_router
@@ -46,6 +47,7 @@ router.include_router(episodic_memory_router)
 router.include_router(dashboard_router)
 router.include_router(emotion_analytics_router)
 router.include_router(forgetting_router)
+router.include_router(reflection_logs_router)
 router.include_router(short_router)
 router.include_router(value_ranking_router)
 

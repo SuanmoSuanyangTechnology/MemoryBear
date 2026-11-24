@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Mapping
+from enum import Enum
 from functools import wraps
 from inspect import signature
 from typing import Any, ParamSpec, TypeVar
@@ -232,11 +233,13 @@ def memory_profile_proxy(
             # The query is rebuilt from the declared fields rather than forwarded
             # raw: API-key callers reach the handler through merge routing, so the
             # caller's own end_user_id may still name a merged-away end user.
-            # Non-primitive values (a ``UUID`` declared by the handler) are
-            # stringified: httpx only encodes str/int/float/bool/None.
+            # Use the validated enum value rather than its Python member name.
+            # UUIDs also need to be converted before httpx encodes the query.
             query: dict[str, Any] = {}
             for field in query_fields:
                 value = arguments.get(field)
+                if isinstance(value, Enum):
+                    value = value.value
                 query[field] = str(value) if isinstance(value, UUID) else value
             for field, maximum in bounds.items():
                 value = query.get(field)
