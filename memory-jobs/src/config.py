@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Literal
 from urllib.parse import quote_plus, urlparse, urlsplit, urlunsplit
 
-from pydantic import AliasChoices, ConfigDict, Field, field_validator
+from pydantic import AliasChoices, ConfigDict, Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings
 from sqlalchemy.engine import make_url
 from task_bridge.mem_router import MAX_PRIORITY, QueueName
@@ -363,8 +363,25 @@ class JobsSettings(BaseSettings):
     memory_enterprise_timeout_seconds: float = Field(
         3.0, gt=0, validation_alias="MEMORY_ENTERPRISE_TIMEOUT_SECONDS"
     )
-    memory_enterprise_token: str = Field(
-        "", validation_alias="MEMORY_ENTERPRISE_TOKEN"
+    #: Audience (the target's ``service_name``) of the internal JWT this worker
+    #: signs for memory-enterprise. Calls carry no shared token: the target
+    #: verifies ``iss=JOBS_SERVICE_NAME`` against identity's JWKS and its caller
+    #: ACL, and reads the tenant from the token claims.
+    memory_enterprise_audience: str = Field(
+        "mem-enterprise", validation_alias="MEMORY_ENTERPRISE_AUDIENCE"
+    )
+
+    # ------------------------------------------------------- internal JWT issuer
+    #: Same variables as gateway / identity-service: all three must share one
+    #: key pair, otherwise memory-enterprise cannot verify through identity's
+    #: JWKS. Missing key leaves enterprise calls disabled (degrade as
+    #: unavailable, never as "no subscription"/"no scenes").
+    internal_issuer_private_key: SecretStr = Field(
+        SecretStr(""), validation_alias="INTERNAL_ISSUER_PRIVATE_KEY"
+    )
+    internal_issuer_kid: str = Field("internal-1", validation_alias="INTERNAL_ISSUER_KID")
+    internal_token_ttl_seconds: int = Field(
+        120, ge=1, validation_alias="INTERNAL_TOKEN_TTL"
     )
 
     # --------------------------------------------------------------------- Neo4j
