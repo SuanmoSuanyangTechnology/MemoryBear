@@ -93,9 +93,8 @@ def _extract_api_key(request: Request) -> str | None:
     (mirrors the monolith extract_api_key_from_request semantics — under the
     /v1/ prefix a Bearer value is an API key, not a user JWT)."""
     auth = request.headers.get("authorization", "")
-    scheme, _, credential = auth.partition(" ")
-    if scheme.lower() == "bearer":
-        key = credential.strip()
+    if auth.startswith("Bearer "):
+        key = auth.removeprefix("Bearer ").strip()
         if key:
             return key
     return request.headers.get("x-api-key") or None
@@ -230,9 +229,12 @@ async def terminate_api_key(request: Request, deps: GatewayDeps) -> AuthResult:
     """
     api_key = _extract_api_key(request)
     if api_key is None:
-        # /v1 契约：未携带 Key → 400 / code 3007（API_KEY_NOT_FOUND）
+        # 缺少 API Key 属于未认证，保留业务码 3007。
         body = _v1_fail(3007, "请求未携带 API Key")
-        return AuthResult(status_code=400, detail="missing api key", body=body)
+        return AuthResult(
+            status_code=401, detail="missing api key", body=body,
+            headers={"WWW-Authenticate": "Bearer"},
+        )
     try:
         ctx = await deps.reader.get_api_key_snapshot(api_key)
     except SnapshotUnavailable:

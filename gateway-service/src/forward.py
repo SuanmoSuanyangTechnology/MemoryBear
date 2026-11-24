@@ -25,7 +25,6 @@ from collections.abc import Callable
 from typing import Literal, Protocol
 
 import httpx
-from error_core.knowledge_upload import versioned_upload_target
 from fastapi import Request
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 from memorybear_grpc.metadata import traceparent_trace_id
@@ -103,15 +102,10 @@ class TargetRoute(BaseModel):
     grpc_target: str | None = None
     grpc_method: str = ""
 
-    def upload_target(self, method: str, external_path: str) -> str | None:
-        if self.service == "kb" and self.path_mode == "internal":
-            return versioned_upload_target(method, external_path)
-        return None
-
-    def target_path(self, external_path: str, method: str = "GET") -> str:
+    def target_path(self, external_path: str) -> str:
         if self.path_mode == "preserve":
             return external_path
-        return self.upload_target(method, external_path) or rewrite_internal_path(external_path)
+        return rewrite_internal_path(external_path)
 
 
 class TargetResolver(Protocol):
@@ -225,10 +219,7 @@ class Forwarder:
             return JSONResponse(status_code=502, content={"detail": "circuit open"})
         gateway_circuit_breaker_state.labels(target=route.service).set(0)
         # request.url.path 不含查询串，query 须单独拼回，否则分页/过滤等参数静默丢失
-        path = getattr(request.state, "kb_upload_target", None)
-        if path is None:
-            path = route.target_path(request.url.path, request.method)
-        url = route.base_url + path
+        url = route.base_url + route.target_path(request.url.path)
         if request.url.query:
             url += "?" + request.url.query
         headers = self.build_headers(request)

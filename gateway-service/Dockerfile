@@ -18,9 +18,10 @@ RUN if [ "$NEED_MIRROR" == "1" ]; then \
         pip3 config set global.trusted-host pypi.tuna.tsinghua.edu.cn; \
     fi
 
-# pip 安装服务时需要本地包，不能从 uv 的路径配置读取。
+# memorybear-grpc is installed before the service for the same reason as
+# auth-sdk: path sources in [tool.uv.sources] are uv-only, and pip needs the
+# package satisfied first (it is not on PyPI).
 COPY packages/auth-sdk /app/packages/auth-sdk
-COPY packages/error-core /app/packages/error-core
 COPY packages/memorybear-grpc /app/packages/memorybear-grpc
 COPY gateway-service/pyproject.toml /app/gateway-service/
 COPY gateway-service/src /app/gateway-service/src
@@ -28,7 +29,7 @@ COPY gateway-service/src /app/gateway-service/src
 # compose/k8s 以 bind-mount / ConfigMap 挂载同一路径覆盖镜像默认
 COPY gateway-service/routes.json /etc/gateway/routes.json
 WORKDIR /app/gateway-service
-RUN pip install --no-cache-dir /app/packages/auth-sdk /app/packages/error-core /app/packages/memorybear-grpc .
+RUN pip install --no-cache-dir -e /app/packages/auth-sdk && pip install --no-cache-dir -e /app/packages/memorybear-grpc && pip install --no-cache-dir .
 
 EXPOSE 8002
 
