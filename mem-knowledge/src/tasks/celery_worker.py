@@ -43,6 +43,8 @@ logger = logging.getLogger(__name__)
 
 ROLE_QUEUE = {
     "wiki_worker": "wiki_tasks",
+    "wiki_map_worker": "wiki_map_tasks",
+    "wiki_reduce_worker": "wiki_reduce_tasks",
     "faq_worker": "faq_tasks",
     "document_worker": "document_tasks",
     "graphrag_worker": "graphrag_tasks",
