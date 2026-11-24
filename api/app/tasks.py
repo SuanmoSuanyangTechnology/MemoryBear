@@ -7473,7 +7473,7 @@ def flush_conversation_task(self) -> None:
     )
 
 
-@celery_app.task(name="app.tasks.scan_workflow_schedule_triggers", queue="periodic_tasks", time_limit=50,
+@celery_app.task(name="app.tasks.scan_workflow_schedule_triggers", queue="workflow_trigger_tasks", time_limit=50,
                  soft_time_limit=45)
 def scan_workflow_schedule_triggers():
     """扫描并派发已发布工作流中的定时触发器。"""
@@ -8146,34 +8146,6 @@ def scan_scene_summary_idle(
             except Exception as exc:
                 logger.warning("[SceneSummary] idle scanner lock release failed: %s", exc)
 
-
-@celery_app.task(
-    name="app.tasks.consume_model_gateway_alerts",
-    bind=False,
-    ignore_result=False,
-    max_retries=0,
-    acks_late=False,
-    time_limit=60,
-    soft_time_limit=50,
-)
-def consume_model_gateway_alerts_task() -> dict[str, Any]:
-    """定时任务：消费部署域用量流（model:usage:<DB_NAME>）做网关健康告警评估（B9）。
-
-    服务侧（model-service）的调用终态只进 stream，本任务用独立消费组
-    `model-usage-alerts` 读该 stream 喂给宿主企业告警插件；beat 周期由
-    settings.MODEL_USAGE_ALERT_INTERVAL_SECONDS（默认 30s）驱动。
-    社区版无 premium 插件时插件层直接跳过（不建组不读流）；Redis 层异常不抛，
-    下轮重试（事件已 ACK 的不重放，属尽力而为 + 新鲜度优先口径）。
-    """
-    from app.core.alert_metric_bridge import consume_model_gateway_alerts
-
-    try:
-        return consume_model_gateway_alerts()
-    except Exception as exc:
-        logger.warning(
-            f"consume_model_gateway_alerts 本轮失败（下轮重试）: {exc}", exc_info=True
-        )
-        return {"status": "RETRY_LATER", "error": str(exc)}
 
 @celery_app.task(
     name="app.tasks.run_reembed_job",

@@ -18,6 +18,7 @@ from ..models.workflow_model import (
     WorkflowNodeCache,
     WorkflowNodeExecution,
 )
+from ..utils.workflow_node_types import NodeType
 
 # Retention SQL for full-graph node rows, shared with the async queue persist
 # path. After each node-projection write the table keeps only the node rows of
@@ -150,6 +151,39 @@ class WorkflowConfigRepository:
             self.db.commit()
             self.db.refresh(config)
             return config
+
+    def update_trigger_runtime(
+        self,
+        app_id: UUID,
+        trigger_id: str,
+        runtime: dict[str, Any],
+    ) -> WorkflowConfig | None:
+        """Persist trigger runtime state into the active config's nodes."""
+
+        config = self.get_by_app_id(app_id)
+        if not config:
+            return None
+        nodes = config.nodes or []
+        updated = False
+        new_nodes = []
+        for node in nodes:
+            if (
+                not updated
+                and node.get("type") == NodeType.TRIGGER
+                and node.get("id") == trigger_id
+            ):
+                # Fresh node dict instead of in-place mutation: an equal
+                # assignment is skipped by SQLAlchemy and never persisted.
+                new_nodes.append({**node, "runtime": runtime})
+                updated = True
+            else:
+                new_nodes.append(node)
+        if not updated:
+            return None
+        config.nodes = new_nodes
+        self.db.commit()
+        self.db.refresh(config)
+        return config
 
 
 class WorkflowExecutionRepository:

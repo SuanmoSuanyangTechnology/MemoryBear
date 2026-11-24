@@ -12,6 +12,11 @@
     {"path_prefix": "/v1/knowledgeshares/share", "service": "kb", "base_url": "http://mem-knowledge:8080", "aud": "kb", "required_scopes": ["rag"]},
     {"path_prefix": "/api/models", "service": "model-service", "base_url": "http://model-service:8080", "aud": "model-service"},
     {"path_prefix": "/api/apps", "service": "application-service", "base_url": "http://application-service:8080", "aud": "application-service"},
+    {"path_prefix": "/api/mcp_markets", "service": "application-service", "base_url": "http://application-service:8080", "aud": "application-service"},
+    {"path_prefix": "/api/mcp_market_configs", "service": "application-service", "base_url": "http://application-service:8080", "aud": "application-service"},
+    {"path_prefix": "/api/workflows/triggers", "service": "application-service", "base_url": "http://application-service:8080", "aud": "application-service"},
+    {"path_prefix": "/api/license", "service": "ops-service", "base_url": "http://ops-service:8080", "aud": "ops-service"},
+    {"path_prefix": "/api/cors", "service": "ops-service", "base_url": "http://ops-service:8080", "aud": "ops-service"},
     {"path_prefix": "/v1/app", "service": "application-service", "base_url": "http://application-service:8080", "aud": "application-service", "required_scopes": ["app"]},
     {"path_prefix": "/v1/apps", "service": "application-service", "base_url": "http://application-service:8080", "aud": "application-service", "required_scopes": ["app_mgmt"]},
     {"path_prefix": "/v1/apps/assets", "service": "application-service", "base_url": "http://application-service:8080", "aud": "application-service", "required_scopes": []},
@@ -28,6 +33,18 @@
     {"path_prefix": "/api/tools", "service": "application-service", "base_url": "http://application-service:8080", "aud": "application-service"},
     {"path_prefix": "/api/skills", "service": "application-service", "base_url": "http://application-service:8080", "aud": "application-service"},
     {"path_prefix": "/api/prompt", "service": "application-service", "base_url": "http://application-service:8080", "aud": "application-service"},
-    {"path_prefix": "/api/public/share", "service": "application-service", "base_url": "http://application-service:8080", "aud": "application-service"}
+    {"path_prefix": "/api/public/share", "service": "application-service", "base_url": "http://application-service:8080", "aud": "application-service"},
+    {"path_prefix": "/api/storage/share", "service": "application-service", "base_url": "http://application-service:8080", "aud": "application-service"},
+    {"path_prefix": "/api/notifications", "service": "notification-service", "base_url": "http://notification-service:8080", "aud": "notification-service"},
+    {"path_prefix": "/sys/notifications", "service": "notification-service", "base_url": "http://notification-service:8080", "aud": "notification-service", "auth_mode": "passthrough"},
+    {"path_prefix": "/sys/notification-templates", "service": "notification-service", "base_url": "http://notification-service:8080", "aud": "notification-service", "auth_mode": "passthrough"},
+    {"path_prefix": "/sys/notification-channels", "service": "notification-service", "base_url": "http://notification-service:8080", "aud": "notification-service", "auth_mode": "passthrough"},
+    {"path_prefix": "/sys/alert", "service": "notification-service", "base_url": "http://notification-service:8080", "aud": "notification-service", "auth_mode": "passthrough"},
+    {"path_prefix": "/api/tenant/speedbear", "service": "ops-service", "base_url": "http://ops-service:8080", "aud": "ops-service"},
+    {"path_prefix": "/api/tenant/orders", "service": "ops-service", "base_url": "http://ops-service:8080", "aud": "ops-service"},
+    {"path_prefix": "/api/tenant/resource-packs", "service": "ops-service", "base_url": "http://ops-service:8080", "aud": "ops-service"},
+    {"path_prefix": "/sys/sso/sources", "service": "api", "base_url": "http://api:8000", "aud": "api", "auth_mode": "passthrough"},
+    {"path_prefix": "/sys", "service": "ops-service", "base_url": "http://ops-service:8080", "aud": "ops-service", "auth_mode": "passthrough"},
+    {"path_prefix": "/api/storage", "service": "file-service", "base_url": "http://file-service:8080", "aud": "file-service"}
   ]
 }

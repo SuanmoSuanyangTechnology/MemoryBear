@@ -16,3 +16,8 @@ gateway_route_reload_total = Counter(
     "gateway_route_reload_total", "Route file reload attempts", ["result"])
 gateway_route_table_size = Gauge(
     "gateway_route_table_size", "Routes in the active resolver")
+gateway_unmatched_routes_total = Counter(
+    "gateway_unmatched_route_total",
+    "Requests whose path matched no gateway route entry",
+    ("path_prefix",),
+)

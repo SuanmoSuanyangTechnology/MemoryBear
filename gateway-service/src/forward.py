@@ -117,6 +117,10 @@ class TargetRoute(BaseModel):
     # internal：沿用 /api|/v1 → /internal/v1 重写（core 默认）。
     # preserve：原样转发（企业 /api/market 直连 market-service）。
     path_mode: Literal["internal", "preserve"] = "internal"
+    # terminate（默认）：验凭据并注入身份 / 内部 token。
+    # passthrough：不验凭据、不注入身份，Authorization 原样转发，路径不改写
+    # （/sys 管理面；身份由目标服务用平台管理员凭据自行验签）。
+    auth_mode: Literal["terminate", "passthrough"] = "terminate"
     # Optional gRPC dispatch: base_url stays the HTTP fallback so one route
     # entry flips transports without a second config surface.
     # None = inherit GATEWAY_APP_CHAT_PROTOCOL; an explicit value in the route

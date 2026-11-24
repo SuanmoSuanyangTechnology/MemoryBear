@@ -1,8 +1,8 @@
 """沙箱产物发布与会话文本文件读写。
 
 产物从 sandbox-service 的 ``/internal/artifacts/{aid}`` 流式下载，经
-``FileStorageService.upload_stream`` 写入主应用文件存储，并将 ``FileMetadata``
-置为 completed 后返回永久下载 URL。沙箱服务本身不接触对象存储。
+``FileStorageService.upload_stream`` 写入主应用文件存储，并通过 file-service
+内网接口把文件记录置为 completed 后返回永久下载 URL。沙箱服务本身不接触对象存储。
 
 产物发布的扩展名白名单、单文件与单次累计大小、文件头魔数抽查均由主应用执行；
 不信任沙箱给出的 content_type 做放行判断。
@@ -17,6 +17,7 @@ from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 
 from ..config import current_settings
+from ..integrations.file_service import get_file_service_client
 from ..integrations.sandbox.client import ArtifactInfo, SandboxPrincipal, SandboxServiceClient
 from ..integrations.sandbox.errors import SandboxClientError, SandboxServiceError
 from ..storage.exceptions import StorageError
@@ -184,10 +185,8 @@ async def publish_artifacts(
 async def _publish_one(
     client: SandboxServiceClient, principal: SandboxPrincipal, art: ArtifactInfo
 ) -> PublishedFile | PublishFailure:
-    from ..db import get_async_db_context
-    from ..models.file_metadata_model import FileMetadata
     from .file_content_service import build_permanent_file_url
-    from .file_storage_service import generate_file_key, get_file_storage_service
+    from .file_storage_service import get_file_storage_service
 
     reason = check_extension(art.name)
     if reason:
@@ -207,52 +206,63 @@ async def _publish_one(
     except ValueError:
         return PublishFailure(art.name, "租户或工作空间标识无效")
 
-    file_id = uuid.uuid4()
-    file_key = generate_file_key(tenant_uuid, workspace_uuid, file_id, ext)
     content_type = art.content_type or "application/octet-stream"
     storage_service = get_file_storage_service()
     holder = _Holder()
+    file_client = get_file_service_client()
 
-    async with get_async_db_context() as db:
-        meta = FileMetadata(
-            id=file_id,
-            tenant_id=tenant_uuid,
-            workspace_id=workspace_uuid,
-            file_key=file_key,
-            file_name=art.name[:255],
-            file_ext=ext,
-            file_size=art.size,
-            content_type=content_type,
-            status="pending",
-        )
-        db.add(meta)
-        await db.commit()
+    pending = await file_client.create_pending(
+        tenant_id=tenant_uuid,
+        workspace_id=workspace_uuid,
+        actor_id=principal.end_user_id,
+        file_name=art.name[:255],
+        file_ext=ext,
+        content_type=content_type,
+        file_size=art.size,
+    )
+    file_id = uuid.UUID(pending.file_id)
+    ext = pending.file_ext or ext
 
-        try:
-            async with client.open_artifact(principal, art.aid) as download:
-                written = await storage_service.upload_stream(
-                    tenant_uuid,
-                    workspace_uuid,
-                    file_id,
-                    ext,
-                    _guard_stream(download.chunks, ext, holder),
-                    content_type,
-                )
-            if written != art.size:
-                raise SandboxFileError("传输的字节数与登记大小不符")
-        except Exception as exc:  # noqa: BLE001 - every failure becomes a per-file result
-            cause = holder.error if holder.error is not None else exc
-            logger.warning(
-                "sandbox_publish_failed name=%s error=%s", art.name, type(cause).__name__
+    try:
+        async with client.open_artifact(principal, art.aid) as download:
+            written = await storage_service.upload_stream(
+                tenant_uuid,
+                workspace_uuid,
+                file_id,
+                ext,
+                _guard_stream(download.chunks, ext, holder),
+                content_type,
             )
-            meta.status = "failed"
-            await db.commit()
-            await _discard(storage_service, file_key)
-            return PublishFailure(art.name, describe_error(cause))
+        if written != art.size:
+            raise SandboxFileError("传输的字节数与登记大小不符")
+    except Exception as exc:  # noqa: BLE001 - every failure becomes a per-file result
+        cause = holder.error if holder.error is not None else exc
+        logger.warning(
+            "sandbox_publish_failed name=%s error=%s", art.name, type(cause).__name__
+        )
+        try:
+            await file_client.fail(
+                tenant_id=tenant_uuid,
+                workspace_id=workspace_uuid,
+                actor_id=principal.end_user_id,
+                file_id=pending.file_id,
+            )
+        except Exception as fail_exc:  # noqa: BLE001 - the artifact already failed
+            logger.warning(
+                "sandbox_publish_status_failed name=%s error=%s",
+                art.name,
+                type(fail_exc).__name__,
+            )
+        await _discard(storage_service, pending.file_key)
+        return PublishFailure(art.name, describe_error(cause))
 
-        meta.status = "completed"
-        meta.file_size = written
-        await db.commit()
+    await file_client.complete(
+        tenant_id=tenant_uuid,
+        workspace_id=workspace_uuid,
+        actor_id=principal.end_user_id,
+        file_id=pending.file_id,
+        size=written,
+    )
 
     return PublishedFile(
         file_id=str(file_id),
