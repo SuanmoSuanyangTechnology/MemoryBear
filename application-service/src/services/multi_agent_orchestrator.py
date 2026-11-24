@@ -527,6 +527,54 @@ def _sse_event_name(event: str) -> Optional[str]:
         return None
 
 
+def _normalize_error_frame(event: str) -> str:
+    """Upgrade legacy sub-run error frames to the unified error frame.
+
+    AgentRunService / handoffs may still emit ``error``-only payloads without
+    msg/code/time. The cluster surface exposes only the unified shape so the
+    frontend and logs can read the user-facing msg. Frames that already carry
+    ``msg`` (or cannot be parsed) pass through unchanged.
+    """
+    if _sse_event_name(event) != "error":
+        return event
+    try:
+        data = json.loads(event.split("data: ", 1)[1].strip())
+    except Exception:
+        return event
+    if not isinstance(data, dict) or "msg" in data:
+        return event
+    error = data.get("error")
+    nested = error if isinstance(error, dict) else {}
+    numeric = data.get("code")
+    if not isinstance(numeric, int):
+        numeric = nested.get("code")
+    if not isinstance(numeric, int) or numeric == BizCode.OK.value:
+        numeric = BizCode.INTERNAL_ERROR.value
+    from error_core.messages import user_message
+
+    msg = (
+        nested.get("msg")
+        or nested.get("message")
+        or user_message(numeric, get_current_locale())
+        or "服务内部错误，请稍后重试"
+    )
+    detail = "" if not error else (
+        error if isinstance(error, str)
+        else str(nested.get("error") or nested.get("message") or "")
+    )
+    frame = {
+        "code": numeric,
+        "msg": msg,
+        "error": detail,
+        "message": detail,
+        "retryable": bool(nested.get("retryable", False)),
+        "time": int(time.time() * 1000),
+    }
+    for _k, _v in data.items():
+        frame.setdefault(_k, _v)
+    return f"event: error\ndata: {json.dumps(frame, ensure_ascii=False)}\n\n"
+
+
 class MultiAgentOrchestrator:
     """Multi-agent orchestrator - coordinates multiple agents to complete tasks together"""
 
@@ -3784,7 +3832,7 @@ class MultiAgentOrchestrator:
             # fill missing fields, never overwrite same-named fields carried by the
             # event) so the running panel can route events to the matching sub-agent block.
             yield self._inject_agent_meta(
-                self._strip_conversation_id(event),
+                self._strip_conversation_id(_normalize_error_frame(event)),
                 self._sub_event_meta(agent_id, agent_info.get("name")),
             )
 
@@ -4688,6 +4736,8 @@ class MultiAgentOrchestrator:
                 # (prevents the frontend's conversation pointer from being poisoned by
                 # handoffs' internal conversation ID — the cluster conversation ID is
                 # only ever published by start/end).
+                if event_name == "error":
+                    event = _normalize_error_frame(event)
                 if event_name not in _SUB_RUN_LIFECYCLE_EVENTS:
                     yield self._strip_conversation_id(event)
 

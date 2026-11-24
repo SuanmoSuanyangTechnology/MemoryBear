@@ -2274,6 +2274,9 @@ class AppChatService:
             # failed (content=user-facing msg, meta.error=diagnostic) instead
             # of an empty completed assistant row.
             _stream_failure: Optional[Dict[str, Any]] = None
+            # Agent-owned error frames are remembered separately; they only
+            # escalate to a failed turn when the main bubble has no body at all.
+            _last_error_frame: Optional[Dict[str, Any]] = None
             # Conversation-capability extras (suggested questions / citations /
             # audio) carried by the end event; empty when features are off
             end_extras: Dict[str, Any] = {}
@@ -2341,6 +2344,13 @@ class AppChatService:
                 if event.startswith("event:"):
                     _event_name = event[6:].split("\n", 1)[0].strip()
 
+                # This layer already emits the unified start frame (with
+                # conversation_id/message_id/user_message_id; the annotation-hit
+                # branch has only that one). The orchestrator start adds only
+                # `mode`; forwarding it would hand the client two start frames.
+                if _event_name == "start":
+                    continue
+
                 if _event_name == "end" and "data:" in event:
                     try:
                         data_line = event.split("data: ", 1)[1].strip()
@@ -2363,14 +2373,17 @@ class AppChatService:
                     # failed (same rule as the frontend's hasAgentOwner); the
                     # turn may still end normally. Only a cluster-level error
                     # (no ownership keys) marks this turn failed.
-                    if _error_payload is not None and not any(
-                        _k in _error_payload
-                        for _k in (
-                            "execution_id", "parent_execution_id",
-                            "orchestration_mode", "agent_id", "agent_name",
-                        )
-                    ):
-                        _stream_failure = _error_payload
+                    if _error_payload is not None:
+                        if any(
+                            _k in _error_payload
+                            for _k in (
+                                "execution_id", "parent_execution_id",
+                                "orchestration_mode", "agent_id", "agent_name",
+                            )
+                        ):
+                            _last_error_frame = _error_payload
+                        else:
+                            _stream_failure = _error_payload
 
                 if _event_name == "end":
                     held_end_event = event
@@ -2396,6 +2409,16 @@ class AppChatService:
                         pass
 
             elapsed_time = time.time() - start_time
+
+            # A sub-agent failed and the turn produced no main-bubble body at
+            # all (e.g. the first collaboration agent errored): persist the
+            # empty turn as failed with the error frame's msg as content.
+            if (
+                _stream_failure is None
+                and _last_error_frame is not None
+                and not full_content.strip()
+            ):
+                _stream_failure = _last_error_frame
 
             if _stream_failure is not None:
                 from error_core.messages import user_message
