@@ -15,7 +15,12 @@ from fastapi import FastAPI
 
 from src import db
 from src import redis as iredis
+from src.config import settings
 from src.controllers import acl, api_key_verify, jwks, user_snapshot
+from src.error_handlers import register_error_handlers
+from src.i18n import LanguageContextMiddleware, load_catalogs
+from src.i18n import configure as configure_i18n
+from src.sensitive import SensitiveDataFilter
 from src.services import (
     acl_publisher,
     audit_consumer,
@@ -24,13 +29,20 @@ from src.services import (
     retention,
     schema_check,
 )
+from src.services.enterprise import register_identity_plugins
+from src.trace import TraceIdMiddleware
 
 logger = logging.getLogger(__name__)
+
+load_catalogs()
+configure_i18n(settings.I18N_DEFAULT_LANGUAGE)
+SensitiveDataFilter.configure(settings)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await db.init_db()
+    db.init_sync_db()
     # 只读表契约校验（受控复制保障）：core 改列名/删列时启动即 fail-fast
     async with db.get_async_db_context() as session:
         await schema_check.assert_readonly_schema(session)
@@ -50,15 +62,25 @@ async def lifespan(app: FastAPI):
         t.cancel()
     await asyncio.gather(notify_task, audit_task, reconcile_task, retention_task,
                          return_exceptions=True)
+    iredis.close_sync_redis()
     await iredis.close_redis()
+    db.close_sync_db()
     await db.close_db()
 
 
 app = FastAPI(title="identity-service", lifespan=lifespan)
+
+# Enterprise policy hooks (login anomaly / quota alert / SSO permissions).
+# Community builds have no enterprise_ext package: nothing is registered and
+# alert reporting degrades to a no-op.
+register_identity_plugins()
+app.add_middleware(TraceIdMiddleware)
+app.add_middleware(LanguageContextMiddleware)
 app.include_router(jwks.router)
 app.include_router(user_snapshot.router)
 app.include_router(api_key_verify.router)
 app.include_router(acl.router)
+register_error_handlers(app)
 
 
 @app.get("/healthz")

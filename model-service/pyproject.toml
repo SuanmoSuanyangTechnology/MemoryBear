@@ -36,10 +36,10 @@ dev = [
 ]
 
 [tool.uv.sources]
-redbear-model = { path = "../packages/redbear-model" }
-error-core = { path = "../packages/error-core" }
-auth-sdk = { path = "../packages/auth-sdk" }
-memorybear-grpc = { path = "../packages/memorybear-grpc" }
+redbear-model = { path = "../packages/redbear-model", editable = true }
+error-core = { path = "../packages/error-core", editable = true }
+auth-sdk = { path = "../packages/auth-sdk", editable = true }
+memorybear-grpc = { path = "../packages/memorybear-grpc", editable = true }
 
 [tool.hatch.build.targets.wheel]
 packages = ["src"]

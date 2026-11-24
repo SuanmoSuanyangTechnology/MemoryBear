@@ -59,11 +59,11 @@ dev = [
 ]
 
 [tool.uv.sources]
-error-core = { path = "../packages/error-core" }
-redbear-model = { path = "../packages/redbear-model" }
-memorybear-grpc = { path = "../packages/memorybear-grpc" }
-mem-storage-core = { path = "../packages/storage-core" }
-auth-sdk = { path = "../packages/auth-sdk" }
+error-core = { path = "../packages/error-core", editable = true }
+redbear-model = { path = "../packages/redbear-model", editable = true }
+memorybear-grpc = { path = "../packages/memorybear-grpc", editable = true }
+mem-storage-core = { path = "../packages/storage-core", editable = true }
+auth-sdk = { path = "../packages/auth-sdk", editable = true }
 
 [tool.hatch.build.targets.wheel]
 packages = ["src"]

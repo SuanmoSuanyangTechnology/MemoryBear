@@ -349,7 +349,7 @@ wheels = [
 [[package]]
 name = "error-core"
 version = "0.1.0"
-source = { directory = "../packages/error-core" }
+source = { editable = "../packages/error-core" }
 
 [package.metadata]
 
@@ -770,10 +770,10 @@ requires-dist = [
     { name = "pydantic", specifier = "==2.14.1" },
     { name = "pydantic-settings", specifier = "==2.16.1" },
     { name = "python-dotenv", specifier = "==1.2.4" },
-    { name = "redbear-model", extras = ["runtime"], directory = "../packages/redbear-model" },
+    { name = "redbear-model", extras = ["runtime"], editable = "../packages/redbear-model" },
     { name = "redis", specifier = "==6.4.0" },
     { name = "sqlalchemy", specifier = "==2.1.6" },
-    { name = "task-bridge-sdk", extras = ["mem-router"], directory = "../packages/task-bridge-sdk" },
+    { name = "task-bridge-sdk", extras = ["mem-router"], editable = "../packages/task-bridge-sdk" },
 ]
 
 [package.metadata.requires-dev]
@@ -1114,7 +1114,7 @@ wheels = [
 [[package]]
 name = "redbear-model"
 version = "0.1.0"
-source = { directory = "../packages/redbear-model" }
+source = { editable = "../packages/redbear-model" }
 dependencies = [
     { name = "cryptography" },
     { name = "error-core" },
@@ -1136,7 +1136,7 @@ requires-dist = [
     { name = "cryptography", specifier = ">=43" },
     { name = "dashscope", marker = "extra == 'all'", specifier = ">=1.25,<2" },
     { name = "dashscope", marker = "extra == 'dashscope'", specifier = ">=1.25,<2" },
-    { name = "error-core", directory = "../packages/error-core" },
+    { name = "error-core", editable = "../packages/error-core" },
     { name = "httpx", marker = "extra == 'all'", specifier = ">=0.28,<1" },
     { name = "httpx", marker = "extra == 'runtime'", specifier = ">=0.28,<1" },
     { name = "httpx", extras = ["socks"], marker = "extra == 'all'", specifier = ">=0.28,<1" },
@@ -1153,7 +1153,7 @@ requires-dist = [
     { name = "langchain-ollama", marker = "extra == 'ollama'", specifier = ">=1.0,<2" },
     { name = "langchain-openai", marker = "extra == 'all'", specifier = ">=1.0,<2" },
     { name = "langchain-openai", marker = "extra == 'runtime'", specifier = ">=1.0,<2" },
-    { name = "memorybear-grpc", marker = "extra == 'grpc'", directory = "../packages/memorybear-grpc" },
+    { name = "memorybear-grpc", marker = "extra == 'grpc'", editable = "../packages/memorybear-grpc" },
     { name = "pydantic", specifier = ">=2.12,<3" },
     { name = "sqlalchemy", specifier = ">=2.0,<3" },
     { name = "volcengine-python-sdk", extras = ["ark"], marker = "extra == 'all'", specifier = ">=5.0.19,<6" },
@@ -1289,7 +1289,7 @@ wheels = [
 [[package]]
 name = "task-bridge-sdk"
 version = "0.1.0"
-source = { directory = "../packages/task-bridge-sdk" }
+source = { editable = "../packages/task-bridge-sdk" }
 
 [package.metadata]
 requires-dist = [

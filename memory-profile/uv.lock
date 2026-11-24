@@ -147,7 +147,7 @@ wheels = [
 [[package]]
 name = "auth-sdk"
 version = "0.1.0"
-source = { directory = "../packages/auth-sdk" }
+source = { editable = "../packages/auth-sdk" }
 dependencies = [
     { name = "httpx" },
     { name = "pydantic" },
@@ -434,7 +434,7 @@ async = [
 [[package]]
 name = "error-core"
 version = "0.1.0"
-source = { directory = "../packages/error-core" }
+source = { editable = "../packages/error-core" }
 
 [package.metadata]
 
@@ -871,7 +871,7 @@ wheels = [
 [[package]]
 name = "memory-contracts"
 version = "0.1.0"
-source = { directory = "../packages/memory-contracts" }
+source = { editable = "../packages/memory-contracts" }
 
 [[package]]
 name = "memory-profile"
@@ -895,6 +895,7 @@ dependencies = [
     { name = "pydantic" },
     { name = "pydantic-settings" },
     { name = "python-dotenv" },
+    { name = "python-multipart" },
     { name = "redbear-model", extra = ["runtime"] },
     { name = "redis" },
     { name = "sqlalchemy", extra = ["asyncio"] },
@@ -917,26 +918,27 @@ dev = [
 requires-dist = [
     { name = "alembic", specifier = "==1.20.0" },
     { name = "asyncpg", specifier = "==0.32.0" },
-    { name = "auth-sdk", directory = "../packages/auth-sdk" },
+    { name = "auth-sdk", editable = "../packages/auth-sdk" },
     { name = "certifi", specifier = "==2026.10.23" },
     { name = "elasticsearch", extras = ["async"], specifier = "==8.16.0" },
-    { name = "error-core", directory = "../packages/error-core" },
+    { name = "error-core", editable = "../packages/error-core" },
     { name = "fastapi", specifier = "==0.156.4" },
     { name = "jinja2", specifier = "==3.1.6" },
     { name = "json-repair", specifier = "==0.64.2" },
     { name = "langchain-core", specifier = "==1.6.12" },
     { name = "langchain-openai", specifier = "==1.7.2" },
-    { name = "memory-contracts", directory = "../packages/memory-contracts" },
+    { name = "memory-contracts", editable = "../packages/memory-contracts" },
     { name = "neo4j", specifier = "==6.4.0" },
     { name = "psutil", specifier = "==7.2.2" },
     { name = "pydantic", specifier = "==2.14.1" },
     { name = "pydantic-settings", specifier = "==2.16.1" },
     { name = "python-dotenv", specifier = "==1.2.4" },
-    { name = "redbear-model", extras = ["runtime"], directory = "../packages/redbear-model" },
+    { name = "python-multipart", specifier = ">=0.0.20" },
+    { name = "redbear-model", extras = ["runtime"], editable = "../packages/redbear-model" },
     { name = "redis", specifier = "==8.1.0" },
     { name = "sqlalchemy", extras = ["asyncio"], specifier = "==2.1.5" },
     { name = "starlette", specifier = "==1.10.0" },
-    { name = "task-bridge-sdk", extras = ["celery", "mem-router"], directory = "../packages/task-bridge-sdk" },
+    { name = "task-bridge-sdk", extras = ["celery", "mem-router"], editable = "../packages/task-bridge-sdk" },
     { name = "uvicorn", extras = ["standard"], specifier = "==0.54.0" },
     { name = "xxhash", specifier = "==4.0.2" },
     { name = "zttp", specifier = "==0.0.35" },
@@ -1282,6 +1284,15 @@ wheels = [
 ]
 
 [[package]]
+name = "python-multipart"
+version = "0.0.34"
+source = { registry = "https://mirrors.cloud.tencent.com/pypi/simple" }
+sdist = { url = "https://mirrors.cloud.tencent.com/pypi/packages/7e/c0/c753d487a83d873f6946cee6cbc26cea3fe59a476ad0de99a14938a2fbd8/python_multipart-0.0.34.tar.gz", hash = "sha256:b998ae90ca6e1e363261ce2e0e230281b8af53867b757970abd69ee9edcd843a" }
+wheels = [
+    { url = "https://mirrors.cloud.tencent.com/pypi/packages/f5/0e/090c52b122d8ec5fa37942c1410fea9cf04ce98bca0c84dde7f0aa11594d/python_multipart-0.0.34-py3-none-any.whl", hash = "sha256:ebacd224bd686eee2f9aa1066a657affe07435a185834e05e5235e2e59173e91" },
+]
+
+[[package]]
 name = "pytz"
 version = "2026.5"
 source = { registry = "https://mirrors.cloud.tencent.com/pypi/simple" }
@@ -1311,7 +1322,7 @@ wheels = [
 [[package]]
 name = "redbear-model"
 version = "0.1.0"
-source = { directory = "../packages/redbear-model" }
+source = { editable = "../packages/redbear-model" }
 dependencies = [
     { name = "cryptography" },
     { name = "error-core" },
@@ -1333,7 +1344,7 @@ requires-dist = [
     { name = "cryptography", specifier = ">=43" },
     { name = "dashscope", marker = "extra == 'all'", specifier = ">=1.25,<2" },
     { name = "dashscope", marker = "extra == 'dashscope'", specifier = ">=1.25,<2" },
-    { name = "error-core", directory = "../packages/error-core" },
+    { name = "error-core", editable = "../packages/error-core" },
     { name = "httpx", marker = "extra == 'all'", specifier = ">=0.28,<1" },
     { name = "httpx", marker = "extra == 'runtime'", specifier = ">=0.28,<1" },
     { name = "httpx", extras = ["socks"], marker = "extra == 'all'", specifier = ">=0.28,<1" },
@@ -1350,7 +1361,7 @@ requires-dist = [
     { name = "langchain-ollama", marker = "extra == 'ollama'", specifier = ">=1.0,<2" },
     { name = "langchain-openai", marker = "extra == 'all'", specifier = ">=1.0,<2" },
     { name = "langchain-openai", marker = "extra == 'runtime'", specifier = ">=1.0,<2" },
-    { name = "memorybear-grpc", marker = "extra == 'grpc'", directory = "../packages/memorybear-grpc" },
+    { name = "memorybear-grpc", marker = "extra == 'grpc'", editable = "../packages/memorybear-grpc" },
     { name = "pydantic", specifier = ">=2.12,<3" },
     { name = "sqlalchemy", specifier = ">=2.0,<3" },
     { name = "volcengine-python-sdk", extras = ["ark"], marker = "extra == 'all'", specifier = ">=5.0.19,<6" },
@@ -1516,7 +1527,7 @@ wheels = [
 [[package]]
 name = "task-bridge-sdk"
 version = "0.1.0"
-source = { directory = "../packages/task-bridge-sdk" }
+source = { editable = "../packages/task-bridge-sdk" }
 
 [package.optional-dependencies]
 celery = [
