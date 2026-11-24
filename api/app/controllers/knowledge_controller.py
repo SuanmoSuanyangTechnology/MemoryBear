@@ -699,7 +699,7 @@ async def _update_knowledge(
 
         # 2. If updating the embedding_id, delete the knowledge base vector index, reset all document parsing progress to 0, and set chunk_num to 0
         update_dict = update_data.model_dump(exclude_unset=True)
-        if {"parent_id", "status"} & update_dict.keys():
+        if {"parent_id", "status", "type"} & update_dict.keys():
             await db.run_sync(
                 validate_knowledge_hierarchy, db_knowledge.workspace_id, update_dict,
                 api_settings.KB_KNOWLEDGE_FOLDER_MAX_DEPTH, db_knowledge.id,
@@ -745,7 +745,7 @@ async def _update_knowledge(
                 if db_knowledge.embedding_id and db_knowledge.reranker_id:
                     await asyncio.to_thread(ElasticSearchVectorIndexOps.for_knowledge(db_knowledge.id).delete_index)
                 await document_service.reset_documents_progress_by_kb_id_async(db, kb_id=db_knowledge.id, current_user=current_user)
-                if {"parent_id", "status"} & update_dict.keys():
+                if {"parent_id", "status", "type"} & update_dict.keys():
                     # Reset commits its transaction; reacquire the lock before editing.
                     await db.run_sync(
                         validate_knowledge_hierarchy, db_knowledge.workspace_id, update_dict,
