@@ -1,5 +1,7 @@
 """供外部 Agent 使用的情绪回应指导接口。"""
 
+import logging
+
 from fastapi import APIRouter, Request, Response
 from fastapi.responses import JSONResponse
 
@@ -8,6 +10,8 @@ from app.core.error_codes import BizCode
 from app.core.response_utils import fail
 from app.integrations.profile.proxy import memory_profile_proxy
 from app.schemas.emotion_reply_schema import EmotionReplyRequest, EmotionReplyResponse
+
+logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/memory/emotion-reply", tags=["Emotion Reply"])
 
 
@@ -42,8 +46,9 @@ async def emotion_reply(request: Request, body: EmotionReplyRequest) -> dict | R
         )
 
     if auth.tenant_id is None:
+        logger.error("Emotion reply could not resolve tenant for workspace %s", auth.workspace_id)
         return JSONResponse(
-            status_code=503,
-            content=fail(BizCode.SERVICE_UNAVAILABLE, "情绪回应策略能力不可用"),
+            status_code=500,
+            content=fail(BizCode.INTERNAL_ERROR, "情绪回应提示词获取失败"),
         )
     return await _handle_emotion_reply(request=request, body=body)

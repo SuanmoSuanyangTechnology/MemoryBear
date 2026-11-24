@@ -51,6 +51,8 @@ class ReflectionTrialService:
         row = await self.configs.get_reflection_trial(config_id, workspace_id, tenant_id)
         if row is None:
             raise ConfigNotFoundError(str(config_id))
+        if row.get("reflexion_range") == "retrieval":
+            row["reflexion_range"] = "partial"
         config = ReflectionTrialConfig.model_validate(row)
         # Match the preview's workspace.llm selection even for inactive configs.
         # There is no usable default-model fallback in the legacy invoke path.
