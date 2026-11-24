@@ -112,6 +112,10 @@ celery_app.conf.update(
             QueueName.MEMORY_PROJECTION.value,
             queue_arguments={"x-max-priority": settings.task_queue_max_priority},
         ),
+        Queue(
+            QueueName.METADATA_MIGRATION.value,
+            queue_arguments={"x-max-priority": settings.task_queue_max_priority},
+        ),
     ),
     task_default_priority=int(TaskPriority.NORMAL),
     broker_transport_options=_broker_transport_options(settings),
