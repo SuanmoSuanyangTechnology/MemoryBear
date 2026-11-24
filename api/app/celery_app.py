@@ -285,16 +285,19 @@ draft_data_clean_schedule = crontab(hour=settings.DRAFT_DATA_CLEAN_HOUR, minute=
 forget_scan_schedule = timedelta(minutes=settings.FORGET_SCAN_INTERVAL_MINUTES)
 # 构建定时任务配置
 beat_schedule_config = {
-    "scan-outbox-projection": {
-        "task": "app.tasks.scan_outbox_projection",
-        "schedule": timedelta(seconds=settings.OUTBOX_SCAN_INTERVAL_SECONDS),
-        "options": {"queue": "memory_projection", "expires": settings.OUTBOX_SCAN_INTERVAL_SECONDS},
-    },
-    "cleanup-outbox": {
-        "task": "app.tasks.cleanup_outbox",
-        "schedule": crontab(hour=settings.OUTBOX_CLEANUP_HOUR, minute=0),
-        "options": {"queue": "memory_projection"},
-    },
+    # storage-outbox 投影/清理由 memory-jobs 的 outbox-projection / outbox-cleanup
+    # 接管（PostgreSQL 租约保证同一行不会被两边同时投影）。两端同时开 beat 只会
+    # 重复空扫，任务定义保留在 app.tasks，便于手动触发或回滚时恢复。
+    # "scan-outbox-projection": {
+    #     "task": "app.tasks.scan_outbox_projection",
+    #     "schedule": timedelta(seconds=settings.OUTBOX_SCAN_INTERVAL_SECONDS),
+    #     "options": {"queue": "memory_projection", "expires": settings.OUTBOX_SCAN_INTERVAL_SECONDS},
+    # },
+    # "cleanup-outbox": {
+    #     "task": "app.tasks.cleanup_outbox",
+    #     "schedule": crontab(hour=settings.OUTBOX_CLEANUP_HOUR, minute=0),
+    #     "options": {"queue": "memory_projection"},
+    # },
     "scan-scene-summary-idle": {
         "task": "app.tasks.scan_scene_summary_idle",
         "schedule": 300.0,

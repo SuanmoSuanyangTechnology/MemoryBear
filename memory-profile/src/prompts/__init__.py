@@ -1,0 +1,1 @@
+"""Prompt resources that must stay byte-compatible with the API host."""

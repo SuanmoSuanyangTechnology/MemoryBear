@@ -3,10 +3,11 @@
  * failures, and it lists failed entries only.
  */
 import { useState } from 'react';
-import { Alert, Button, Flex, Space } from 'antd';
+import { Button, Flex, Space } from 'antd';
 
 import useFaqImportI18n from './hooks/useFaqImportI18n';
 import type { FaqImportIssue, FaqImportParseResult } from './faqImportFile';
+import RbAlert from '@/components/RbAlert'
 
 interface FaqImportPreviewProps {
   result: FaqImportParseResult;
@@ -20,7 +21,7 @@ export default function FaqImportPreview({ result }: FaqImportPreviewProps) {
   const formatIssue = (item: FaqImportIssue) => key(`errors.${item.code}`, item.params);
 
   if (result.error) {
-    return <Alert type="error" showIcon className="rb:mt-4!" message={formatIssue(result.error)} />;
+    return <RbAlert color="red" className="rb:mt-4!">{formatIssue(result.error)}</RbAlert>;
   }
 
   const failures = result.rows

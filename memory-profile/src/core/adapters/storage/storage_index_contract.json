@@ -1011,6 +1011,9 @@
             "role": {
               "type": "keyword"
             },
+            "role_rank": {
+              "type": "integer"
+            },
             "source": {
               "type": "keyword"
             },
@@ -1053,7 +1056,7 @@
           }
         },
         "name": "rag_memory",
-        "schema_version": 1,
+        "schema_version": 2,
         "settings": {
           "number_of_shards": 5
         }
@@ -2104,6 +2107,9 @@
         },
         {
           "field": "role"
+        },
+        {
+          "field": "role_rank"
         },
         {
           "field": "end_user_id"

@@ -877,6 +877,7 @@ async def v1_chat(
     app_id = await resolve_app_for_chat(
         api_key_id=request.headers.get(API_KEY_ID_HEADER),
         workspace_id=principal.workspace_id,
+        fail_fast=True,
     )
     workspace_id = principal.workspace_id
 

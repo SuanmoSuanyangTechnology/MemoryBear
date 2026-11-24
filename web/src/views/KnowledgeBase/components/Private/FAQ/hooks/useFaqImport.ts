@@ -18,20 +18,22 @@ import { dismissFaqImportResult, showFaqImportResult } from '../FaqImportStatus'
 import type { FaqImportFailedEntryVo, FaqImportMode, FaqImportTaskVo } from '../types';
 import useFaqImportI18n from './useFaqImportI18n';
 
-const POLL_INTERVAL_MS = 800;
+const POLL_INTERVAL_MS = 2000;
 
 export type FaqImportStage = 'input' | 'submitting' | 'running' | 'done';
 
 interface UseFaqImportOptions {
   knowledgeBaseId: string;
   onCompleted?: () => void;
+  /** 现有 FAQ 总数，用于全量覆盖时的二次确认文案。 */
+  existingCount?: number;
 }
 
 const isTerminal = (status: FaqImportTaskVo['status']) =>
   status === 'succeeded' || status === 'partially_succeeded' || status === 'failed';
 
-export default function useFaqImport({ knowledgeBaseId, onCompleted }: UseFaqImportOptions) {
-  const { message, notification } = App.useApp();
+export default function useFaqImport({ knowledgeBaseId, onCompleted, existingCount = 0 }: UseFaqImportOptions) {
+  const { message, notification, modal } = App.useApp();
   const key = useFaqImportI18n();
 
   const [open, setOpen] = useState(false);
@@ -51,10 +53,12 @@ export default function useFaqImport({ knowledgeBaseId, onCompleted }: UseFaqImp
   const modeRef = useRef(mode);
   const stageRef = useRef(stage);
   const isJsonRef = useRef(false);
+  const existingCountRef = useRef(existingCount);
   completedRef.current = onCompleted;
   keyRef.current = key;
   modeRef.current = mode;
   stageRef.current = stage;
+  existingCountRef.current = existingCount;
 
   const stopPolling = useCallback(() => {
     if (pollTimerRef.current) {
@@ -165,8 +169,8 @@ export default function useFaqImport({ knowledgeBaseId, onCompleted }: UseFaqImp
     parseFaqImportFile(file)
       .then((result) => {
         if (version !== readVersionRef.current || session !== sessionRef.current) return;
-        if (isFaqImportReady(result)) commitImport(result, modeRef.current);
-        else setParseResult(result);
+        // Validation alone never imports; the user must click the confirm button.
+        setParseResult(result);
       })
       .catch(() => {
         if (version !== readVersionRef.current || session !== sessionRef.current) return;
@@ -176,7 +180,31 @@ export default function useFaqImport({ knowledgeBaseId, onCompleted }: UseFaqImp
         if (version !== readVersionRef.current || session !== sessionRef.current) return;
         setParsing(false);
       });
-  }, [parsing, stage, commitImport, dismissNotice]);
+  }, [parsing, stage, dismissNotice]);
+
+  // Explicit confirm: append commits directly; replace needs a second confirmation.
+  const confirmImport = useCallback(() => {
+    if (stage !== 'input' || !parseResult || !isFaqImportReady(parseResult)) return;
+    const selectedMode = modeRef.current;
+    if (selectedMode !== 'replace') {
+      commitImport(parseResult, selectedMode);
+      return;
+    }
+    const t = keyRef.current;
+    modal.confirm({
+      title: t('replaceConfirmTitle'),
+      content: t('replaceConfirmDesc', {
+        importCount: parseResult.rows.length,
+        totalCount: existingCountRef.current,
+      }),
+      okText: t('replaceConfirmOk'),
+      cancelText: t('replaceBack'),
+      okButtonProps: { danger: true },
+      onOk: () => {
+        commitImport(parseResult, selectedMode);
+      },
+    });
+  }, [stage, parseResult, commitImport, modal]);
 
   const openImport = useCallback(() => {
     if (stage === 'submitting' || stage === 'running') {
@@ -239,6 +267,7 @@ export default function useFaqImport({ knowledgeBaseId, onCompleted }: UseFaqImp
     openImport,
     closeImport,
     readFile,
+    confirmImport,
     dismissNotice,
   };
 }

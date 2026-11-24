@@ -3,7 +3,7 @@ Workflow-related data models
 """
 
 import uuid
-from sqlalchemy import Column, String, Boolean, DateTime, Integer, BigInteger, Float, ForeignKey, Text, text
+from sqlalchemy import Column, String, Boolean, DateTime, Integer, BigInteger, Float, ForeignKey, Index, Text, text
 from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy.orm import relationship
 from .base import ServiceBase as Base
@@ -134,6 +134,17 @@ class WorkflowExecution(Base):
     meta_data = Column(JSONB, default=dict)
     
     created_at = Column(DateTime, nullable=False, default=utcnow_naive)
+
+    __table_args__ = (
+        Index(
+            "ix_workflow_executions_retention_order",
+            app_id,
+            workflow_config_id,
+            started_at.desc(),
+            created_at.desc(),
+            id.desc(),
+        ),
+    )
     
     # Relationships
     workflow_config = relationship("WorkflowConfig", back_populates="executions")

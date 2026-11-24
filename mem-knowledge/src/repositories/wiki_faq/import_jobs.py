@@ -254,7 +254,7 @@ def commit_faqs(session, task_id, token, items, model_id):
                         negative_questions=[],
                         answer_strategy="all",
                         review_state="approved",
-                        is_enabled=True,
+                        is_enabled=False,
                         content_revision=1,
                         row_version=1,
                         created_by=job.actor_id,
