@@ -229,12 +229,9 @@ async def terminate_api_key(request: Request, deps: GatewayDeps) -> AuthResult:
     """
     api_key = _extract_api_key(request)
     if api_key is None:
-        # 缺少 API Key 属于未认证，保留业务码 3007。
+        # /v1 契约：未携带 Key → 400 / code 3007（API_KEY_NOT_FOUND）
         body = _v1_fail(3007, "请求未携带 API Key")
-        return AuthResult(
-            status_code=401, detail="missing api key", body=body,
-            headers={"WWW-Authenticate": "Bearer"},
-        )
+        return AuthResult(status_code=400, detail="missing api key", body=body)
     try:
         ctx = await deps.reader.get_api_key_snapshot(api_key)
     except SnapshotUnavailable:
