@@ -222,15 +222,8 @@ def build_openai_embedding_params(
     }
     if clients.timeout is not None:
         params["timeout"] = clients.timeout
-    if config.provider is ModelProvider.OPENAI and not config.base_url:
-        params["base_url"] = "https://api.openai.com/v1"
-    if config.provider in {ModelProvider.SPEEDBEAR, ModelProvider.XINFERENCE}:
+    if config.provider is ModelProvider.SPEEDBEAR:
         params["check_embedding_ctx_length"] = False
-    if config.provider is ModelProvider.XINFERENCE:
-        if not config.base_url:
-            raise ValueError("Xinference embeddings require a deployment URL")
-        base_url = config.base_url.rstrip("/").removesuffix("/v1/embeddings")
-        params["base_url"] = base_url if base_url.endswith("/v1") else f"{base_url}/v1"
     return params
 
 

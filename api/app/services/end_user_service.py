@@ -1,27 +1,21 @@
 import asyncio
 import uuid
 
-from sqlalchemy import select, update
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from task_bridge.metadata_migration import (
-    legacy_metadata_input,
-    metadata_write_column,
-    new_metadata,
-)
 
-from app.core.config import settings
+from app.aioRedis import get_thread_safe_sync_redis
 from app.core.exceptions import BusinessException
 from app.core.logging_config import get_memory_logger
 from app.core.memory.models.metadata_models import merge_user_meta_data
 from app.core.memory.storage.custom import merge_end_user_memory_nodes
-from app.core.utils.datetime_utils import utcnow_naive
 from app.models import EndUserInfo
 from app.models.end_user_model import EndUser
-from app.plugins import get_plugin
 from app.repositories.end_user_info_repository import EndUserInfoRepository
 from app.repositories.end_user_repository import EndUserRepository
 from app.repositories.neo4j.neo4j_connector import Neo4jConnector
-from app.utils.redis_lock import RedisFairLock, get_memory_write_redis
+from app.plugins import get_plugin
+from app.utils.redis_lock import RedisFairLock
 
 logger = get_memory_logger()
 
@@ -46,86 +40,9 @@ class EndUserService:
 
         locks = await self._acquire_memory_write_locks(source, target)
         try:
-            return await self._merge_end_users_locked(source, target, write_locks=locks)
-        except BaseException:
-            await self.db.rollback()
-            raise
+            return await self._merge_end_users_locked(source, target)
         finally:
             await self._release_memory_write_locks(locks)
-
-    async def _prepare_merge_metadata(
-        self, users: dict[uuid.UUID, EndUser], infos: dict[uuid.UUID, EndUserInfo],
-        locks: list[RedisFairLock],
-    ) -> dict[uuid.UUID, dict]:
-        """有效老用户补迁成功才允许合并；在当前事务 CAS 写入，不提前软删。"""
-        from app.core.memory.storage_services.reflection_engine.deterministic.metadata_migration import (
-            prepare_migration_metadata,
-        )
-        by_key = {lock.key: lock for lock in locks}
-        client = None
-        prepared = {}
-        pending = []
-        for user_id, user in users.items():
-            info = infos.get(user_id)
-            if info is None:
-                raise BusinessException(message=f"User info missing before merge: {user_id}")
-            lock = by_key.get(f"memory_write:{user_id}")
-            if lock is None:
-                raise BusinessException(message=f"User write lock missing: {user_id}")
-            lock.ensure_valid()
-            if info.meta_data_new is not None:
-                prepared[user_id] = new_metadata(info.meta_data_new)
-                continue
-            if not user.is_active:
-                # 已软删的历史来源不再补迁，也不能假装合并到了它的 metadata。
-                raise BusinessException(message=f"Inactive source has unmigrated metadata: {user_id}")
-            if metadata_write_column(user.created_at, None) == "meta_data_new":
-                prepared[user_id] = {}
-                continue
-            if not settings.METADATA_MIGRATION_ENABLED:
-                raise BusinessException(message="Metadata migration disabled; retry user merge after migration")
-            original = info.meta_data
-            if original is not None and not isinstance(original, dict):
-                raise BusinessException(message=f"Invalid metadata before merge: {user_id}")
-            if client is None and legacy_metadata_input(original or {}):
-                client = await self._merge_migration_client(user.workspace_id)
-            merged, _, _ = await asyncio.wait_for(
-                prepare_migration_metadata(str(user_id), original, client),
-                timeout=settings.METADATA_MIGRATION_TIMEOUT_SECONDS,
-            )
-            prepared[user_id] = merged
-            pending.append((user_id, original, merged))
-        # 所有模型处理成功后再写入，失败不会留下部分 ORM 内存修改。
-        for user_id, original, merged in pending:
-            lock = by_key[f"memory_write:{user_id}"]
-            lock.ensure_valid()
-            if await asyncio.to_thread(lock.redis.get, lock.key) != lock.value:
-                raise BusinessException(message=f"User write lock lost: {user_id}")
-            baseline_matches = EndUserInfo.meta_data.is_(None) if original is None else EndUserInfo.meta_data == original
-            result = await self.db.execute(
-                update(EndUserInfo).where(
-                    EndUserInfo.end_user_id == user_id, EndUserInfo.meta_data_new.is_(None), baseline_matches,
-                    EndUserInfo.end_user_id.in_(select(EndUser.id).where(EndUser.is_active.is_(True))),
-                ).values(meta_data_new=merged, updated_at=utcnow_naive()).execution_options(synchronize_session=False)
-            )
-            if not result.rowcount:
-                raise BusinessException(message=f"Metadata changed before merge: {user_id}; retry")
-            logger.info("用户合并前 metadata 补迁完成 user=%s", user_id)
-        return prepared
-
-    @staticmethod
-    async def _merge_migration_client(workspace_id: uuid.UUID):
-        """只在需要转换旧事实时解析模型；使用独立短会话。"""
-        from app.core.memory.pipelines.base_pipeline import ModelClientMixin
-        from app.db import get_async_db_context
-        from app.models.workspace_model import Workspace
-        from app.services.memory_config_service import MemoryConfigService
-        async with get_async_db_context() as db:
-            config_id = await db.scalar(select(Workspace.memory_config).where(Workspace.id == workspace_id))
-            config = await MemoryConfigService(db).load_memory_config_async(config_id)
-            return await ModelClientMixin.get_llm_client_async(
-                db, getattr(config, "reflection_model_id", None) or config.llm_model_id, config.tenant_id,
-            )
 
     async def _fetch_scene_name_to_id_map(
         self, workspace_id: uuid.UUID, scene_names: list[str],
@@ -150,7 +67,7 @@ class EndUserService:
         source: set[uuid.UUID],
         target: uuid.UUID,
     ) -> list[RedisFairLock]:
-        redis_client = get_memory_write_redis()
+        redis_client = get_thread_safe_sync_redis()
         locks: list[RedisFairLock] = []
         lock_ids = sorted({str(target), *(str(source_id) for source_id in source)})
         try:
@@ -189,7 +106,6 @@ class EndUserService:
         self,
         source: set[uuid.UUID],
         target: uuid.UUID,
-        *, write_locks: list[RedisFairLock],
     ):
         """将 source 中的用户合并到 target 用户。
 
@@ -198,7 +114,7 @@ class EndUserService:
         2. PG EndUser + end_user_merge：source 软删（is_active = False）并写入合并
            映射，**同一次提交**。此后老 end_user_id 即经映射路由到 target，迁移
            期间的新写入直接落到 target，不会产生孤儿数据
-        3. PG EndUserInfo：aliases / meta_data_new 与归并意图同事务合并到 target
+        3. PG EndUserInfo：aliases / meta_data 合并到 target
         4. Neo4j：普通节点的 end_user_id 改为 target；User 实体节点合并全部属性；
            Preference 同业务桶保留 target 并删除 source，异桶迁移到 target
         5. Neo4j：关系属性 end_user_id 改为 target（保留原始关系类型）
@@ -267,14 +183,6 @@ class EndUserService:
                     message=f"Inactive source user {source_id} has no matching merge intent."
                 )
 
-        # 先补齐双方新列，再发布软删除/归并意图。任一补迁失败则不开始归并。
-        all_infos = {info.end_user_id: info for info in end_user_infos}
-        all_infos[target] = target_user_info
-        prepared_metadata = await self._prepare_merge_metadata(
-            {target: target_user, **source_users}, all_infos, write_locks,
-        )
-        # 补迁成功的结果和归并意图同事务提交；禁止把旧八字段重新混入新列。
-
         # Snapshot every ORM value needed after the first commit.  The application
         # session factory currently uses expire_on_commit=False, but this service
         # accepts any AsyncSession; callers and tests may use the SQLAlchemy default
@@ -285,61 +193,15 @@ class EndUserService:
             for source_id, source_user in source_users.items()
         }
         target_aliases_snapshot = list(target_user_info.aliases or [])
-        target_meta_snapshot = prepared_metadata[target]
+        target_meta_snapshot = dict(target_user_info.meta_data or {})
         source_info_snapshots = [
-            (list(info.aliases or []), prepared_metadata[info.end_user_id])
+            (list(info.aliases or []), dict(info.meta_data or {}))
             for info in end_user_infos
         ]
 
-        workspace_id = target_user.workspace_id
-        # 合并 aliases 与新列；与软删除、路由映射一起提交。
-        final_aliases: list[str] = list(target_aliases_snapshot)
-        seen_alias_lower = {a.lower() for a in final_aliases}
-
-        merged_meta: dict = dict(target_meta_snapshot)
-        # 查询 scene_name -> scene_type_id 映射，用于归并时统一 domain_specific_info 键
-        scene_names = {
-            key
-            for metadata in [target_meta_snapshot, *(meta for _, meta in source_info_snapshots)]
-            if isinstance(metadata.get("domain_specific_info"), dict)
-            for key in metadata["domain_specific_info"]
-        }
-        name_to_id_map = await self._fetch_scene_name_to_id_map(workspace_id, sorted(scene_names))
-        # source 没有信息记录时，也需要统一 target 中已有的场景键。
-        merged_meta = merge_user_meta_data(merged_meta, {}, name_to_id_map)
-
-        for aliases, meta_data in source_info_snapshots:
-            for alias in aliases:
-                alias = alias.strip()
-                if alias and alias.lower() not in seen_alias_lower:
-                    final_aliases.append(alias)
-                    seen_alias_lower.add(alias.lower())
-
-            merged_meta = merge_user_meta_data(merged_meta, meta_data, name_to_id_map)
-
-        target_user_info.aliases = final_aliases
-        for lock in write_locks:
-            lock.ensure_valid()
-            if await asyncio.to_thread(lock.redis.get, lock.key) != lock.value:
-                raise BusinessException(message=f"User write lock lost: {lock.key}")
-        target_user_info.meta_data_new = new_metadata(merged_meta)
-        target_user.memory_tags = None
-        target_user.memory_tags_source_fingerprint = None
-        target_user.memory_tags_updated_at = None
-        target_user.memory_insight = None
-        target_user.memory_insight_updated_at = None
-        target_user.key_findings = None
-        target_user.behavior_pattern = None
-        target_user.growth_trajectory = None
-        target_user.user_summary = None
-        target_user.user_summary_updated_at = None
-        target_user.personality_traits = None
-        target_user.core_values = None
-        target_user.one_sentence_summary = None
-
         # ── 1.5 归并意图先行落库：软删 source + 写 end_user_merge 映射，同一次提交 ──
-        # 新画像已在内存准备完成，此提交原子落下新列结果、软删除和映射：
-        # ① 必须晚于校验/补迁：任何失败时 source 不能已被软删；
+        # 位置刻意放在「所有前置校验之后、任何数据迁移之前」：
+        # ① 必须晚于校验：上面的 target_user_info 校验若失败，source 不能已被软删；
         # ② 必须早于迁移：迁移期间落到 source 的新写入会经 get_end_user_by_id_async
         #    路由到 target，不会变成挂在死账号上的孤儿数据（引用表迁移与 Neo4j
         #    reassign 都是一次性的，迁移窗口之后写到 source 的数据永远迁不过去）；
@@ -373,8 +235,40 @@ class EndUserService:
             f"source={source} → target={target}"
         )
 
+        # ── 2. 合并 aliases 与 meta_data 到 target EndUserInfo ──
+        final_aliases: list[str] = list(target_aliases_snapshot)
+        seen_alias_lower = {a.lower() for a in final_aliases}
+
+        merged_meta: dict = dict(target_meta_snapshot)
+        # 查询 scene_name -> scene_type_id 映射，用于归并时统一 domain_specific_info 键
+        scene_names = {
+            key
+            for metadata in [target_meta_snapshot, *(meta for _, meta in source_info_snapshots)]
+            if isinstance(metadata.get("domain_specific_info"), dict)
+            for key in metadata["domain_specific_info"]
+        }
+        name_to_id_map = await self._fetch_scene_name_to_id_map(workspace_id, sorted(scene_names))
+        # source 没有信息记录时，也需要统一 target 中已有的场景键。
+        merged_meta = merge_user_meta_data(merged_meta, {}, name_to_id_map)
+
+        for aliases, meta_data in source_info_snapshots:
+            for alias in aliases:
+                alias = alias.strip()
+                if alias and alias.lower() not in seen_alias_lower:
+                    final_aliases.append(alias)
+                    seen_alias_lower.add(alias.lower())
+
+            merged_meta = merge_user_meta_data(merged_meta, meta_data, name_to_id_map)
+
+        target_user_info.aliases = final_aliases
+        target_user_info.meta_data = merged_meta
+        await self.db.commit()
         await self.db.refresh(target_user_info)
-        logger.info("用户新画像合并完成 target=%s", target)
+        logger.info(
+            f"[merge_end_users] PG EndUserInfo 合并完成: "
+            f"target={target}, aliases_count={len(final_aliases)}, "
+            f"meta_keys={list(merged_meta.keys())}"
+        )
 
         # ── 3. 记忆数据归属迁移：RAG 走独立索引，图空间走 Neo4j ──
         from app.models.workspace_model import Workspace
@@ -382,7 +276,7 @@ class EndUserService:
         storage_type = (
             await self.db.execute(
                 select(Workspace.storage_type).where(
-                    Workspace.id == workspace_id
+                    Workspace.id == target_user.workspace_id
                 )
             )
         ).scalar_one_or_none()
@@ -395,7 +289,7 @@ class EndUserService:
             raise BusinessException(
                 message=(
                     f"Unresolved workspace storage_type for merge: "
-                    f"workspace={workspace_id}, "
+                    f"workspace={target_user.workspace_id}, "
                     f"storage_type={storage_type!r}"
                 )
             )
@@ -620,11 +514,7 @@ class EndUserService:
                     await self._merge_end_users_locked(
                         source=source_ids,
                         target=existing_id,
-                        write_locks=locks,
                     )
-                except BaseException:
-                    await self.db.rollback()
-                    raise
                 finally:
                     await self._release_memory_write_locks(locks)
                 logger.info(

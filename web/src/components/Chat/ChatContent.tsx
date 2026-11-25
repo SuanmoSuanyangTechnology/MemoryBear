@@ -197,12 +197,8 @@ const ChatContent: FC<ChatContentProps> = ({
       ? item.meta_data?.outputs.map(vo => vo.content).join('\n')
       : renderRuntime && item.content && item.content.length > 0
       ? item.content
-      : renderRuntime && item.meta_data?.error && item.meta_data?.error.length > 0 
-      ? escapeHtml(item.meta_data?.error)
       : renderRuntime && item.subContent
       ? ''
-      : item.meta_data?.error && item.meta_data?.error.length > 0 && item.content && item.content?.length > 0
-      ? item.content
       : item.meta_data?.error && item.meta_data?.error.length > 0
       ? escapeHtml(item.meta_data?.error)
       : item.meta_data?.outputs && item.meta_data?.outputs?.length > 1

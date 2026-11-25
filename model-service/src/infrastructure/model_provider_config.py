@@ -3,7 +3,6 @@
 from typing import Optional
 
 from ..config import current_settings
-from ..errors import BizCode, BusinessException
 from ..models.models_model import ModelProvider, ModelType
 
 _LOCAL_DEPLOYMENT_PROVIDERS = frozenset(
@@ -37,86 +36,6 @@ _VALIDATION_MODELS = {
     ModelProvider.DASHSCOPE.value: "qwen3.5-flash",
     ModelProvider.OPENAI.value: "gpt-4o-mini",
 }
-
-# 产品开放范围，按各模型类型列出可选供应商。
-_PROVIDERS_BY_MODEL_TYPE = {
-    ModelType.LLM: {
-        ModelProvider.OPENAI, ModelProvider.SPEEDBEAR, ModelProvider.MINIMAX,
-        ModelProvider.DASHSCOPE, ModelProvider.OLLAMA, ModelProvider.XINFERENCE,
-        ModelProvider.GPUSTACK, ModelProvider.BEDROCK, ModelProvider.VOLCANO,
-    },
-    ModelType.EMBEDDING: {
-        ModelProvider.OPENAI, ModelProvider.SPEEDBEAR, ModelProvider.DASHSCOPE,
-        ModelProvider.OLLAMA, ModelProvider.XINFERENCE, ModelProvider.GPUSTACK,
-        ModelProvider.BEDROCK, ModelProvider.VOLCANO,
-    },
-    ModelType.RERANK: {
-        ModelProvider.SPEEDBEAR, ModelProvider.DASHSCOPE,
-        ModelProvider.XINFERENCE, ModelProvider.GPUSTACK, ModelProvider.BEDROCK,
-    },
-    ModelType.ASR: {ModelProvider.DASHSCOPE},
-    ModelType.IMAGE: {ModelProvider.VOLCANO},
-    ModelType.VIDEO: {ModelProvider.VOLCANO},
-}
-
-
-def _provider_names_by_model_type(model_type: ModelType | str) -> list[str]:
-    """该类型支持的全部供应商名（稳定序，用于错误文案与前端下拉）。"""
-    try:
-        resolved = ModelType(_provider_name(model_type))
-    except ValueError:
-        return []
-    return sorted(
-        provider.value for provider in _PROVIDERS_BY_MODEL_TYPE.get(resolved, ())
-    )
-
-
-def _provider_name(value: ModelProvider | str | None) -> str:
-    return str(getattr(value, "value", value)).lower()
-
-
-def validate_provider_supports_model_type(
-    provider: ModelProvider | str, model_type: ModelType | str | None
-) -> Optional[str]:
-    """校验 provider × model_type 组合是否真有运行时适配器。
-
-    返回 None 表示通过；否则为可直接展示给用户的错误原因。
-
-    这张表此前只服务于 `GET /models/provider?model_type=` 的前端下拉过滤，写路径
-    完全不看它，于是「前端点不到、但 API 能提交」的组合会一路走到活体验证，最后
-    被兜底成「未知错误：调用模型服务失败」——用户看不出是自己选错了组合。校验放
-    在写路径前，错误才可归因。
-
-    组合模型（COMPOSITE）不在此表内：它由成员解析运行，允许任意 type，调用方跳过。
-    """
-    provider_name = _provider_name(provider)
-    try:
-        resolved_type = ModelType(_provider_name(model_type))
-    except ValueError:
-        return f"不支持的模型类型: {model_type}"
-
-    supported = _PROVIDERS_BY_MODEL_TYPE.get(resolved_type, set())
-    if any(provider_name == item.value for item in supported):
-        return None
-
-    names = _provider_names_by_model_type(resolved_type)
-    if not names:
-        return f"模型类型 {resolved_type.value} 暂无可用的供应商适配"
-    return (
-        f"供应商 {provider_name} 不支持 {resolved_type.value} 类型模型；"
-        f"当前支持 {resolved_type.value} 的供应商：{'、'.join(names)}"
-    )
-
-
-def require_provider_supports_model_type(
-    provider: ModelProvider | str, model_type: ModelType | str | None
-) -> None:
-    """拒绝没有运行时适配器的组合，组合模型由成员解析运行。"""
-    if _provider_name(provider) == ModelProvider.COMPOSITE.value:
-        return
-    reason = validate_provider_supports_model_type(provider, model_type)
-    if reason is not None:
-        raise BusinessException(reason, BizCode.INVALID_PARAMETER)
 
 
 def is_local_deployment_provider(provider: ModelProvider | str) -> bool:
@@ -197,11 +116,8 @@ def get_default_provider_api_base(
     return _DEFAULT_API_BASES.get(provider_name)
 
 
-def get_model_provider_metadata(
-    model_type: ModelType | None = None,
-) -> list[dict[str, Optional[str]]]:
+def get_model_provider_metadata() -> list[dict[str, Optional[str]]]:
     """构建供模型管理 API 返回的提供商与默认地址列表。"""
-    supported = _PROVIDERS_BY_MODEL_TYPE[model_type] if model_type is not None else None
     return [
         {
             "provider": provider.value,
@@ -212,7 +128,7 @@ def get_model_provider_metadata(
             ),
         }
         for provider in ModelProvider
-        if provider != ModelProvider.COMPOSITE and (supported is None or provider in supported)
+        if provider != ModelProvider.COMPOSITE
     ]
 
 
@@ -221,8 +137,6 @@ __all__ = [
     "get_model_provider_metadata",
     "get_provider_validation_model",
     "is_local_deployment_provider",
-    "require_provider_supports_model_type",
     "uses_custom_api_base",
     "validate_api_base_against_default",
-    "validate_provider_supports_model_type",
 ]

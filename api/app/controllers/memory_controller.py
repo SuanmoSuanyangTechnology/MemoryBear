@@ -1,6 +1,6 @@
 """记忆读写服务接口 - 基于 JWT 认证
 
-将流式读、异步写从 memory_agent_controller 迁出，统一收口本文件，
+将同步读、异步写从 memory_agent_controller 迁出，统一收口本文件，
 使对内 /api 路由与对外 /v1（memory_api_controller）保持一致。
 
 路由前缀: /memory
@@ -8,7 +8,7 @@
 """
 import uuid
 
-from fastapi import APIRouter, Depends, Header, Request
+from fastapi import APIRouter, Depends, Header
 from fastapi.responses import StreamingResponse
 
 from app.core.error_codes import BizCode
@@ -19,7 +19,6 @@ from app.core.memory.memory_service import MemoryService
 from app.core.response_utils import fail, success
 from app.db import get_async_db_context
 from app.dependencies import cur_workspace_access_guard, cur_workspace_access_guard_self_db, get_current_user_async, CurrentUserSnapshot
-from app.integrations.profile.stream import memory_profile_stream_proxy
 from app.repositories.end_user_repository import EndUserRepository
 from app.schemas.memory_agent_schema import UserInput, Write_UserInput
 from app.schemas.memory_config_schema import ModelInactiveError, ModelNotFoundError
@@ -160,20 +159,14 @@ async def write_server_async(
         return fail(BizCode.INTERNAL_ERROR, "写入失败", str(e))
 
 
-@router.post("/read/stream", response_model=None)
+@router.post("/read/sync", response_model=None)
 @cur_workspace_access_guard_self_db()
-@memory_profile_stream_proxy(
-    body_arg="user_input",
-    body_fields=("message", "search_switch", "end_user_id", "session_id"),
-    target_path="/internal/v1/memory/read/stream",
-)
 async def read_server(
-        request: Request,
         user_input: UserInput,
         current_user: CurrentUserSnapshot = Depends(get_current_user_async)
 ) -> StreamingResponse:
     """
-    记忆验证读取接口（``/api/memory/read/stream``）：请求保持不变，响应为 SSE。
+    记忆验证读取接口：请求保持不变，响应改为 SSE。
 
     search_switch values:
     - "0": Deep

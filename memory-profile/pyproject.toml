@@ -42,7 +42,6 @@ dependencies = [
     "uvicorn[standard]==0.54.0",
     "xxhash==4.0.2",
     "zttp==0.0.35",
-    "python-multipart>=0.0.20",
 ]
 
 [tool.uv.sources]
@@ -75,21 +74,6 @@ select = ["E", "F", "I", "UP", "B", "ASYNC", "TID"]
 
 [tool.ruff.lint.flake8-tidy-imports]
 ban-relative-imports = "all"
-
-[tool.ruff.lint.per-file-ignores]
-# The storage tree is a verbatim port of ``api/app/core/memory/storage``: keep it
-# aligned with the host source (annotations, import style, line length) so future
-# diffs against the host stay meaningful.
-"src/storage/**" = [
-    "E501",
-    "I001",
-    "UP006",
-    "UP017",
-    "UP035",
-    "TID252",
-    "B905",
-    "F811",
-]
 
 # Resolve through the mirror so re-locks keep every lock URL on it.
 [[tool.uv.index]]

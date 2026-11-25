@@ -487,16 +487,5 @@ export const knowledgeBase = {
       hybridIsHasGraph: '是否启用图谱',
       yes: '是',
       no: '否',
-      wikiColumn: 'Wiki',
-      documentWiki: {
-        ready: '已整理 · {{count}}',
-        pending: '未整理',
-        processing: '整理中',
-        view: '查看关联的 {{count}} 篇 Wiki',
-        viewUnknown: '查看关联 Wiki',
-        subtitle: '{{name}} · {{count}} 篇 Wiki',
-        subtitleUnknown: '{{name}} · 关联 Wiki',
-        empty: '尚未生成 Wiki',
-      },
     },
 }

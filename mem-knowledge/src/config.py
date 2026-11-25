@@ -9,8 +9,6 @@ from urllib.parse import quote_plus, urlparse
 from pydantic import Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, PydanticBaseSettingsSource, SettingsConfigDict
 
-DEFAULT_FAQ_IMPORT_PENDING_TIMEOUT_SECONDS = 30 * 60
-
 
 class KnowledgeSettings(BaseSettings):
     """Immutable settings constructed only from the bootstrap merge."""
@@ -23,13 +21,6 @@ class KnowledgeSettings(BaseSettings):
     )
 
     service_name: Literal["mem-knowledge"] = "mem-knowledge"
-
-    kb_knowledge_folder_max_depth: int = Field(
-        default=3, ge=1, validation_alias="KB_KNOWLEDGE_FOLDER_MAX_DEPTH",
-    )
-    kb_file_folder_max_depth: int = Field(
-        default=4, ge=1, validation_alias="KB_FILE_FOLDER_MAX_DEPTH",
-    )
 
     # Wiki execution budgets are ceilings, not content truncation policies.
     kb_wiki_segment_tokens: int = Field(default=32768, ge=128,
@@ -487,11 +478,6 @@ class KnowledgeSettings(BaseSettings):
         default=3600,
         ge=1,
         validation_alias="KB_TASK_TIME_LIMIT_SECONDS",
-    )
-    kb_faq_import_pending_timeout_seconds: int = Field(
-        default=DEFAULT_FAQ_IMPORT_PENDING_TIMEOUT_SECONDS,
-        ge=1,
-        validation_alias="KB_FAQ_IMPORT_PENDING_TIMEOUT_SECONDS",
     )
     kb_task_soft_time_limit_seconds: int = Field(
         default=3000,

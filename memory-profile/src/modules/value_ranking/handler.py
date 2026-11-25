@@ -5,7 +5,7 @@ from collections.abc import Awaitable
 
 from src.common.errors import BizCode, ProfileError
 from src.common.responses import ApiResponse
-from src.middleware.auth import SOURCE_EXTERNAL, MemoryPrincipal
+from src.middleware.auth import MemoryPrincipal
 from src.runtime import ProfileRuntime
 from src.schemas.value_ranking import (
     PermanentMemoryList,
@@ -44,18 +44,10 @@ class ValueRankingHandler:
     async def list_memories(
         self, context: MemoryPrincipal, end_user_id: str, page: int, pagesize: int
     ) -> ApiResponse[PermanentMemoryList]:
-        try:
-            return await _respond(
-                self.service.list_memories(end_user_id, context.workspace_id, page, pagesize),
-                "查询成功",
-            )
-        except ProfileError as exc:
-            if context.source == SOURCE_EXTERNAL and exc.code == BizCode.SERVICE_UNAVAILABLE:
-                # The V1 contract omits internal diagnostics on service failures.
-                raise ProfileError(
-                    exc.code, exc.message, status_code=exc.status_code, data=exc.data
-                ) from exc
-            raise
+        return await _respond(
+            self.service.list_memories(end_user_id, context.workspace_id, page, pagesize),
+            "查询成功",
+        )
 
     async def unmark(
         self, context: MemoryPrincipal, node_id: str, end_user_id: str

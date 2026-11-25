@@ -20,41 +20,24 @@ from __future__ import annotations
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query, Request
-from fastapi.exceptions import RequestValidationError
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
-from ...errors import BizCode, BusinessException
-from ...models.app_model import AppType
 from ...schemas import app_schema
 from ...services.asset_service import AssetService
 from ...services.category_service import CategoryService
 from ...utils.datetime_utils import to_timestamp_ms
-from ..dependencies import API_KEY_ID_HEADER, Principal, get_principal, get_sync_db
+from ..dependencies import Principal, get_principal, get_sync_db
 from ..schemas.common import success
 from ..schemas.response_schema import ApiResponse, PageData, PageMeta
 
 router = APIRouter(prefix="/apps/assets", tags=["Resource Center"])
-
-# The `/v1` face of the same four read/install handlers. The catalog lives under
-# `/apps/assets` internally because the console calls it there, but the v1
-# contract puts it next to `/v1/apps`, `/v1/skills` and `/v1/tools` (§3.4 of the
-# design doc). Two paths, one implementation: the handlers below are decorated
-# twice, so the catalog logic never forks.
-#
-# Only these four are re-declared. `PUT`/`DELETE /{asset_id}` (share-mode edit
-# and unshare) stay on the internal path: they belong to the publisher's 「我的
-# 共享」 and are not part of the v1 asset contract, so this alias must not carry
-# them — a prefix alias would otherwise expose a write surface the scope was
-# never meant to grant.
-assets_v1_router = APIRouter(prefix="/assets", tags=["Resource Center"])
 
 DbSession = Annotated[Session, Depends(get_sync_db)]
 Caller = Annotated[Principal, Depends(get_principal)]
 
 
 @router.get("", summary="资源中心：租户内浏览应用", response_model=ApiResponse)
-@assets_v1_router.get("", summary="资源中心：租户内浏览应用", response_model=ApiResponse)
 def list_assets(
         db: DbSession,
         principal: Caller,
@@ -72,17 +55,6 @@ def list_assets(
     release never changes what consumers see until the sharer forwards the
     version.
     """
-    # Same gate as `GET /v1/apps`: an unknown type is a caller error, not an
-    # empty catalog. Without this the value reached the SQL string comparison
-    # and answered 200 + empty list, which is indistinguishable from "nothing
-    # shared yet".
-    if type and type not in {t.value for t in AppType}:
-        raise RequestValidationError(
-            [{"loc": ("query", "type"),
-              "msg": f"非法的应用类型: {type}",
-              "type": "enum"}]
-        )
-
     service = AssetService(db)
     items, total = service.list_assets(
         tenant_id=principal.tenant_id,
@@ -99,13 +71,7 @@ def list_assets(
 # 必须排在 ``/{asset_id}`` 之前：``asset_id`` 是 UUID 类型参数，先注册的话
 # ``/categories`` 会被它先匹配，直接返回 422（"categories" 不是合法 UUID）。
 @router.get("/categories", summary="资源中心：功能分类字典", response_model=ApiResponse)
-@assets_v1_router.get("/categories", summary="资源中心：功能分类字典", response_model=ApiResponse)
-def list_categories(
-        db: DbSession,
-        resource_type: str = Query(
-            "app", description="app | tool | skill_package，默认取 app 组"
-        ),
-):
+def list_categories(db: DbSession):
     """分类字典，只返回分类本身，不统计数量。
 
     字段与市场侧 `GET /api/market/categories` 的 `items[]` 同名同义
@@ -119,21 +85,16 @@ def list_categories(
     **市场侧是另一套存储**（`market_categories`，企业端才装）。两者靠 ``code``
     对齐、各自 seed 一份，所以这里不能假定市场上有什么分类。
 
-    没有 ``count``，也不按行返回 ``id``：一期只有 ``app`` 组有消费方，
-    ``resource_type`` 默认 ``app``；传 ``tool`` / ``skill_package`` 也能取到，
-    只是还没有消费方。取值越界直接报错（复用 ``CategoryService`` 的校验，
-    错误码 ``VALIDATION_FAILED``），不返回空列表冒充成功。
+    没有 ``resource_type`` 参数：一期只有 ``app`` 组有消费方。
     """
 
-    resolved = CategoryService._validate_types(resource_type)[0]
     return success(
-        data=CategoryService(db).list_options(resource_type=resolved),
+        data=CategoryService(db).list_options(resource_type="app"),
         msg="获取功能分类成功",
     )
 
 
 @router.get("/{asset_id}", summary="资源中心：应用资源详情", response_model=ApiResponse)
-@assets_v1_router.get("/{asset_id}", summary="资源中心：应用资源详情", response_model=ApiResponse)
 def get_asset(asset_id: UUID, db: DbSession, principal: Caller):
     """Detail page for one entry (same component as the market detail page).
 
@@ -145,13 +106,9 @@ def get_asset(asset_id: UUID, db: DbSession, principal: Caller):
 
 
 @router.post("/{asset_id}/install", summary="资源中心：添加到我的空间", response_model=ApiResponse)
-@assets_v1_router.post(
-    "/{asset_id}/install", summary="资源中心：添加到我的空间", response_model=ApiResponse
-)
 def install_asset(
         asset_id: UUID,
         payload: app_schema.AssetInstallRequest,
-        http_request: Request,
         db: DbSession,
         principal: Caller,
 ):
@@ -160,47 +117,13 @@ def install_asset(
     The caller does **not** choose read-only vs copy: the entry's ``share_mode``
     alone decides (``readonly`` → ``reference``, ``editable`` → ``copy``), so a
     consumer can never escalate its own permission.
-
-    **Two faces, two target rules.** The console (JWT face) lets the user pick
-    the target from a workspace picker, so the body field stays required there.
-    A v1 API Key is bound to exactly one workspace and the v1 catalog contract is
-    "install into my own space", so on the API-key face the field is optional:
-    omitted → the Key's workspace; supplied but different → rejected rather than
-    silently ignored. Silently landing an install in a space the caller did not
-    name is the failure mode this branch exists to prevent (the same reason
-    ``/v1/apps`` never honours a ``workspace_id`` query).
     """
-    api_key_face = http_request.headers.get(API_KEY_ID_HEADER) is not None
-    target_workspace_id = payload.target_workspace_id
-
-    if api_key_face:
-        if target_workspace_id is None:
-            target_workspace_id = principal.workspace_id
-        elif target_workspace_id != principal.workspace_id:
-            raise BusinessException(
-                "API Key 只能把资源添加到它绑定的空间，target_workspace_id 可省略",
-                BizCode.WORKSPACE_ACCESS_DENIED,
-                data={
-                    "reason": "INSTALL_TARGET_NOT_KEY_WORKSPACE",
-                    "key_workspace_id": str(principal.workspace_id),
-                },
-            )
-    elif target_workspace_id is None:
-        raise BusinessException(
-            "target_workspace_id 不能为空", BizCode.MISSING_PARAMETER
-        )
-
-    if target_workspace_id is None:
-        # Only reachable when the Key carries no workspace at all; the guard
-        # already rejects that, so this is a defensive assertion.
-        raise BusinessException("缺少目标空间", BizCode.MISSING_PARAMETER)
-
     service = AssetService(db)
     result = service.install_asset(
         asset_id=asset_id,
         tenant_id=principal.tenant_id,
         user_id=principal.actor_id,
-        target_workspace_id=target_workspace_id,
+        target_workspace_id=payload.target_workspace_id,
     )
     return success(data=result, msg="已添加到空间")
 

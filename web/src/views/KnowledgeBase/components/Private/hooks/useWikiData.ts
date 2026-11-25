@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 
 import {
   getKnowledgeWikiPages,
-} from '@/api/kbWiki';
+} from '@/api/knowledgeBase';
 
 import type {
   WikiData,

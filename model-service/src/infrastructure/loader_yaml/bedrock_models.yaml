@@ -1,19 +1,5 @@
 provider: bedrock
 models:
-- name: cohere.embed-v4:0
-  type: embedding
-  provider: bedrock
-  description: Cohere Embed v4 文本向量化，适合多语言检索和 RAG。
-  is_deprecated: false
-  is_official: true
-  input_modalities:
-  - text
-  output_modalities:
-  - text
-  features: []
-  tags:
-  - 文本嵌入模型
-  logo: bedrock
 - name: ai21
   type: llm
   provider: bedrock

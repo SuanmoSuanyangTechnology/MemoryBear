@@ -12,14 +12,10 @@ from collections.abc import Iterable
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import String, cast, desc, select, true
+from sqlalchemy import desc, select
 
 from src.infrastructure.postgres import PostgresManager
-from src.models.references import (
-    MemoryConfigRow,
-    Workspace,
-    WorkspaceDefaultModelPreset,
-)
+from src.models.references import MemoryConfigRow, Workspace
 
 
 def _columns(*keys: str) -> tuple[Any, ...]:
@@ -214,71 +210,6 @@ class MemoryConfigReadRepository:
                     await session.execute(
                         select(*VALIDATION_COLUMNS, *WORKSPACE_VALIDATION_COLUMNS)
                         .outerjoin(Workspace, Workspace.id == MemoryConfigRow.workspace_id)
-                        .where(MemoryConfigRow.config_id == config_id)
-                        .limit(1)
-                    )
-                )
-                .mappings()
-                .one_or_none()
-            )
-            return dict(row) if row is not None else None
-
-
-    async def get_read_config_source(self, config_id: UUID) -> dict[str, Any] | None:
-        """One configuration joined with the workspace facts a read needs.
-
-        Shapes the row like the host's ``load_memory_config_async`` source: the
-        configuration identity, the workspace's tenant/name/default flag, its own
-        per-slot columns (``workspace_{slot}``) and the singleton preset's per-slot
-        columns (``{slot}_model_config_id``). The adapter ports the host's
-        ``_effective_workspace_models`` over both families — a default-config
-        workspace follows the preset, everything else its own columns — so this
-        projection must publish both, never fold one into the other.
-        """
-
-        columns = (
-            MemoryConfigRow.config_id,
-            MemoryConfigRow.config_name,
-            MemoryConfigRow.workspace_id,
-            Workspace.name.label("workspace_name"),
-            Workspace.tenant_id,
-            Workspace.storage_type,
-            Workspace.is_default_config,
-            WorkspaceDefaultModelPreset.id.label("preset_id"),
-            Workspace.llm.label("workspace_llm"),
-            Workspace.embedding.label("workspace_embedding"),
-            Workspace.rerank.label("workspace_rerank"),
-            Workspace.vision.label("workspace_vision"),
-            Workspace.audio.label("workspace_audio"),
-            Workspace.video.label("workspace_video"),
-            cast(
-                WorkspaceDefaultModelPreset.llm_model_config_id, String
-            ).label("llm_model_config_id"),
-            cast(
-                WorkspaceDefaultModelPreset.embedding_model_config_id, String
-            ).label("embedding_model_config_id"),
-            cast(
-                WorkspaceDefaultModelPreset.rerank_model_config_id, String
-            ).label("rerank_model_config_id"),
-            cast(
-                WorkspaceDefaultModelPreset.vision_model_config_id, String
-            ).label("vision_model_config_id"),
-            cast(
-                WorkspaceDefaultModelPreset.audio_model_config_id, String
-            ).label("audio_model_config_id"),
-            cast(
-                WorkspaceDefaultModelPreset.video_model_config_id, String
-            ).label("video_model_config_id"),
-        )
-        async with self.postgres.session() as session:
-            row = (
-                (
-                    await session.execute(
-                        select(*columns)
-                        .outerjoin(
-                            Workspace, Workspace.id == MemoryConfigRow.workspace_id
-                        )
-                        .outerjoin(WorkspaceDefaultModelPreset, true())
                         .where(MemoryConfigRow.config_id == config_id)
                         .limit(1)
                     )

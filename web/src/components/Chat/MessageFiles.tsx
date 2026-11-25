@@ -2,7 +2,7 @@ import { Image, Flex } from 'antd'
 import clsx from 'clsx'
 import AudioPlayer from './AudioPlayer'
 import VideoPlayer from './VideoPlayer'
-import { formatFileSize } from '@/utils/format'
+import { formatFileSize } from './utils'
 
 const getFileUrl = (file: any) =>
   file.thumbUrl || file.url || (file.originFileObj ? URL.createObjectURL(file.originFileObj) : undefined)

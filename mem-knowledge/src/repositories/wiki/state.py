@@ -24,7 +24,7 @@ from ...rag.wiki.config import (
     generation_config_hash,
     read_wiki_config,
 )
-from ...rag.wiki.identity import TOPIC_MAP_VERSION
+from ...rag.wiki.identity import TOPIC_IDENTITY_VERSION
 from ...utils.datetime_utils import utcnow_naive
 from .common import (
     append_log,
@@ -256,7 +256,7 @@ def admit(
             raise WikiError("WIKI_SOURCE_NOT_READY", retryable=False)
         reuse = (
             state.mapped_version == state.requested_version
-            and (state.map_progress or {}).get("identity_version") == TOPIC_MAP_VERSION
+            and (state.map_progress or {}).get("identity_version") == TOPIC_IDENTITY_VERSION
             and state.config_hash
             == generation_config_hash(knowledge.llm_id, knowledge.parser_config)
         )

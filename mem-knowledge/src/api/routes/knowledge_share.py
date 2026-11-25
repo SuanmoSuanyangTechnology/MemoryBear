@@ -11,11 +11,7 @@ from ...runtime import ProcessRuntime
 from ...services import knowledge_share as share_service
 from ..dependencies import Principal, get_principal, get_runtime
 from ..schemas.common import SuccessEnvelope, success
-from ..schemas.knowledge_share import (
-    KnowledgeShareCreate,
-    KnowledgeShareRequest,
-    KnowledgeShareResult,
-)
+from ..schemas.knowledge_share import KnowledgeShareCreate
 
 router = APIRouter(
     prefix="/knowledgeshares",
@@ -119,18 +115,3 @@ async def delete_knowledgeshare(
         request,
         msg="The knowledge base sharing has been successfully deleted",
     )
-
-
-@router.post("/share", response_model=SuccessEnvelope[KnowledgeShareResult])
-async def create_or_reuse_knowledgeshare(
-    create_data: KnowledgeShareRequest,
-    principal: Annotated[Principal, Depends(get_principal)],
-    runtime: Annotated[ProcessRuntime, Depends(get_runtime)],
-) -> dict[str, Any]:
-    async with runtime.database.async_session() as db:
-        data = await share_service.create_or_reuse_share(
-            db,
-            create_data,
-            principal,
-        )
-    return success(data=data)

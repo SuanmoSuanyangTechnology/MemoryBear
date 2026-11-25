@@ -208,9 +208,8 @@ async def create_knowledge_async(
         knowledge: knowledge_schema.KnowledgeCreate,
         *,
         preserve_source_parser_config: bool = False,
-        commit: bool = True,
 ) -> Knowledge:
-    """Create a record; commit=False leaves the transaction to the caller."""
+    """Async version of create_knowledge."""
     db_logger.debug(f"Create a knowledge base record (async): name={knowledge.name}")
 
     try:
@@ -221,9 +220,6 @@ async def create_knowledge_async(
             )
         )
         db.add(db_knowledge)
-        if not commit:
-            await db.flush()
-            return db_knowledge
         await db.commit()
         await db.refresh(db_knowledge)
         loaded_knowledge = await get_knowledge_by_id_async(db, db_knowledge.id)
@@ -233,19 +229,6 @@ async def create_knowledge_async(
         db_logger.error(f"Failed to create a knowledge base record (async): name={knowledge.name} - {str(e)}")
         await db.rollback()
         raise
-
-
-async def lock_share_source_async(
-        db: AsyncSession, source_kb_id: uuid.UUID
-) -> Knowledge | None:
-    # V1 holds this source lock until the reference and relation are committed.
-    result = await db.execute(
-        select(Knowledge)
-        .where(Knowledge.id == source_kb_id)
-        .with_for_update()
-        .execution_options(populate_existing=True)
-    )
-    return result.scalar_one_or_none()
 
 
 def get_knowledge_by_id(db: Session, knowledge_id: uuid.UUID) -> Knowledge | None:

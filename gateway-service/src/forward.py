@@ -21,9 +21,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import random
-import re
 from collections.abc import Callable
-from functools import cache
 from typing import Literal, Protocol
 
 import httpx
@@ -79,20 +77,6 @@ def rewrite_internal_path(external_path: str) -> str:
     return external_path
 
 
-@cache
-def _compile_api_key_path(template: str) -> tuple[str, re.Pattern[str]]:
-    """Compile one "METHOD /path/{param}" allowlist entry into (method, regex).
-
-    ``{param}`` matches exactly one path segment; every other character is
-    escaped literally. The allowlist is static for the process lifetime, so the
-    compiled form is cached rather than rebuilt per request.
-    """
-    method, _, path = template.partition(" ")
-    parts = re.split(r"\{[^}]+\}", path.strip())
-    pattern = re.compile("[^/]+".join(re.escape(part) for part in parts))
-    return method.strip().upper(), pattern
-
-
 class TargetRoute(BaseModel):
     path_prefix: str
     service: str
@@ -103,12 +87,6 @@ class TargetRoute(BaseModel):
     # usage declared; the pipeline denies those requests (fail-closed) instead of
     # letting a missing declaration silently widen a key's reach.
     required_scopes: tuple[str, ...] = ()
-    # API-key path allowlist: "METHOD /template" entries (e.g.
-    # "GET /v1/tools/{tool_id}"), matched against the *external* path. Empty = no
-    # allowlist declared → opt-in, the route keeps its previous behaviour. A
-    # non-empty list is an exhaustive contract: anything not listed is denied at
-    # termination (403 for an unlisted path, 405 for an unlisted method).
-    api_key_paths: tuple[str, ...] = ()
     # internal：沿用 /api|/v1 → /internal/v1 重写（core 默认）。
     # preserve：原样转发（企业 /api/market 直连 market-service）。
     path_mode: Literal["internal", "preserve"] = "internal"
@@ -124,33 +102,6 @@ class TargetRoute(BaseModel):
         if self.path_mode == "preserve":
             return external_path
         return rewrite_internal_path(external_path)
-
-    def api_key_path_verdict(self, method: str, path: str) -> str | None:
-        """Allowlist verdict for one API-key request.
-
-        Returns ``None`` when allowed, ``"method"`` when the path is in the
-        contract but this method is not, and ``"path"`` when the path is not in
-        the contract at all. Opt-in: a route without ``api_key_paths`` always
-        allows.
-
-        HEAD is matched as GET (Starlette adds HEAD to every GET route, so a bare
-        probe must not regress to 405). The trailing slash is dropped from the
-        request side only: ``/v1/tools/`` and ``/v1/tools`` are one contract
-        entry — the gateway does not follow the downstream 307.
-        """
-        if not self.api_key_paths:
-            return None
-        wanted = "GET" if method.upper() == "HEAD" else method.upper()
-        target = path.rstrip("/") or "/"
-        path_matched = False
-        for template in self.api_key_paths:
-            template_method, pattern = _compile_api_key_path(template)
-            if pattern.fullmatch(target) is None:
-                continue
-            if template_method == wanted:
-                return None
-            path_matched = True
-        return "method" if path_matched else "path"
 
 
 class TargetResolver(Protocol):

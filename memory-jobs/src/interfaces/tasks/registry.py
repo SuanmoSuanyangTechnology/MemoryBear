@@ -18,19 +18,13 @@ from dataclasses import dataclass
 from task_bridge.mem_router import TaskName
 
 from src.application.jobs import (
-    DoMetadataMigrationJob,
     FanOutWorkspaceJob,
     GenerateInterestDistributionJob,
     GenerateProfileCacheJob,
     PingJob,
     PrewarmInterestDistributionsJob,
-    ScanMetadataMigrationJob,
     ScanProfileCachesJob,
 )
-from src.application.jobs.conversation_detail_generate import GenerateConversationDetailJob
-from src.application.jobs.emotion_suggestions_generate import GenerateEmotionSuggestionsJob
-from src.application.jobs.forgetting_trigger import TriggerForgettingJob
-from src.application.jobs.rag_profile_generate import GenerateRAGProfileJob
 from src.application.ports.jobs import JobHandler, JobSpec
 from src.composition import get_container
 from src.runtime import get_runtime
@@ -48,28 +42,6 @@ class JobRegistration:
 
 
 JOBS: tuple[JobRegistration, ...] = (
-    JobRegistration(
-        name=TaskName.RAG_PROFILE_GENERATE.value,
-        spec=GenerateRAGProfileJob.spec,
-        build=lambda: GenerateRAGProfileJob(get_container().rag_profile.generate()),
-    ),
-    JobRegistration(
-        name=TaskName.EMOTION_SUGGESTIONS_GENERATE.value,
-        spec=GenerateEmotionSuggestionsJob.spec,
-        build=lambda: GenerateEmotionSuggestionsJob(get_container().emotion.generate()),
-    ),
-    JobRegistration(
-        name=TaskName.FORGETTING_TRIGGER.value,
-        spec=TriggerForgettingJob.spec,
-        build=lambda: TriggerForgettingJob(get_container().forgetting.trigger()),
-    ),
-    JobRegistration(
-        name=TaskName.WORKING_MEMORY_DETAIL_GENERATE.value,
-        spec=GenerateConversationDetailJob.spec,
-        build=lambda: GenerateConversationDetailJob(
-            get_container().working_memory.generate()
-        ),
-    ),
     JobRegistration(
         name=TaskName.HEALTH_PING.value,
         spec=PingJob.spec,
@@ -97,16 +69,6 @@ JOBS: tuple[JobRegistration, ...] = (
         build=lambda: ScanProfileCachesJob(
             get_container().profile_cache.scan()
         ),
-    ),
-    JobRegistration(
-        name=TaskName.METADATA_MIGRATION_SCAN.value,
-        spec=ScanMetadataMigrationJob.spec,
-        build=lambda: ScanMetadataMigrationJob(get_container().metadata_migration.scan()),
-    ),
-    JobRegistration(
-        name=TaskName.METADATA_MIGRATION_DO.value,
-        spec=DoMetadataMigrationJob.spec,
-        build=lambda: DoMetadataMigrationJob(get_container().metadata_migration.do()),
     ),
     JobRegistration(
         name=TaskName.INTEREST_DISTRIBUTION_GENERATE.value,

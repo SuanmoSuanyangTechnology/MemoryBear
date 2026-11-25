@@ -15,9 +15,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from src.application.ports.publishing import UnitPublisher
-from src.application.ports.task_cache import TaskCache
 from src.config import JobsSettings
-from src.infrastructure.cache.redis_task_cache import RedisTaskCache
 from src.infrastructure.llm.model_service_factory import ModelServiceChatModelFactory
 from src.infrastructure.persistence.postgres.uow import SqlAlchemyUnitOfWork
 from src.infrastructure.prompts.jinja_prompt_catalog import JinjaPromptCatalog
@@ -34,7 +32,6 @@ class SharedDependencies:
     chat_models: ModelServiceChatModelFactory
     prompts: JinjaPromptCatalog
     publisher: UnitPublisher
-    task_cache: TaskCache
 
 
 def build_shared_dependencies(runtime: JobsRuntime) -> SharedDependencies:
@@ -49,5 +46,4 @@ def build_shared_dependencies(runtime: JobsRuntime) -> SharedDependencies:
         chat_models=ModelServiceChatModelFactory(runtime.model_service),
         prompts=JinjaPromptCatalog(),
         publisher=CeleryUnitPublisher(),
-        task_cache=RedisTaskCache(runtime.redis),
     )

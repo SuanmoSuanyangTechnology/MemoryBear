@@ -90,10 +90,9 @@ def get_model_types():
 @router.get("/provider", response_model=ApiResponse)
 def get_model_providers(
     principal: Principal = Depends(get_principal),
-    model_type: ModelType | None = Query(None, description="按支持的模型类型筛选供应商"),
 ):
     _ = principal
-    return success(msg="获取模型提供商成功", data=get_model_provider_metadata(model_type))
+    return success(msg="获取模型提供商成功", data=get_model_provider_metadata())
 
 
 @router.get("/strategy", response_model=ApiResponse)

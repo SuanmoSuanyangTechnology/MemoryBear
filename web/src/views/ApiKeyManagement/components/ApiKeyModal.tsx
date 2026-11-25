@@ -1,11 +1,16 @@
+/*
+ * @Author: ZhaoYing 
+ * @Date: 2026-02-03 15:52:47 
+ * @Last Modified by: ZhaoYing
+ * @Last Modified time: 2026-02-04 10:00:01
+ */
 import { forwardRef, useImperativeHandle, useState } from 'react';
-import { Form, Input, App, DatePicker, Button, Flex, Result, Row, Col } from 'antd';
+import { Form, Input, Switch, App, DatePicker, Button, Flex, Result } from 'antd';
 import { useTranslation } from 'react-i18next';
 import dayjs from 'dayjs'
 
 import type { ApiKey, ApiKeyModalRef } from '../types';
 import RbModal from '@/components/RbModal'
-import SwitchFormItem from '@/components/FormItem/SwitchFormItem'
 import { createApiKey, updateApiKey  } from '@/api/apiKey';
 import { stringRegExp } from '@/utils/validator';
 import RbSlider from '@/components/RbSlider'
@@ -100,8 +105,6 @@ const ApiKeyModal = forwardRef<ApiKeyModalRef, CreateModalProps>(({
         ...rest,
         memory: scopes.includes('memory'),
         rag: scopes.includes('rag'),
-        app_mgmt: scopes.includes('app_mgmt'),
-        asset: scopes.includes('asset'),
         expires_at: expires_at ? dayjs(expires_at) : undefined,
       });
       setEditVo(apiKey);
@@ -118,7 +121,7 @@ const ApiKeyModal = forwardRef<ApiKeyModalRef, CreateModalProps>(({
   const handleSave = async () => {
     form.validateFields()
       .then((values) => {
-        const { memory, rag, app_mgmt, asset, expires_at, user_id, ...rest } = values
+        const { memory, rag, expires_at, user_id, ...rest } = values
         const scopes = []
 
         if (memory) {
@@ -126,12 +129,6 @@ const ApiKeyModal = forwardRef<ApiKeyModalRef, CreateModalProps>(({
         }
         if (rag) {
           scopes.push('rag')
-        }
-        if (app_mgmt) {
-          scopes.push('app_mgmt')
-        }
-        if (asset) {
-          scopes.push('asset')
         }
         // Prepare new/updated API key data
         const apiKeyData = {
@@ -194,7 +191,7 @@ const ApiKeyModal = forwardRef<ApiKeyModalRef, CreateModalProps>(({
           {createdApiKey?.other_id &&
             <div className="rb:mb-4">
               <div className="rb:text-sm rb:text-gray-500 rb:mb-2">{t('apiKey.memoryDefaultId')}</div>
-              <Flex align="center" justify="space-between" className="rb:bg-gray-100 rb:text-gray-600 rb:rounded-lg rb:px-3! rb:py-2!">
+              <Flex align="center" justify="space-between" className="rb:bg-[#F6F6F6] rb:text-gray-600 rb:rounded-lg rb:px-3! rb:py-2!">
                 <span className="rb:text-sm">{createdApiKey?.other_id}</span>
   
                 <Button className="rb:px-2! rb:h-7! rb:group" onClick={() => handleCopy(createdApiKey?.other_id || '')}>
@@ -209,7 +206,7 @@ const ApiKeyModal = forwardRef<ApiKeyModalRef, CreateModalProps>(({
 
           <div className="rb:mb-4">
             <div className="rb:text-sm rb:text-gray-500 rb:mb-2">{t('apiKey.apiKey')}</div>
-            <Flex align="center" justify="space-between" className="rb:bg-gray-100 rb:text-gray-600 rb:rounded-lg rb:px-3! rb:py-2!">
+            <Flex align="center" justify="space-between" className="rb:bg-[#F6F6F6] rb:text-gray-600 rb:rounded-lg rb:px-3! rb:py-2!">
               <span className="rb:text-sm">{createdApiKey?.api_key}</span>
 
               <Button className="rb:px-2! rb:h-7! rb:group" onClick={() => handleCopy(createdApiKey?.api_key || '')}>
@@ -227,7 +224,7 @@ const ApiKeyModal = forwardRef<ApiKeyModalRef, CreateModalProps>(({
                 <span className="rb:text-sm rb:text-gray-500">{t('apiKey.endUserId')}</span>
                 <span className="rb:text-xs rb:text-orange-500">{t('apiKey.pleaseSave')}</span>
               </Flex>
-              <Flex align="center" justify="space-between" className="rb:bg-gray-100 rb:text-gray-600 rb:rounded-lg rb:px-3! rb:py-2!">
+              <Flex align="center" justify="space-between" className="rb:bg-[#F6F6F6] rb:text-gray-600 rb:rounded-lg rb:px-3! rb:py-2!">
                 <span className="rb:text-sm">{createdApiKey?.end_user_id}</span>
 
                 <Button className="rb:px-2! rb:h-7! rb:group" onClick={() => handleCopy(createdApiKey?.end_user_id || '')}>
@@ -284,43 +281,24 @@ const ApiKeyModal = forwardRef<ApiKeyModalRef, CreateModalProps>(({
 
           <div className="rb:text-gray-600 rb:font-medium rb:leading-5 rb:mb-4">{t('apiKey.permissionInfo')}</div>
 
-          <Row gutter={[12, 12]} className="rb:mb-3!">
-            <Col span={12}>
-              <SwitchFormItem
-                title={t('apiKey.memoryEngine')}
-                name="memory"
-                className="rb:h-full rb:bg-gray-100 rb:rounded-xl rb:p-3!"
-              />
-            </Col>
-            <Col span={12}>
-              <SwitchFormItem
-                title={t('apiKey.knowledgeBase')}
-                name="rag"
-                className="rb:h-full rb:bg-gray-100 rb:rounded-xl rb:p-3!"
-              />
-            </Col>
-            <Col span={12}>
-              <SwitchFormItem
-                title={t('apiKey.app_mgmt')}
-                name="app_mgmt"
-                className="rb:h-full rb:bg-gray-100 rb:rounded-xl rb:p-3!"
-              />
-            </Col>
-            <Col span={12}>
-              <SwitchFormItem
-                title={t('apiKey.asset')}
-                name="asset"
-                className="rb:h-full rb:bg-gray-100 rb:rounded-xl rb:p-3!"
-              />
-            </Col>
-          </Row>
+          <FormItem
+            name="memory"
+            label={t('apiKey.memoryEngine')}
+            layout="horizontal"
+            valuePropName="checked"
+          >
+            <Switch />
+          </FormItem>
 
           {!editVo && <>
             <FormItem name="user_id" hidden />
 
+            
             {memory &&
-              <Flex align="center" justify="space-between" className="rb:mt-4 rb:mb-1!">
-                <div className="rb:text-[14px] rb:leading-5">{t('apiKey.memoryDefaultId')}</div>
+              <Flex align="center" justify="space-between" className="rb:mb-1!">
+                <div>
+                  {t('apiKey.memoryDefaultId')}
+                </div>
                 <Button
                   type="link"
                   onClick={generateDefaultUserId}
@@ -333,7 +311,6 @@ const ApiKeyModal = forwardRef<ApiKeyModalRef, CreateModalProps>(({
               name="end_user"
               dependencies={['memory']}
               hidden={!memory}
-              className="rb:mt-2!"
             >
               <DebounceSelect
                 url={userMemoryListUrl}
@@ -353,7 +330,16 @@ const ApiKeyModal = forwardRef<ApiKeyModalRef, CreateModalProps>(({
             </FormItem>
           </>}
 
-          <div className="rb:text-gray-600 rb:font-medium rb:leading-5 rb:mt-6 rb:mb-4">{t('apiKey.advancedSettings')}</div>
+          <FormItem
+            name="rag"
+            label={t('apiKey.knowledgeBase')}
+            layout="horizontal"
+            valuePropName="checked"
+          >
+            <Switch />
+          </FormItem>
+
+          <div className="rb:text-gray-600 rb:font-medium rb:leading-5 rb:mb-4">{t('apiKey.advancedSettings')}</div>
 
           <FormItem
             name="expires_at"

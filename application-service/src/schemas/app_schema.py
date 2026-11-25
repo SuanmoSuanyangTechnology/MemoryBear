@@ -815,16 +815,9 @@ class AppShareRequest(BaseModel):
 
 
 class AssetInstallRequest(BaseModel):
-    """拉进空间。**不收 permission**：条目的 share_mode 已决定形态。
+    """拉到我的空间。**不收 permission**：条目的 share_mode 已决定形态。"""
 
-    ``target_workspace_id`` 在控制台面（JWT）必填——那里有空间选择器；在 v1
-    面（API Key）可省略，省略即落到 Key 绑定的空间，传了别的空间会被拒。
-    必填性由 handler 按面区分，故 schema 层放开为可选。
-    """
-
-    target_workspace_id: Optional[uuid.UUID] = Field(
-        None, description="目标空间 ID；v1 面可省略（落到 Key 绑定空间）"
-    )
+    target_workspace_id: uuid.UUID = Field(..., description="目标空间 ID")
 
 
 class AssetShareModeRequest(BaseModel):

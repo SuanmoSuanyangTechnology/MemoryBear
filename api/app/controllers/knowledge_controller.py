@@ -1,8 +1,7 @@
 import asyncio
 import datetime
 import json
-from http import HTTPStatus
-from typing import Annotated, Optional
+from typing import Optional
 import uuid
 
 from fastapi import APIRouter, Body, Depends, HTTPException, status, Query, Request
@@ -14,9 +13,8 @@ from starlette.background import BackgroundTask
 
 from app.core.utils.datetime_utils import utcnow_naive
 from app.celery_app import celery_app
-from app.core.config import settings as api_settings
 from app.core.error_codes import BizCode
-from app.core.exceptions import BusinessException, ValidationException
+from app.core.exceptions import BusinessException
 from app.core.logging_config import get_api_logger
 from app.core.rag.common import settings
 from app.core.rag.integrations.feishu.client import FeishuAPIClient
@@ -55,7 +53,6 @@ from app.schemas import file_schema
 from app.schemas.response_schema import ApiResponse
 from app.repositories import knowledge_repository, knowledgeshare_repository
 from app.services import knowledge_service, document_service
-from app.services.folder_hierarchy import validate_knowledge_hierarchy
 from app.services import file_service
 from app.services.file_storage_service import FileStorageService, get_file_storage_service
 from app.services.model_service import ModelApiKeyService, ModelConfigService
@@ -295,7 +292,6 @@ async def get_knowledges(
         db: AsyncSession = Depends(get_async_db),
         current_user: User = Depends(get_current_user_async),
         request: Request = None,
-        status: Annotated[int | None, Query(ge=0, le=1, description="0: disabled, 1: enabled")] = None,
 ):
     """
     Query the knowledge base list in pages
@@ -310,7 +306,7 @@ async def get_knowledges(
     if page < 1 or pagesize < 1:
         api_logger.warning(f"Error in paging parameters: page={page}, pagesize={pagesize}")
         raise HTTPException(
-            status_code=HTTPStatus.BAD_REQUEST,
+            status_code=status.HTTP_400_BAD_REQUEST,
             detail="The paging parameter must be greater than 0"
         )
 
@@ -332,14 +328,11 @@ async def get_knowledges(
     if kb_ids:
         filters.append(knowledge_model.Knowledge.id.in_(kb_ids.split(',')))
     else:
+        filters.append(knowledge_model.Knowledge.status != 2)
         if parent_id:
             filters.append(knowledge_model.Knowledge.parent_id == parent_id)
         else:
             filters.append(knowledge_model.Knowledge.parent_id == current_user.current_workspace_id)
-    if status is not None:
-        filters.append(knowledge_model.Knowledge.status == status)
-    elif not kb_ids:
-        filters.append(knowledge_model.Knowledge.status != 2)
     # RAG 独立迁移过渡期：不按 PermissionType.Memory 过滤，存量 USER_RAG_MERORY
     # 暂时可见；全量迁移到 rag_memory_current 并验证后，统一删除这些系统记忆库。
     # 3. Execute paged query
@@ -358,7 +351,7 @@ async def get_knowledges(
     except Exception as e:
         api_logger.error(f"Knowledge base query failed: {str(e)}")
         raise HTTPException(
-            status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Query failed: {str(e)}"
         )
 
@@ -403,12 +396,6 @@ async def create_knowledge(
                     status_code=status.HTTP_404_NOT_FOUND,
                     detail="The parent knowledge base does not exist or access is denied",
                 )
-        if create_data.type == knowledge_model.KnowledgeType.FOLDER:
-            await db.run_sync(
-                validate_knowledge_hierarchy, current_user.current_workspace_id,
-                create_data.model_dump(exclude_unset=True),
-                api_settings.KB_KNOWLEDGE_FOLDER_MAX_DEPTH,
-            )
         api_logger.debug(f"Start creating the knowledge base: {create_data.name}")
         # 1. Check if the knowledge base name already exists
         db_knowledge_exist = await knowledge_service.get_knowledge_by_name_async(db, name=create_data.name, current_user=current_user)
@@ -432,7 +419,7 @@ async def create_knowledge(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(e),
         ) from e
-    except (HTTPException, ValidationException):
+    except HTTPException:
         raise
     except Exception as e:
         api_logger.error(f"The creation of the knowledge base failed: {create_data.name} - {str(e)}")
@@ -699,12 +686,19 @@ async def _update_knowledge(
 
         # 2. If updating the embedding_id, delete the knowledge base vector index, reset all document parsing progress to 0, and set chunk_num to 0
         update_dict = update_data.model_dump(exclude_unset=True)
-        if {"parent_id", "status"} & update_dict.keys():
-            await db.run_sync(
-                validate_knowledge_hierarchy, db_knowledge.workspace_id, update_dict,
-                api_settings.KB_KNOWLEDGE_FOLDER_MAX_DEPTH, db_knowledge.id,
-            )
-            await db.refresh(db_knowledge)
+        if "parent_id" in update_dict:
+            parent_id = update_dict["parent_id"]
+            if parent_id is not None and parent_id != current_user.current_workspace_id:
+                parent = await knowledge_service.get_knowledge_by_id_async(
+                    db=db,
+                    knowledge_id=parent_id,
+                    current_user=current_user,
+                )
+                if not parent:
+                    raise HTTPException(
+                        status_code=status.HTTP_404_NOT_FOUND,
+                        detail="The parent knowledge base does not exist or access is denied",
+                    )
         graph_enabled_before: bool | None = None
         if "parser_config" in update_dict:
             try:
@@ -745,13 +739,6 @@ async def _update_knowledge(
                 if db_knowledge.embedding_id and db_knowledge.reranker_id:
                     await asyncio.to_thread(ElasticSearchVectorIndexOps.for_knowledge(db_knowledge.id).delete_index)
                 await document_service.reset_documents_progress_by_kb_id_async(db, kb_id=db_knowledge.id, current_user=current_user)
-                if {"parent_id", "status"} & update_dict.keys():
-                    # Reset commits its transaction; reacquire the lock before editing.
-                    await db.run_sync(
-                        validate_knowledge_hierarchy, db_knowledge.workspace_id, update_dict,
-                        api_settings.KB_KNOWLEDGE_FOLDER_MAX_DEPTH, db_knowledge.id,
-                    )
-                    await db.refresh(db_knowledge)
 
         # 2. Update fields (only update non-null fields)
         api_logger.debug(f"Start updating the knowledge base fields: {knowledge_id}")
@@ -831,7 +818,7 @@ async def _update_knowledge(
 
         # 4. Return the updated knowledge base with async-safe relationships loaded
         return await knowledge_repository.get_knowledge_by_id_async(db=db, knowledge_id=db_knowledge.id) or db_knowledge
-    except (HTTPException, ValidationException):
+    except HTTPException:
         raise
     except Exception as e:
         await db.rollback()

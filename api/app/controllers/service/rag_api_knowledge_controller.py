@@ -1,6 +1,6 @@
 """RAG 服务接口 - 基于 API Key 认证"""
 
-from typing import Annotated, Optional
+from typing import Optional
 import uuid
 
 from fastapi import APIRouter, Body, Depends, Request, Query
@@ -92,8 +92,7 @@ async def get_knowledges(
     orderby: Optional[str] = Query(None, description="Sort fields, such as: created_at,updated_at"),
     desc: Optional[bool] = Query(False, description="Is it descending order"),
     keywords: Optional[str] = Query(None, description="Search keywords (knowledge base name)"),
-    kb_ids: Optional[str] = Query(None, description="Knowledge base ids, separated by commas"),
-    status: Annotated[int | None, Query(ge=0, le=1, description="0: disabled, 1: enabled")] = None,
+    kb_ids: Optional[str] = Query(None, description="Knowledge base ids, separated by commas")
 ):
     """
     Query the knowledge base list in pages
@@ -113,7 +112,6 @@ async def get_knowledges(
                                                          desc=desc,
                                                          keywords=keywords,
                                                          kb_ids=kb_ids,
-                                                         status=status,
                                                          db=db,
                                                          current_user=current_user)
     return knowledge_schema.project_public_knowledge(response)

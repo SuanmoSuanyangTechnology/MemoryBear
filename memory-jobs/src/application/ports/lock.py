@@ -17,17 +17,3 @@ class InflightLock(Protocol):
     def release(self, end_user_id: str, token: str) -> None: ...
 
     def is_locked(self, end_user_id: str) -> bool: ...
-
-
-class MetadataMigrationLock(InflightLock, Protocol):
-    """Unlike cache refresh, migration fails closed on lost ownership."""
-
-    def ensure_valid(self) -> None: ...
-
-
-class MetadataMigrationCircuitBreaker(Protocol):
-    """Workspace-level pause for repeated model configuration failures."""
-
-    def is_open(self, workspace_id: str) -> bool: ...
-
-    def open(self, workspace_id: str) -> None: ...

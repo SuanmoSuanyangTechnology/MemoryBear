@@ -23,20 +23,11 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any
 
-from src.application.dto import (
-    FanOutReport,
-    MetadataMigrationResult,
-    MetadataMigrationScanReport,
-    ScanReport,
-)
-from src.application.emotion.dto import EmotionSuggestionsResult
-from src.application.forgetting.dto import ForgettingResult
+from src.application.dto import FanOutReport, ScanReport
 from src.application.interest.generate import InterestDistributionResult
 from src.application.jobs.health_ping import HealthReport
 from src.application.jobs.interest_prewarm import PrewarmJobResult
 from src.application.profile_cache.generate import ProfileCacheResult
-from src.application.rag_profile.dto import RAGProfileResult
-from src.application.working_memory.dto import ConversationDetailResult
 
 
 def _health(report: HealthReport) -> dict[str, Any]:
@@ -99,42 +90,13 @@ def _prewarm(result: PrewarmJobResult) -> dict[str, Any]:
     }
 
 
-def _metadata_migration_scan(report: MetadataMigrationScanReport) -> dict[str, Any]:
-    return {
-        "status": "SUCCESS",
-        "dispatched": report.dispatched,
-        "skipped_inflight": report.skipped_inflight,
-        "skipped_circuit_breaker": report.skipped_circuit_breaker,
-        "failed": report.failed,
-        "page_failures": report.page_failures,
-        "elapsed_seconds": report.elapsed_seconds,
-    }
-
-
-def _metadata_migration(result: MetadataMigrationResult) -> dict[str, Any]:
-    return {
-        "status": result.status,
-        "end_user_id": result.end_user_id,
-        "workspace_id": result.workspace_id,
-        "reason": result.reason,
-        "operations_applied": result.operations_applied,
-        "operations_rejected": result.operations_rejected,
-    }
-
-
 _SERIALIZERS: dict[type, Callable[[Any], dict[str, Any]]] = {
-    RAGProfileResult: lambda result: {"data": result.data},
-    EmotionSuggestionsResult: lambda result: {"data": result.data},
-    ForgettingResult: lambda result: {"data": result.data},
-    ConversationDetailResult: lambda result: {"data": result.data},
     HealthReport: _health,
     ScanReport: _scan,
     FanOutReport: _fan_out,
     ProfileCacheResult: _profile_cache,
     InterestDistributionResult: _interest,
     PrewarmJobResult: _prewarm,
-    MetadataMigrationScanReport: _metadata_migration_scan,
-    MetadataMigrationResult: _metadata_migration,
 }
 
 

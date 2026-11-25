@@ -617,7 +617,7 @@ class UserMemoryService:
                 "end_user_id": str(end_user_info_record.end_user_id),
                 "other_name": end_user_info_record.other_name,
                 "aliases": end_user_info_record.aliases,
-                "meta_data": end_user_info_record.meta_data_new if isinstance(end_user_info_record.meta_data_new, dict) else {},
+                "meta_data": end_user_info_record.meta_data,
                 "created_at": datetime_to_timestamp(end_user_info_record.created_at),
                 "updated_at": datetime_to_timestamp(end_user_info_record.updated_at)
             }
@@ -729,7 +729,7 @@ class UserMemoryService:
                 "end_user_id": str(end_user_info_record.end_user_id),
                 "other_name": end_user_info_record.other_name,
                 "aliases": end_user_info_record.aliases,
-                "meta_data": end_user_info_record.meta_data_new if isinstance(end_user_info_record.meta_data_new, dict) else {},
+                "meta_data": end_user_info_record.meta_data,
                 "created_at": datetime_to_timestamp(end_user_info_record.created_at),
                 "updated_at": datetime_to_timestamp(end_user_info_record.updated_at)
             }

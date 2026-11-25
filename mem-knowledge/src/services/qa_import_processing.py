@@ -129,11 +129,14 @@ def _parse_csv(contents: bytes) -> tuple[list[dict[str, str]], list[int]]:
         text = contents.decode("utf-8-sig")
     except UnicodeDecodeError:
         text = contents.decode("gbk", errors="ignore")
-    reader = csv.reader(io.StringIO(text), delimiter=",")
+    try:
+        delimiter = csv.Sniffer().sniff(text[:2048]).delimiter
+    except csv.Error:
+        delimiter = "," if "," in text[:500] else "\t"
 
     pairs = []
     failed_rows = []
-    for index, row in enumerate(reader):
+    for index, row in enumerate(csv.reader(io.StringIO(text), delimiter=delimiter)):
         if index == 0:
             continue
         if len(row) >= 2 and row[0].strip():

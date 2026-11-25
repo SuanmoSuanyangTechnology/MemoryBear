@@ -12,7 +12,6 @@ from .contracts import Citations
 from .diagnostics import diagnostic_json, exception_details
 from .identity import merge_candidate, topic_identity
 from .model import request_tokens, tokens
-from .ontology import candidate_identity, with_verified_type
 from .pipeline import (
     PAGE_LINK,
     link_mentions,
@@ -20,7 +19,6 @@ from .pipeline import (
     model_topics,
     rewrite_markdown_text,
 )
-from .resolution import planned_ontology
 from .summary import summarize_document
 
 logger = logging.getLogger(__name__)
@@ -35,8 +33,7 @@ def _citation_log(snapshot, event, **details):
     }))
 
 
-def _filter_citations(value, handles, source_text, new_allowed, snapshot, *, batch_index, model_id):
-    refs = source_text.keys()
+def _filter_citations(value, handles, refs, new_allowed, snapshot, *, batch_index, model_id):
     cited = defaultdict(set)
     unknown_topics, unknown_sources = set(), set()
     for topic in value["topics"]:
@@ -53,13 +50,7 @@ def _filter_citations(value, handles, source_text, new_allowed, snapshot, *, bat
         unknown_sources.update(selected - refs)
         valid = sorted(selected & refs, key=source_reference_key)
         if new_allowed and valid:
-            try:
-                candidates.append(
-                    with_verified_type({**candidate, "source_refs": valid}, source_text)
-                )
-            except ValueError as exc:
-                _citation_log(snapshot, "wiki_invalid_candidate_type_evidence",
-                              batch_index=batch_index, reason=str(exc), model_id=model_id)
+            candidates.append({**candidate, "source_refs": valid})
     if unknown_topics or unknown_sources or (value["new_candidates"] and not new_allowed):
         _citation_log(snapshot, "wiki_citation_handles_filtered",
                       unknown_topics=sorted(unknown_topics),
@@ -104,9 +95,7 @@ def _classify(model, snapshot, topics, segment, allow_new):
 
 
 def _classify_slice(model, snapshot, topics, segment, allow_new):
-    source_text = defaultdict(str)
-    for source in segment:
-        source_text[source["ref"]] += source["text"]
+    refs = {source["ref"] for source in segment}
 
     def build(values):
         return {**_classification_context(snapshot, allow_new), "topics": model_topics(values),
@@ -129,15 +118,14 @@ def _classify_slice(model, snapshot, topics, segment, allow_new):
                     and not isinstance(exc.__cause__, ModelInvokeClientError)):
                 raise
             _citation_log(snapshot, "wiki_citation_batch_failed", batch_index=index,
-                          topic_handles=sorted(handles), source_handles=sorted(source_text),
+                          topic_handles=sorted(handles), source_handles=sorted(refs),
                           model_id=model.model_id, error_code=exc.code,
                           failure_details=exception_details(exc))
             results.append({"topics": [], "new_candidates": [], "failed": True,
                             "dropped_handles": 0, "dropped_candidates": 0})
             continue
         results.append(_filter_citations(
-            value, handles, source_text, new_allowed, snapshot,
-            batch_index=index, model_id=model.model_id,
+            value, handles, refs, new_allowed, snapshot, batch_index=index, model_id=model.model_id
         ))
     return results
 
@@ -152,13 +140,13 @@ def prepare_document(model, snapshot, candidates, segments, catalog, *, fixed_pl
                       for segment in segments)
     results = parallel(operations, model.settings)
     cited = defaultdict(set)
-    identities = {topic_identity(candidate_identity(t), t["title"]): t for t in topics}
+    identities = {topic_identity(t["kind"], t["title"]): t for t in topics}
     for result in results[1:]:
         for batch in result:
             for topic in batch["topics"]:
                 cited[topic["topic_ref"]].update(topic["source_refs"])
             for candidate in batch["new_candidates"]:
-                key = topic_identity(candidate_identity(candidate), candidate["name"])
+                key = topic_identity(candidate["kind"], candidate["name"])
                 target = identities.get(key)
                 if target is None:
                     target = {**candidate, "topic_ref": f"T{len(topics) + 1}",
@@ -175,6 +163,9 @@ def prepare_document(model, snapshot, candidates, segments, catalog, *, fixed_pl
                     }))
                     merge_candidate(target, candidate)
                 cited[target["topic_ref"]].update(target["source_refs"])
+    limit = model.settings.kb_wiki_max_topics
+    if limit and len(topics) > limit:
+        raise WikiError("WIKI_TOPIC_BUDGET_EXCEEDED", retryable=False)
     retained, skipped_pages = [], []
     fallback_count = 0
     for topic in topics:
@@ -189,10 +180,6 @@ def prepare_document(model, snapshot, candidates, segments, catalog, *, fixed_pl
             if fixed_plan and topic.get("page_id"):
                 skipped_pages.append(topic["page_id"])
             continue
-        refs.update(
-            item["source_ref"] for item in topic.get("type_evidence", [])
-            if item["source_ref"] in catalog
-        )
         retained.append({**topic, "source_refs": sorted(refs, key=source_reference_key)})
     batches_done = [batch for result in results[1:] for batch in result]
     logger.info("Wiki 引用汇总 %s", diagnostic_json({
@@ -211,11 +198,8 @@ def prepare_document(model, snapshot, candidates, segments, catalog, *, fixed_pl
 
 def bind_materials(draft, plan, catalog, title):
     mappings = plan.get("topic_pages") or {t["topic_ref"]: t["page_id"] for t in plan["topics"]}
-    links = [
-        {"topic_ref": ref, "page_id": mappings[topic["topic_ref"]]}
-        for topic in draft["topics"]
-        for ref in [topic["topic_ref"], *topic.get("merged_topic_refs", [])]
-    ]
+    links = [{"topic_ref": topic["topic_ref"], "page_id": mappings[topic["topic_ref"]]}
+             for topic in draft["topics"]]
     # Citation-discovered topics can be linked after the parallel summary has completed.
     canonical_refs = {}
     for topic in draft["topics"]:
@@ -242,23 +226,6 @@ def bind_materials(draft, plan, catalog, title):
                                       topic.get("name", topic["title"])]))
         if topic.get("category_path"):
             item["category_path"] = topic["category_path"]
-    for topic in plan["topics"]:
-        if (item := metadata.get(topic["page_id"])) is None:
-            continue
-        if selected_type := planned_ontology(topic):
-            item["_ontology"] = {
-                **selected_type,
-                "type_evidence": [
-                    {
-                        "chunk_id": catalog[evidence["source_ref"]]["chunk_id"],
-                        "quote": evidence["quote"],
-                        "semantic_type": evidence["semantic_type"],
-                        **({"context": evidence["context"]} if evidence.get("context") else {}),
-                    }
-                    for evidence in selected_type["type_evidence"]
-                    if evidence["source_ref"] in catalog
-                ],
-            }
     context = {"title": title, "summary": summary, "topics": links,
                "format": "original_evidence_v2"}
     materials = [{"page_id": page_id, "facts": [],

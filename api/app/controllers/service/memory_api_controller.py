@@ -22,8 +22,6 @@ from app.core.exceptions import BusinessException
 from app.core.logging_config import get_business_logger
 from app.core.memory.enums import SearchStrategy
 from app.core.memory.memory_service import MemoryService
-from app.core.memory.models.metadata_models import LEGACY_METADATA_FIELDS
-from app.core.memory.read_services.search_engine.quick_retrieval_dedup import is_user_profile
 from app.core.memory.storage.enums import MemoryNodeType
 from app.core.quota_stub import check_end_user_quota
 from app.core.response_utils import success, fail
@@ -39,18 +37,6 @@ from app.services.workspace_service import get_workspace_storage_type_without_au
 
 router = APIRouter(prefix="/memory", tags=["V1 - Memory API"])
 logger = get_business_logger()
-
-# 裁剪用户节点的旧画像字段内容
-def _serialize_public_memory(memory, end_user_id: str) -> dict:
-    item = memory.model_dump()
-    if not is_user_profile(memory, end_user_id):
-        return item
-    data = item.get("data")
-    if isinstance(data, dict):
-        item["data"] = {
-            key: value for key, value in data.items() if key not in LEGACY_METADATA_FIELDS
-        }
-    return item
 
 
 def _encode_result(result):
@@ -76,9 +62,7 @@ async def read_memory_sync(
     """
     Read memory synchronously.
 
-    Requires API Key with 'memory' scope. The public response removes the eight
-    legacy profile fields only from the terminal-user profile node
-    (id == end_user_id); ordinary memory nodes are returned unchanged.
+    Requires API Key with 'memory' scope.
 
     Supports two modes:
     - Single user (backward-compatible): pass ``end_user_id`` (string).
@@ -122,9 +106,7 @@ async def read_memory_sync(
             )
             return euid, {
                 "answer": memory.content,
-                "intermediate_outputs": [
-                    _serialize_public_memory(item, euid) for item in memory.memories
-                ],
+                "intermediate_outputs": [_.model_dump() for _ in memory.memories],
             }
 
         results = await asyncio.gather(
@@ -165,9 +147,7 @@ async def read_memory_sync(
         record_display=True)
     return success(data={
         "answer": memory.content,
-        "intermediate_outputs": [
-            _serialize_public_memory(item, payload.end_user_id) for item in memory.memories
-        ]
+        "intermediate_outputs": [_.model_dump() for _ in memory.memories]
     })
 
 
@@ -223,7 +203,7 @@ async def read_memory_internal(
     )
     return success(data={
         "answer": memory.content,
-        "intermediate_outputs": [item.model_dump() for item in memory.memories]
+        "intermediate_outputs": [_.model_dump() for _ in memory.memories]
     })
 
 

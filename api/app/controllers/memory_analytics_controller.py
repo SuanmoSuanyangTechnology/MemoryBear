@@ -158,27 +158,6 @@ async def generate_cache_api(
             if end_user_id:
                 api_logger.info(f"开始为单个用户生成缓存: end_user_id={end_user_id}")
 
-                import uuid
-
-                from app.core.config import settings
-                from app.repositories.end_user_repository import EndUserRepository
-                user = EndUserRepository(db).get_by_id(uuid.UUID(end_user_id))
-                if user is None or not user.is_active or str(user.workspace_id) != str(workspace_id):
-                    return fail(BizCode.USER_NOT_FOUND, "终端用户不存在或不属于当前工作空间")
-                end_user_id = str(user.id)
-                if settings.METADATA_MIGRATION_ENABLED:
-                    try:
-                        from task_bridge.mem_router import QueueName, TaskName
-
-                        from app.celery_app import celery_app
-                        celery_app.send_task(
-                            TaskName.METADATA_MIGRATION_DO.value,
-                            kwargs={"end_user_id": end_user_id, "workspace_id": str(workspace_id), "language": language},
-                            queue=QueueName.METADATA_MIGRATION.value,
-                        )
-                    except Exception:
-                        api_logger.warning("用户迁移派发失败，下轮定时任务重试 user=%s", end_user_id, exc_info=True)
-
                 insight_result = await user_memory_service.generate_and_cache_insight(
                     end_user_id, workspace_id, language=language, db=db,
                 )

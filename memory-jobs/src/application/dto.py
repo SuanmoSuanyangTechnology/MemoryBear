@@ -40,23 +40,3 @@ class PrewarmReport:
     skipped_missing: int = 0
     failed: int = 0
     errors: list[dict[str, Any]] = field(default_factory=list)
-
-
-@dataclass(frozen=True, slots=True)
-class MetadataMigrationScanReport:
-    dispatched: int = 0
-    skipped_inflight: int = 0
-    skipped_circuit_breaker: int = 0
-    failed: int = 0
-    page_failures: int = 0
-    elapsed_seconds: float = 0.0
-
-
-@dataclass(frozen=True, slots=True)
-class MetadataMigrationResult:
-    status: str
-    end_user_id: str
-    workspace_id: str | None = None
-    reason: str | None = None
-    operations_applied: int = 0
-    operations_rejected: int = 0

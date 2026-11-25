@@ -238,12 +238,12 @@ def get_workspace_model_public_version() -> str:
 
 def invalidate_workspace_model_options(
         tenant_ids: Iterable[Any], *, public_catalog_changed: bool = False,
-) -> bool:
+) -> None:
     try:
         redis = get_sync_client()
         if public_catalog_changed:
             redis.incr(WORKSPACE_MODEL_PUBLIC_VERSION_KEY)
-            return True
+            return
         version = str(redis.get(WORKSPACE_MODEL_PUBLIC_VERSION_KEY) or "0")
         keys = {
             workspace_model_options_key(tenant_id, version)
@@ -251,7 +251,5 @@ def invalidate_workspace_model_options(
         }
         if keys:
             redis.delete(*keys)
-        return True
     except Exception:
         logger.warning("Workspace model options invalidation failed", exc_info=True)
-        return False

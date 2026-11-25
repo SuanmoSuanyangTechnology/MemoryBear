@@ -1,7 +1,7 @@
 """Request-local profile projection; shared caches always contain full profiles."""
 
-import logging
 from copy import deepcopy
+import logging
 
 from app.core.memory.models.metadata_models import split_metadata_entry
 
@@ -51,15 +51,7 @@ async def scoped_metadata(ctx, record: dict) -> dict:
     if ctx.app_id is None:
         logger.warning("Metadata application context missing; using default_only")
     elif resolver is not None:
-        try:
-            scope = await resolver.resolve(ctx.app_id, ctx.end_user_id)
-        except Exception:
-            # ``default_only`` is the most restrictive projection (it drops all
-            # domain-specific info), so a lookup failure can degrade safely
-            # instead of failing the read — same policy as memory-profile.
-            logger.warning(
-                "Metadata scope lookup failed; using default_only", exc_info=True
-            )
-            scope = None
+        # Query failures propagate: never fall back to the full profile.
+        scope = await resolver.resolve(ctx.app_id, ctx.end_user_id)
     logger.info("Metadata scope=%s", "bounded" if scope else "default_only")
     return project_metadata(record, scope)

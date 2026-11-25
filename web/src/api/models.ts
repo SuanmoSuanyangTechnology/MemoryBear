@@ -5,7 +5,7 @@
  * @Last Modified time: 2026-02-03 14:00:09 
  */
 import { request } from '@/utils/request'
-import type { MultiKeyForm, Query, KeyConfigModalForm, CompositeModelForm, CustomModelForm, Provider, ModelType } from '@/views/ModelManagement/types'
+import type { MultiKeyForm, Query, KeyConfigModalForm, CompositeModelForm, CustomModelForm, Provider } from '@/views/ModelManagement/types'
 
 // Model list
 export const getModelListUrl = '/models'
@@ -16,8 +16,8 @@ export const getModelList = (data?: Query) => {
 export const modelTypeUrl = '/models/type'
 // Model provider list
 export const modelProviderUrl = '/models/provider'
-export const getModelProviderList = (data?: { model_type?: ModelType }) => {
-  return request.get(modelProviderUrl, data)
+export const getModelProviderList = () => {
+  return request.get(modelProviderUrl)
 }
 // New model list
 export const getModelNewListUrl = '/models/new'

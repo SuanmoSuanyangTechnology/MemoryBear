@@ -33,20 +33,6 @@ class WorkspaceSummary(BaseModel):
         return to_timestamp_ms(value)
 
 
-class KnowledgeShareRequest(BaseModel):
-    source_kb_id: uuid.UUID
-    target_workspace_id: uuid.UUID
-
-
-class KnowledgeShareResult(KnowledgeShareRequest):
-    id: uuid.UUID
-    source_workspace_id: uuid.UUID
-    target_kb_id: uuid.UUID
-    created: bool = False
-
-    model_config = ConfigDict(from_attributes=True)
-
-
 class KnowledgeShareBase(BaseModel):
     source_kb_id: uuid.UUID
     source_workspace_id: uuid.UUID | None = None

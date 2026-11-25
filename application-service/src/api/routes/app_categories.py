@@ -15,23 +15,17 @@ from __future__ import annotations
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Body, Depends, Query, Request
+from fastapi import APIRouter, Body, Depends, Query
 from sqlalchemy.orm import Session
 
-from ...errors import BizCode, BusinessException
 from ...services.category_service import CategoryService
-from ..dependencies import API_KEY_ID_HEADER, get_sync_db
+from ..dependencies import get_sync_db
 from ..schemas.common import success
 from ..schemas.response_schema import ApiResponse
 
 router = APIRouter(prefix="/app-categories", tags=["App Categories"])
 
 DbSession = Annotated[Session, Depends(get_sync_db)]
-
-
-def require_category_write_access(request: Request) -> None:
-    if API_KEY_ID_HEADER in request.headers:
-        raise BusinessException("API Key 仅可读取应用分类", BizCode.FORBIDDEN)
 
 
 @router.get("", summary="分类字典：运维面全量", response_model=ApiResponse)
@@ -55,12 +49,7 @@ def list_categories(
     return success(data={"items": items, "total": len(items)}, msg="获取分类列表成功")
 
 
-@router.post(
-    "",
-    summary="分类字典：新建",
-    response_model=ApiResponse,
-    dependencies=[Depends(require_category_write_access)],
-)
+@router.post("", summary="分类字典：新建", response_model=ApiResponse)
 def create_category(
         db: DbSession,
         payload: dict = Body(
@@ -88,12 +77,7 @@ def create_category(
     return success(data={"items": items, "total": len(items)}, msg="分类创建成功")
 
 
-@router.patch(
-    "/{category_id}",
-    summary="分类字典：修改",
-    response_model=ApiResponse,
-    dependencies=[Depends(require_category_write_access)],
-)
+@router.patch("/{category_id}", summary="分类字典：修改", response_model=ApiResponse)
 def update_category(
         category_id: UUID,
         db: DbSession,
@@ -111,12 +95,7 @@ def update_category(
     return success(data=item, msg="分类更新成功")
 
 
-@router.delete(
-    "/{category_id}",
-    summary="分类字典：删除",
-    response_model=ApiResponse,
-    dependencies=[Depends(require_category_write_access)],
-)
+@router.delete("/{category_id}", summary="分类字典：删除", response_model=ApiResponse)
 def delete_category(category_id: UUID, db: DbSession):
     """物理删除。被任一应用版本引用时返回 `RESOURCE_IN_USE`（5005）。
 

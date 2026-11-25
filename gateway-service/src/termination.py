@@ -121,23 +121,6 @@ def _api_key_scope_denied(request: Request, ctx: ApiKeyContext) -> bool:
     return not set(route.required_scopes).issubset(ctx.scopes or ())
 
 
-def _api_key_path_denied(request: Request) -> str | None:
-    """Route-declared API-key path allowlist gate.
-
-    Returns ``"path"`` (the path is not in the v1 contract at all), ``"method"``
-    (the path is in the contract but this method is not open) or ``None``
-    (allowed). Opt-in: a route without ``api_key_paths`` keeps its previous
-    behaviour, and an unrouted request stays on the stub/404 path.
-
-    Matched against the *external* path (``request.url.path``), the same source
-    the middleware resolves routes on — templates are declared as ``/v1/...``.
-    """
-    route = getattr(request.state, "target_route", None)
-    if route is None:
-        return None
-    return route.api_key_path_verdict(request.method, request.url.path)
-
-
 def _profile_headers(
     request: Request, actor_id: str, tenant_id: str, workspace_id: str
 ) -> dict[str, str]:
@@ -271,25 +254,6 @@ async def terminate_api_key(request: Request, deps: GatewayDeps) -> AuthResult:
             status_code=403,
             detail="insufficient scope",
             body=_v1_fail(3012, "API Key 权限不足"),
-        )
-    # Path allowlist before quota, for the same reason as the scope gate above:
-    # an out-of-contract call must not consume the key's QPS/daily budget.
-    denied = _api_key_path_denied(request)
-    if denied == "path":
-        # /v1 契约：路径不在契约内 → 403 / code 3001（FORBIDDEN）。Not 3012:
-        # no scope can unlock a path that was never opened, so reusing the scope
-        # code would send integrators chasing a permission fix that cannot work.
-        return AuthResult(
-            status_code=403,
-            detail="api key path not allowed",
-            body=_v1_fail(3001, "无权限访问该路径", "该路径未对 API Key 开放"),
-        )
-    if denied == "method":
-        # /v1 契约：路径在契约内、方法未开放 → 405 / code 1000（BAD_REQUEST）
-        return AuthResult(
-            status_code=405,
-            detail="api key method not allowed",
-            body=_v1_fail(1000, "不支持的请求方法"),
         )
     if not ctx.rate_limit_disabled:
         for check, limit in (

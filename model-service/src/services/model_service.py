@@ -43,7 +43,6 @@ from ..errors import BizCode, BusinessException
 from ..infrastructure.model_provider_config import (
     get_default_provider_api_base,
     is_local_deployment_provider,
-    require_provider_supports_model_type,
     validate_api_base_against_default,
 )
 from ..infrastructure.redis_cache import (
@@ -530,12 +529,6 @@ def _require_wellformed_api_base(
     """
     provider_name = str(getattr(provider, "value", provider)).lower()
     if provider_name == ModelProvider.BEDROCK.value:
-        from redbear_model.providers.bedrock import resolve_bedrock_region
-
-        try:
-            resolve_bedrock_region(api_base)
-        except ValueError as exc:
-            raise BusinessException(str(exc), BizCode.INVALID_PARAMETER) from exc
         return
     if not (isinstance(api_base, str) and api_base.strip()):
         return
@@ -591,8 +584,8 @@ def _model_option_cache_state(model: ModelConfig) -> tuple[uuid.UUID | None, boo
     return model.tenant_id, public_speedbear
 
 
-def _invalidate_model_option_states(*states: tuple[uuid.UUID | None, bool]) -> bool:
-    return invalidate_workspace_model_options(
+def _invalidate_model_option_states(*states: tuple[uuid.UUID | None, bool]) -> None:
+    invalidate_workspace_model_options(
         (tenant_id for tenant_id, _ in states),
         public_catalog_changed=any(is_public for _, is_public in states),
     )
@@ -602,10 +595,10 @@ def _model_base_configs(db: Session, model_base_id: uuid.UUID) -> list[ModelConf
     return db.query(ModelConfig).filter(ModelConfig.model_id == model_base_id).all()
 
 
-def _invalidate_model_base_caches(configs: Sequence[ModelConfig]) -> bool:
+def _invalidate_model_base_caches(configs: Sequence[ModelConfig]) -> None:
     """基础模型弃用态变更后：清运行期模型缓存（按租户精确删）与工作空间模型选项缓存。"""
     if not configs:
-        return True
+        return
     config_ids = [config.id for config in configs]
     invalidate_runtime_model_info_batch(config_ids)
     by_tenant: dict[uuid.UUID, list[uuid.UUID]] = {}
@@ -614,7 +607,7 @@ def _invalidate_model_base_caches(configs: Sequence[ModelConfig]) -> bool:
             by_tenant.setdefault(config.tenant_id, []).append(config.id)
     for tenant_id, ids in by_tenant.items():
         invalidate_runtime_model_info_batch(ids, tenant_id)
-    return _invalidate_model_option_states(*[_model_option_cache_state(config) for config in configs])
+    _invalidate_model_option_states(*[_model_option_cache_state(config) for config in configs])
 
 
 def _probe_availability(
@@ -1063,16 +1056,11 @@ class ModelConfigService:
                 embedding = RedBearEmbeddings(shared_config)
                 test_texts = [test_message, "测试文本"]
 
-                try:
+                # 火山引擎使用 embed_batch，其他使用 embed_documents
+                if provider_lower == "volcano":
+                    vectors = await asyncio.to_thread(embedding.embed_batch, test_texts)
+                else:
                     vectors = await asyncio.to_thread(embedding.embed_documents, test_texts)
-                finally:
-                    await embedding.aclose()
-                if (
-                    len(vectors) != len(test_texts)
-                    or not vectors[0]
-                    or any(len(vector) != len(vectors[0]) for vector in vectors)
-                ):
-                    raise RuntimeError("Embedding response does not match the request")
 
                 elapsed_time = time.time() - start_time
 
@@ -1096,12 +1084,7 @@ class ModelConfigService:
                 rerank = RedBearRerank(shared_config)
                 query = test_message
                 documents = ["这是第一个文档", "这是第二个文档", "这是第三个文档"]
-                try:
-                    results = await asyncio.to_thread(
-                        rerank.rerank, query=query, documents=documents, top_n=3
-                    )
-                finally:
-                    await rerank.aclose()
+                results = await asyncio.to_thread(rerank.rerank, query=query, documents=documents, top_n=3)
                 elapsed_time = time.time() - start_time
 
                 return {
@@ -1367,9 +1350,6 @@ class ModelConfigService:
         _assert_plaza_entry_absent(
             db, name=model_data.name, provider=model_data.provider, model_type=model_data.type
         )
-        # Before any network probe: a combination with no runtime adapter can only
-        # fail, and letting it reach the probe surfaced "未知错误: 调用模型服务失败".
-        require_provider_supports_model_type(model_data.provider, model_data.type)
         if is_asr_model(model_data.type):
             snapshot, credential = ModelConfigService._prepare_asr_model(
                 db, model_data, tenant_id
@@ -1493,10 +1473,6 @@ class ModelConfigService:
             model_data.provider if "provider" in fields_set else existing_model.provider,
             normalize_type(model_data.type) if "type" in fields_set else existing_model.type,
         )
-        # provider × type 只在组合本身变化时校验：存量非法组合（如手建的 ollama
-        # rerank）改描述、改名称都不该被拦，否则这些行连改名都做不到。
-        if (new_triple[1], new_triple[2]) != (existing_model.provider, existing_model.type):
-            require_provider_supports_model_type(new_triple[1], new_triple[2])
         if new_triple != (existing_model.name, existing_model.provider, existing_model.type):
             _assert_plaza_entry_absent(
                 db,
@@ -1902,9 +1878,6 @@ class ModelBaseService:
         existing = ModelBaseRepository.get_by_name_and_provider(db, data.name, data.provider)
         if existing:
             raise BusinessException("模型已存在", BizCode.DUPLICATE_NAME)
-        # Same gate as the custom-model path: a plaza entry with no runtime adapter
-        # would be addable here and only fail later at invoke time.
-        require_provider_supports_model_type(data.provider, data.type)
         create_data = data.model_dump(
             exclude={"input_modalities", "output_modalities", "features"}
         )
@@ -1987,7 +1960,6 @@ class ModelBaseService:
         if ModelBaseRepository.check_added_by_tenant(db, model_base_id, tenant_id):
             raise BusinessException("模型已添加", BizCode.DUPLICATE_NAME)
 
-        require_provider_supports_model_type(model_base.provider, model_base.type)
         model_config_data = {
             "model_id": model_base_id,
             "tenant_id": tenant_id,

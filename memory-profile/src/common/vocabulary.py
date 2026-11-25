@@ -11,7 +11,6 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from types import MappingProxyType
-from typing import Literal
 
 #: 图谱支持的 Node_Type 集合（api ``graph_data_constants`` 同值）。
 SUPPORTED_NODE_TYPES: frozenset[str] = frozenset(
@@ -153,43 +152,3 @@ def normalize_emotion_type_or_raw(value: object) -> object:
         return None
     code = normalize_emotion_type(value)
     return code if code is not None else value
-
-
-EMOTION_NAMES_ZH: Mapping[str, str] = MappingProxyType(
-    {
-        "neutral": "中性", "joy": "开心", "relief": "缓解", "anxiety": "焦虑",
-        "sadness": "难过", "anger": "生气", "frustration": "挫败",
-        "loneliness": "孤独", "confusion": "困惑", "hope": "期待",
-    }
-)
-EMOTION_NAMES_EN: Mapping[str, str] = MappingProxyType(
-    {
-        "neutral": "Neutral", "joy": "Joy", "relief": "Relief", "anxiety": "Anxiety",
-        "sadness": "Sadness", "anger": "Anger", "frustration": "Frustration",
-        "loneliness": "Loneliness", "confusion": "Confusion", "hope": "Hope",
-    }
-)
-POSITIVE_EMOTIONS: frozenset[str] = frozenset({"joy", "relief", "hope"})
-NEGATIVE_EMOTIONS: frozenset[str] = frozenset(
-    {"anxiety", "sadness", "anger", "frustration", "loneliness"}
-)
-NEUTRAL_EMOTIONS: frozenset[str] = frozenset({"neutral", "confusion"})
-EmotionValence = Literal["positive", "negative", "neutral"]
-
-
-def emotion_valence(value: object) -> EmotionValence | None:
-    code = normalize_emotion_type(value)
-    if code is None:
-        return None
-    if code in POSITIVE_EMOTIONS:
-        return "positive"
-    if code in NEGATIVE_EMOTIONS:
-        return "negative"
-    return "neutral"
-
-
-def emotion_display_name(value: object, language: str = "zh") -> str | None:
-    code = normalize_emotion_type(value)
-    if code is None:
-        return None
-    return (EMOTION_NAMES_EN if language == "en" else EMOTION_NAMES_ZH)[code]

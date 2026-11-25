@@ -7,7 +7,6 @@ import uuid
 from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, Depends, Query, Request
-from pydantic import WrapValidator
 
 from ...error_mapping import map_wiki_error
 from ...errors import KnowledgeError
@@ -15,8 +14,7 @@ from ...rag.wiki.config import WikiError
 from ...repositories.wiki import read
 from ...runtime import ProcessRuntime
 from ...services.wiki.runtime import transaction
-from ..dependencies import Principal, get_principal, get_runtime, is_manager_request
-from ..query_validation import localized_query_validation
+from ..dependencies import Principal, get_principal, get_runtime
 from ..schemas.common import SuccessEnvelope, success
 
 router = APIRouter(prefix="/knowledges/{kb_id}/wiki", tags=["wiki"])
@@ -56,7 +54,6 @@ async def list_pages(
     kb_id: uuid.UUID,
     principal: PrincipalDep,
     runtime: RuntimeDep,
-    document_id: Annotated[uuid.UUID | None, WrapValidator(localized_query_validation)] = None,
     page_types: str | None = None,
     keyword: str | None = Query(
         None, description="搜索 Wiki 标题、摘要和正文，不区分大小写的字面包含匹配；"
@@ -73,7 +70,6 @@ async def list_pages(
             runtime,
             read.list_pages,
             _scope(kb_id, principal),
-            document_id=document_id if is_manager_request(request) else None,
             keyword=keyword,
             page_types=_types(page_types),
             page=page,

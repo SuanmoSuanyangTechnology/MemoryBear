@@ -87,19 +87,3 @@ class CeleryUnitPublisher:
             countdown=stagger_delay(dispatch_index),
             priority=_TRANSPORT_PRIORITY[priority],
         )
-
-    def publish_metadata_migration(
-        self,
-        *,
-        end_user_id: str,
-        workspace_id: str,
-        language: str,
-        priority: str,
-        dispatch_index: int,
-    ) -> None:
-        self._sender().send_task(
-            TaskName.METADATA_MIGRATION_DO.value,
-            kwargs={"end_user_id": end_user_id, "workspace_id": workspace_id, "language": language},
-            countdown=stagger_delay(dispatch_index),
-            priority=_TRANSPORT_PRIORITY[Priority.BACKGROUND],
-        )
