@@ -244,7 +244,7 @@ class ConsumeOutboxBatchUseCase:
             else:
                 # Elasticsearch may already carry the document. Never project
                 # again just because the PostgreSQL acknowledgement failed.
-                updated = self._store.mark_processed(event.id, event.claim_token)
+                updated = self._store.mark_processed(event)
                 return "processed" if updated else "lost"
         return "lost"
 

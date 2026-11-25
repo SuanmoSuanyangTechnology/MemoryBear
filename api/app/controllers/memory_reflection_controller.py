@@ -54,6 +54,7 @@ from app.schemas.memory_reflection_schemas import (
 )
 from app.core.response_utils import fail
 from app.core.error_codes import BizCode
+from app.integrations.profile.proxy import memory_profile_proxy
 
 # Load environment variables for configuration
 load_dotenv()
@@ -68,8 +69,11 @@ router = APIRouter(
 )
 
 
+# These three routes forward to memory-profile and retain the original handlers.
 @router.get("/reflection/logs/stats")
+@memory_profile_proxy(query_fields=("end_user_id",))
 async def get_reflection_log_stats(
+        request: Request,
         end_user_id: str = Query(..., description="终端用户ID"),
         current_user: CurrentUserSnapshot = Depends(get_current_user_async),
 ):
@@ -103,7 +107,9 @@ async def get_reflection_log_stats(
 
 
 @router.get("/reflection/logs/{log_id}")
+@memory_profile_proxy()
 async def get_reflection_log_detail(
+        request: Request,
         log_id: str = Path(..., description="日志ID"),
         current_user: CurrentUserSnapshot = Depends(get_current_user_async),
 ):
@@ -133,7 +139,11 @@ async def get_reflection_log_detail(
 
 
 @router.get("/reflection/logs")
+@memory_profile_proxy(
+    query_fields=("end_user_id", "sub_problem", "status", "trigger_type", "page", "pagesize"),
+)
 async def get_reflection_logs(
+        request: Request,
         end_user_id: str = Query(..., description="终端用户ID"),
         sub_problem: Optional[SubProblemEnum] = Query(None, description="子问题类型筛选"),
         status: Optional[LogStatusEnum] = Query(None, description="状态筛选"),

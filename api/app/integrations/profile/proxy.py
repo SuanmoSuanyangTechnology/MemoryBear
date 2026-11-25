@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Mapping
+from enum import Enum
 from functools import wraps
 from inspect import signature
 from typing import Any, ParamSpec, TypeVar
@@ -157,11 +158,12 @@ def memory_profile_proxy(
     target_path: str | None = None,
     principal_arg: str = "current_user",
     preserve_status: bool = False,
+    request_headers: tuple[str, ...] = (),
 ):
     """Forward a migrated route to memory-profile for every request.
     The wrapped function defines the route signature, not a local fallback. The API-key
-    routes run their authentication, workspace validation, and merge routing
-    before calling it, so the decorator only replaces the final use-case call.
+    routes run their authentication before calling it. They may also resolve
+    workspace ownership and merges there, or delegate those checks with a raw request.
     Forwarding is path-driven: the handler declares ``request: Request`` and its
     caller path is forwarded, so adding an endpoint needs no entry here, and the
     source is read off that same path. Pass ``source`` to pin it for a caller that
@@ -187,6 +189,7 @@ def memory_profile_proxy(
     body parsed inside the handler keeps its ``exclude_unset`` semantics.
     ``preserve_status`` returns the upstream HTTP status instead of forcing 200,
     for endpoints whose legacy contract distinguishes 4xx/5xx.
+    ``request_headers`` allowlists route-specific headers to send upstream.
 
     ``principal_arg`` names the handler argument carrying the caller when it is
     not ``current_user``; when neither is present the API-key context established
@@ -194,6 +197,7 @@ def memory_profile_proxy(
     """
 
     bounds = dict(upper_bounds or {})
+    forwarded_header_names = {name.lower().encode("ascii") for name in request_headers}
 
     def decorate(handler):
         handler_signature = signature(handler)
@@ -232,11 +236,13 @@ def memory_profile_proxy(
             # The query is rebuilt from the declared fields rather than forwarded
             # raw: API-key callers reach the handler through merge routing, so the
             # caller's own end_user_id may still name a merged-away end user.
-            # Non-primitive values (a ``UUID`` declared by the handler) are
-            # stringified: httpx only encodes str/int/float/bool/None.
+            # Use the validated enum value rather than its Python member name.
+            # UUIDs also need to be converted before httpx encodes the query.
             query: dict[str, Any] = {}
             for field in query_fields:
                 value = arguments.get(field)
+                if isinstance(value, Enum):
+                    value = value.value
                 query[field] = str(value) if isinstance(value, UUID) else value
             for field, maximum in bounds.items():
                 value = query.get(field)
@@ -276,6 +282,13 @@ def memory_profile_proxy(
             caller_source = (
                 _caller_source(caller_path) if source is None else source
             )
+            request_options = {}
+            if forwarded_header_names:
+                request_options["request_headers"] = tuple(
+                    (name, value.strip(b" \t"))
+                    for name, value in request.headers.raw
+                    if name.lower() in forwarded_header_names
+                )
             try:
                 result = await get_memory_profile_client().request(
                     method=request.method,
@@ -293,6 +306,7 @@ def memory_profile_proxy(
                     raw_body=raw_body,
                     raw=True,
                     timeout=timeout_seconds,
+                    **request_options,
                 )
                 if isinstance(result, MemoryProfileRawResponse):
                     # The upstream body is already a serialized ApiResponse;

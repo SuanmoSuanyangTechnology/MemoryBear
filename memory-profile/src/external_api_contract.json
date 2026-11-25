@@ -8909,6 +8909,186 @@
         "model": "src.common.responses.ApiResponse[EmotionWordcloudData]",
         "status_code": 200
       }
+    },
+    "GET /internal/v1/memory/preference/recall/full": {
+      "endpoint": "recall_all_coding_preferences_http",
+      "parameters": {
+        "header:other_id": {
+          "in": "header",
+          "annotation": "str | None",
+          "required": false,
+          "default": null,
+          "constraints": [
+            "alias=X-End-User-Other-Id"
+          ]
+        }
+      },
+      "response": {
+        "model": "src.common.responses.ApiResponse[FullPreferenceRecallResult]",
+        "status_code": 200,
+        "declared": [],
+        "fields": {
+          "code": {
+            "annotation": "int",
+            "required": false,
+            "default": 0,
+            "constraints": []
+          },
+          "msg": {
+            "annotation": "str",
+            "required": false,
+            "default": "OK",
+            "constraints": []
+          },
+          "data": {
+            "annotation": "src.schemas.preference_recall.FullPreferenceRecallResult",
+            "required": true,
+            "default": null,
+            "constraints": [],
+            "fields": {
+              "preferences": {
+                "annotation": "list[src.schemas.preference_recall.RecalledPreference]",
+                "required": true,
+                "default": null,
+                "constraints": [],
+                "fields": {
+                  "preference_text": {
+                    "annotation": "str",
+                    "required": true,
+                    "default": null,
+                    "constraints": [
+                      "MinLen(min_length=1)"
+                    ]
+                  },
+                  "updated_at": {
+                    "annotation": "datetime.datetime",
+                    "required": true,
+                    "default": null,
+                    "constraints": []
+                  }
+                },
+                "config": {
+                  "extra": "forbid"
+                }
+              },
+              "count": {
+                "annotation": "int",
+                "required": true,
+                "default": null,
+                "constraints": []
+              },
+              "preference_prompt": {
+                "annotation": "str",
+                "required": true,
+                "default": null,
+                "constraints": []
+              }
+            },
+            "config": {
+              "extra": "forbid"
+            }
+          },
+          "error": {
+            "annotation": "str",
+            "required": false,
+            "default": "",
+            "constraints": []
+          },
+          "time": {
+            "annotation": "int",
+            "required": false,
+            "default": "<factory:now_ms#5bec5d10ddf5>",
+            "constraints": []
+          }
+        }
+      }
+    },
+    "POST /internal/v1/memory/preference/recall": {
+      "endpoint": "recall_coding_preferences_http",
+      "parameters": {
+        "header:other_id": {
+          "in": "header",
+          "annotation": "str | None",
+          "required": false,
+          "default": null,
+          "constraints": [
+            "alias=X-End-User-Other-Id"
+          ]
+        }
+      },
+      "response": {
+        "model": "src.common.responses.ApiResponse[PreferenceRecallResult]",
+        "status_code": 200,
+        "declared": [],
+        "fields": {
+          "code": {
+            "annotation": "int",
+            "required": false,
+            "default": 0,
+            "constraints": []
+          },
+          "msg": {
+            "annotation": "str",
+            "required": false,
+            "default": "OK",
+            "constraints": []
+          },
+          "data": {
+            "annotation": "src.schemas.preference_recall.PreferenceRecallResult",
+            "required": true,
+            "default": null,
+            "constraints": [],
+            "fields": {
+              "preferences": {
+                "annotation": "list[src.schemas.preference_recall.RecalledPreference]",
+                "required": true,
+                "default": null,
+                "constraints": [],
+                "fields": {
+                  "preference_text": {
+                    "annotation": "str",
+                    "required": true,
+                    "default": null,
+                    "constraints": [
+                      "MinLen(min_length=1)"
+                    ]
+                  },
+                  "updated_at": {
+                    "annotation": "datetime.datetime",
+                    "required": true,
+                    "default": null,
+                    "constraints": []
+                  }
+                },
+                "config": {
+                  "extra": "forbid"
+                }
+              },
+              "count": {
+                "annotation": "int",
+                "required": true,
+                "default": null,
+                "constraints": []
+              }
+            },
+            "config": {
+              "extra": "forbid"
+            }
+          },
+          "error": {
+            "annotation": "str",
+            "required": false,
+            "default": "",
+            "constraints": []
+          },
+          "time": {
+            "annotation": "int",
+            "required": false,
+            "default": "<factory:now_ms#5bec5d10ddf5>",
+            "constraints": []
+          }
+        }
+      }
     }
   },
   "schema": 1

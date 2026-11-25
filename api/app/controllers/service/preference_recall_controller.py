@@ -9,7 +9,7 @@ from fastapi.responses import JSONResponse
 
 from app.controllers.service.mcp_auth_middleware import OTHER_ID_HEADER
 from app.core.api_key_auth import get_current_api_key_auth, require_api_key_self_db
-from app.core.error_codes import BizCode, http_status_for
+from app.core.error_codes import BizCode
 from app.core.memory.storage_services.preference_engine.full_recall_service import (
     execute_full_preference_recall,
 )
@@ -21,6 +21,7 @@ from app.core.memory.storage_services.preference_engine.recall_service import (
 )
 from app.core.response_utils import fail, success
 from app.db import get_async_db_context
+from app.integrations.profile.proxy import memory_profile_proxy
 from app.repositories.end_user_repository import EndUserRepository
 from app.services.memory_config_service import MemoryConfigService
 
@@ -28,7 +29,7 @@ router = APIRouter(prefix="/memory/preference", tags=["V1 - Preference Recall AP
 
 
 def _failure(code: BizCode, message: str) -> JSONResponse:
-    return JSONResponse(content=fail(code, message), status_code=http_status_for(code))
+    return JSONResponse(content=fail(code, message))
 
 
 async def _resolve_caller(request: Request):
@@ -57,6 +58,10 @@ async def _resolve_caller(request: Request):
 
 @router.post("/recall")
 @require_api_key_self_db(scopes=["memory"])
+@memory_profile_proxy(
+    raw_body=True,
+    request_headers=(OTHER_ID_HEADER,),
+)
 async def recall_coding_preferences_http(request: Request) -> JSONResponse:
     """Recall task-relevant preferences using API-key and end-user headers."""
     # A lone model-typed parameter would make FastAPI parse the whole body as ApiKeyAuth.
@@ -101,9 +106,13 @@ async def recall_coding_preferences_http(request: Request) -> JSONResponse:
 
 @router.get("/recall/full")
 @require_api_key_self_db(scopes=["memory"])
+@memory_profile_proxy(
+    raw_body=True,
+    request_headers=(OTHER_ID_HEADER,),
+)
 async def recall_all_coding_preferences_http(request: Request) -> JSONResponse:
     """Return all visible active Coding Agent preferences and their prompt block."""
-    if await request.body() or request.query_params:
+    if await request.body():
         return _failure(BizCode.INVALID_PARAMETER, "偏好召回请求参数不合法")
 
     caller, error = await _resolve_caller(request)
@@ -120,5 +129,4 @@ async def recall_all_coding_preferences_http(request: Request) -> JSONResponse:
         return _failure(BizCode.SERVICE_UNAVAILABLE, "偏好召回服务暂时不可用")
     return JSONResponse(
         content=success(data=result.model_dump(mode="json"), msg="查询成功"),
-        headers={"Cache-Control": "no-store"},
     )

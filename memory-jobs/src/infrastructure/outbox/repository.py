@@ -27,6 +27,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from src.application.ports.outbox.outbox import MAX_ATTEMPTS, OutboxEvent
 from src.infrastructure.outbox.model import (
+    DELETE,
     FAILED,
     OUTBOX_EVENTS,
     PENDING,
@@ -116,6 +117,7 @@ class PostgresOutboxStore:
                 other.c.status == PROCESSING,
             )
         )
+        # "No earlier pending row for this node" keeps the per-node queue serial.
         has_earlier_pending = sa.exists(
             sa.select(1).where(
                 other.c.label == events.c.label,
@@ -124,11 +126,25 @@ class PostgresOutboxStore:
                 other.c.sequence < events.c.sequence,
             )
         )
+        # The node's queue tip bounds what this projection already covers. It has
+        # to be read by the claim statement itself: a row enqueued between two
+        # statements could have committed its Neo4j write after our read, and
+        # superseding it would drop an update.
+        node_queue = events.alias("node_queue")
+        queue_tip = (
+            sa.select(sa.func.max(node_queue.c.sequence))
+            .where(
+                node_queue.c.label == events.c.label,
+                node_queue.c.node_id == events.c.node_id,
+                node_queue.c.status == PENDING,
+            )
+            .scalar_subquery()
+        )
         claimed: list[OutboxEvent] = []
         with self.sessions.begin() as session:
             rows = (
                 session.execute(
-                    sa.select(events)
+                    sa.select(events, queue_tip.label("queue_tip"))
                     .where(
                         events.c.status == PENDING,
                         ~has_processing,
@@ -174,6 +190,7 @@ class PostgresOutboxStore:
                             operation=row["operation"],
                             attempt_count=row["attempt_count"],
                             claim_token=token,
+                            queue_tip=row["queue_tip"] or row["sequence"],
                         )
                     )
         return claimed
@@ -246,10 +263,15 @@ class PostgresOutboxStore:
             failed_at=db_now() if status == FAILED else None,
         )
 
-    def mark_processed(self, event_id: UUID, claim_token: UUID) -> bool:
-        """Write the terminal ``processed`` state."""
+    def mark_processed(self, event: OutboxEvent) -> bool:
+        """Write the terminal ``processed`` state, then collapse its node's queue.
 
-        return self._finish(event_id, claim_token, PROCESSED, None)
+        The projection re-reads Neo4j, so every row of that node which was
+        already pending at claim time is covered by the state that was just
+        written: they can all converge to ``processed`` without projecting.
+        """
+
+        return self._finish(event.id, event.claim_token, PROCESSED, None, event)
 
     def mark_failed(self, event_id: UUID, claim_token: UUID, error: str) -> bool:
         """Write the terminal ``failed`` state with a bounded error text.
@@ -264,7 +286,12 @@ class PostgresOutboxStore:
         )
 
     def _finish(
-        self, event_id: UUID, token: UUID, status: str, error: str | None
+        self,
+        event_id: UUID,
+        token: UUID,
+        status: str,
+        error: str | None,
+        claim: OutboxEvent | None = None,
     ) -> bool:
         with self.sessions.begin() as session:
             result = session.execute(
@@ -272,7 +299,37 @@ class PostgresOutboxStore:
                 .where(self._owner(event_id, token))
                 .values(**self._terminal(status, error))
             )
+            # Supersede only after an acknowledged success. A zero rowcount means
+            # the lease moved to another worker: collapsing the queue then would
+            # discard rows that worker still has to project.
+            if result.rowcount and status == PROCESSED and claim is not None:
+                self._supersede(session, claim)
             return bool(result.rowcount)
+
+    @staticmethod
+    def _supersede(session: Session, claim: OutboxEvent) -> int:
+        """Collapse the pending rows this projection already covers.
+
+        A physical delete is projected blindly (no Neo4j read), so it may only
+        collapse other deletes: a later state event could be the re-creation of
+        the same node id and must still be projected.
+        """
+
+        if claim.queue_tip <= 0:
+            return 0
+        scope = [
+            events.c.label == claim.label,
+            events.c.node_id == claim.node_id,
+            events.c.status == PENDING,
+            events.c.sequence <= claim.queue_tip,
+        ]
+        if claim.operation == DELETE:
+            scope.append(events.c.operation == DELETE)
+        return session.execute(
+            sa.update(events)
+            .where(*scope)
+            .values(**PostgresOutboxStore._terminal(PROCESSED))
+        ).rowcount
 
     # ------------------------------------------------------------ maintenance
 
