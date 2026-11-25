@@ -1,12 +1,11 @@
 """Minimal read/write mappings for the re-embedding state machine.
 
 ``memory_reembed_jobs`` / ``memory_reembed_job_users`` are owned by the API
-migration chain. Three callers use them here: the memory-read path asks whether an
-end user's stored vectors are still being rebuilt, the workspace re-embed
-status endpoints list a job's per-user rows, and the manual-retry path reopens
-the job and requeues its terminal-failed rows. The mappings keep only the columns
-those callers need; a wider mapping would invite them to depend on fields this
-service does not own.
+migration chain. The workspace module uses them here: it creates jobs on behalf
+of the workspace service, lists a job's per-user rows, and performs manual
+retries (reopen the job, requeue terminal-failed rows). The mappings keep only
+the columns those paths need; a wider mapping would invite callers to depend on
+fields this service does not own.
 
 Like every reference mapping here, no foreign keys, no relationships, and no
 participation in migration metadata.
@@ -23,7 +22,9 @@ class MemoryReembedJobRow(ReadOnlyBase):
 
     id = Column(UUID(as_uuid=True), primary_key=True)
     workspace_id = Column(UUID(as_uuid=True), nullable=False)
-    #: Slot stores ``model_configs.id`` as text; the read compares it as a string.
+    tenant_id = Column(UUID(as_uuid=True), nullable=False)
+    #: Both slots store ``model_configs.id`` as text.
+    old_embedding_config_id = Column(String, nullable=True)
     new_embedding_config_id = Column(String, nullable=False)
     status = Column(String, nullable=False)
     old_model_name = Column(String, nullable=True)
@@ -32,6 +33,7 @@ class MemoryReembedJobRow(ReadOnlyBase):
     processed_end_users = Column(Integer, nullable=False)
     #: Node-level failure count; the detail payload exposes it as "damage size".
     failed_nodes = Column(BigInteger, nullable=False)
+    created_by_user_id = Column(UUID(as_uuid=True), nullable=True)
     created_at = Column(DateTime, nullable=False)
     started_at = Column(DateTime, nullable=True)
     #: Set when the job reaches a terminal state; "current job" visibility ages off it.

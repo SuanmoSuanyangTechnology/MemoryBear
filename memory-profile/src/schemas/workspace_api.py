@@ -134,3 +134,37 @@ class MemoryReembedJobData(BaseModel):
     created_at: int | None = None
     started_at: int | None = None
     finished_at: int | None = None
+
+
+class WorkspaceReembedJobCreate(BaseModel):
+    """Body of ``POST /workspaces/workspace_reembed/jobs``.
+
+    Service-to-service: the workspace service switches the model first, then
+    calls this endpoint with the new config so the durable job row is registered
+    and the driver is dispatched. ``new_embedding_config_id`` must already be the
+    workspace's current ``embedding`` value, otherwise registration is refused
+    (the driver would self-abort on a job that targets a stale model).
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    old_embedding_config_id: str | None = Field(
+        None, description="变更前的 embedding 配置 id（可空）"
+    )
+    new_embedding_config_id: str = Field(
+        ...,
+        min_length=1,
+        description="新的 embedding 配置 id；必须已是工作空间当前模型",
+    )
+    old_model_name: str | None = Field(None, description="变更前的底层模型名")
+    new_model_name: str | None = Field(None, description="变更后的底层模型名")
+
+
+class WorkspaceReembedJobCreatedData(BaseModel):
+    """``data`` of the job-creation endpoint."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    job_id: str
+    #: ``None`` when the broker rejected the publish; the reconciler re-dispatches.
+    task_id: str | None = None

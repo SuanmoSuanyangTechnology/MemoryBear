@@ -27,6 +27,7 @@ from src.middleware.identity import require_memory_context
 from src.modules.workspace.handler import WorkspaceHandler
 from src.schemas.workspace_api import (
     WorkspaceApiResponse,
+    WorkspaceReembedJobCreate,
     WorkspaceRetentionPolicyUpdate,
 )
 
@@ -135,6 +136,30 @@ async def get_workspace_reembed_job(
     job_id: UUID,
 ) -> ApiResponse[Any] | JSONResponse:
     return await _handler(request).job_detail(context, request, job_id=job_id)
+
+
+# ── Re-embed job creation (workspace service → API worker) ───────────────────
+
+
+@router.post(
+    "/workspace_reembed/jobs",
+    response_model=WorkspaceApiResponse,
+)
+async def create_workspace_reembed_job(
+    request: Request,
+    context: Context,
+    body: WorkspaceReembedJobCreate,
+) -> ApiResponse[Any] | JSONResponse:
+    """Register a job for a model switch and publish the API re-embed driver.
+
+    Service-to-service entry point: the workspace service changes
+    ``workspaces.embedding`` first, then calls this route so the durable job row
+    is written here and ``app.tasks.run_reembed_job`` is published to the API
+    worker. One active job per workspace; the target config must already be the
+    workspace's current embedding model (otherwise 409).
+    """
+
+    return await _handler(request).create_reembed_job(context, request, body)
 
 
 # ── Re-embed retry (profile-owned) ───────────────────────────────────────────

@@ -42,7 +42,14 @@ from src.i18n import get_request_language, translate_request
 from src.middleware.auth import MemoryPrincipal
 from src.runtime import ProfileRuntime
 from src.schemas.workspace_api import (
+    WorkspaceReembedJobCreate,
     WorkspaceRetentionPolicyUpdate,
+)
+from src.services.reembed_jobs import (
+    ReembedJobCreateConflictError,
+    ReembedJobCreateInvalidError,
+    ReembedJobService,
+    ReembedWorkspaceNotFoundError,
 )
 from src.services.reembed_retry import (
     ReembedRetryConflictError,
@@ -78,6 +85,7 @@ class WorkspaceHandler:
         self.retention = WorkspaceRetentionService(runtime.postgres)
         self.reembed = ReembedStatusService(runtime.postgres)
         self.retry = ReembedRetryService(runtime)
+        self.jobs = ReembedJobService(runtime)
 
     # ------------------------------------------------------- retention policy
 
@@ -188,6 +196,47 @@ class WorkspaceHandler:
             )
         return success(data=data, msg=_ok_message(request))
 
+    # ------------------------------------------------- re-embed job creation
+
+    async def create_reembed_job(
+        self,
+        principal: MemoryPrincipal,
+        request: Request,
+        payload: WorkspaceReembedJobCreate,
+    ) -> ApiResponse[Any] | JSONResponse:
+        """Register a job for a model change and publish the API driver.
+
+        The caller is the workspace service: it has already switched
+        ``workspaces.embedding``. The row is committed here first; a broker
+        failure leaves ``task_id`` null and the reconciler re-dispatches.
+        """
+
+        try:
+            data = await self.jobs.create_and_dispatch(
+                workspace_id=principal.workspace_id,
+                tenant_id=principal.tenant_id,
+                created_by_user_id=principal.actor_id,
+                old_embedding_config_id=payload.old_embedding_config_id,
+                new_embedding_config_id=payload.new_embedding_config_id,
+                old_model_name=payload.old_model_name,
+                new_model_name=payload.new_model_name,
+            )
+        except ReembedWorkspaceNotFoundError:
+            return http_error_response(
+                request,
+                404,
+                "workspace not found",
+                code=int(BizCode.NOT_FOUND),
+            )
+        except ReembedJobCreateInvalidError as exc:
+            return _invalid_parameter(request, exc)
+        except ReembedJobCreateConflictError as exc:
+            return _state_conflict(request, exc)
+        except Exception as exc:
+            logger.exception("reembed job creation failed")
+            return http_error_response(request, 500, str(exc))
+        return success(data=data, msg=_ok_message(request))
+
     # --------------------------------------------------- re-embed retry routes
 
     async def reembed_retry(
@@ -244,13 +293,23 @@ def _invalid_status(
     )
 
 
-def _state_conflict(
-    request: Request, exc: ReembedRetryConflictError
-) -> JSONResponse:
+def _state_conflict(request: Request, exc: Exception) -> JSONResponse:
     """The host's ``BusinessException(STATE_CONFLICT)`` envelope (HTTP 409)."""
 
     language = get_request_language(request)
     code = int(BizCode.STATE_CONFLICT)
+    return error_response(
+        request,
+        http_status_for(code),
+        failure(code, user_message(code, language) or str(exc), str(exc)),
+    )
+
+
+def _invalid_parameter(request: Request, exc: Exception) -> JSONResponse:
+    """The host's ``BusinessException(INVALID_PARAMETER)`` envelope (HTTP 400)."""
+
+    language = get_request_language(request)
+    code = int(BizCode.INVALID_PARAMETER)
     return error_response(
         request,
         http_status_for(code),

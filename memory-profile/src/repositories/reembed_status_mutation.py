@@ -1,15 +1,20 @@
-"""Write access for manual re-embed retries (API-owned job tables).
+"""Write access for the re-embed job tables (API-owned rows).
 
-Port of the API's ``memory_reembed_service.retry_job_users`` behind the four
-``workspace_reembed/.../retry`` endpoints. The transaction is the same and in the
-same order: lock the workspace row, read the job under that lock, refuse a job
-whose target embedding model is no longer the workspace's current one, reopen a
-``failed`` job (conditional write), reset the terminal-failed end-user rows to
-``pending``, commit.
+Two write paths live here:
 
-Redis claim clearing and re-dispatch stay outside this module: they must happen
+* job creation on behalf of the workspace service (``POST
+  /workspace_reembed/jobs``): lock the workspace row, refuse a second active job,
+  require the job's target model to already be the workspace's current embedding
+  model, insert a ``pending`` row, commit;
+* manual retries (the four ``workspace_reembed/.../retry`` endpoints), ported
+  from the API's ``memory_reembed_service.retry_job_users``: lock the workspace
+  row, read the job under that lock, refuse a job whose target embedding model is
+  no longer the workspace's current one, reopen a ``failed`` job (conditional
+  write), reset the terminal-failed end-user rows to ``pending``, commit.
+
+Dispatch and Redis claim clearing stay outside this module: they must happen
 after the commit, because a dispatch failure must never roll back stored state
-(the periodic reconciler re-dispatches ``pending`` rows anyway).
+(the periodic reconciler re-dispatches ``pending`` jobs/rows anyway).
 
 DDL stays owned by the API's Alembic chain; this module only writes rows.
 """
@@ -19,11 +24,12 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.common.timing import utcnow_naive
 from src.infrastructure.postgres import PostgresManager
 from src.models.references import (
     MemoryReembedJobRow,
@@ -38,7 +44,9 @@ from src.repositories.reembed_status import (
 
 #: Stored job statuses this module transitions between (API vocabulary).
 JOB_STATUS_FAILED = "failed"
+JOB_STATUS_PENDING = "pending"
 JOB_STATUS_RUNNING = "running"
+ACTIVE_JOB_STATUSES = (JOB_STATUS_PENDING, JOB_STATUS_RUNNING)
 
 #: One manual retry requeues at most this many rows (API contract).
 REEMBED_RETRY_BATCH_LIMIT = 500
@@ -49,6 +57,12 @@ MODEL_CONFLICT = "model_conflict"
 USER_NOT_FAILED = "user_not_failed"
 NOTHING_RETRIED = "nothing_retried"
 RETRIED = "retried"
+
+#: Job-creation outcome kinds.
+WORKSPACE_NOT_FOUND = "workspace_not_found"
+ACTIVE_JOB_EXISTS = "active_job_exists"
+MODEL_NOT_CURRENT = "model_not_current"
+CREATED = "created"
 
 
 @dataclass(slots=True)
@@ -61,9 +75,87 @@ class RetryWriteOutcome:
     dispatch_job: bool = False
 
 
+@dataclass(slots=True)
+class JobCreateOutcome:
+    """What the job-creation transaction decided."""
+
+    kind: str
+    job_id: str | None = None
+
+
 class ReembedRetryMutationRepository:
     def __init__(self, postgres: PostgresManager) -> None:
         self.postgres = postgres
+
+    async def create_job(
+        self,
+        *,
+        workspace_id: UUID,
+        tenant_id: UUID,
+        old_embedding_config_id: str | None,
+        new_embedding_config_id: str,
+        old_model_name: str | None,
+        new_model_name: str | None,
+        created_by_user_id: UUID | None,
+    ) -> JobCreateOutcome:
+        """Insert one ``pending`` job for a model change, or say why not.
+
+        The workspace service performs the model switch itself; by the time it
+        calls us ``workspaces.embedding`` must already point at
+        ``new_embedding_config_id``. A job targeting anything else would be
+        self-aborted by the driver's model check, so it is refused instead of
+        left to linger as a zombie job.
+        """
+
+        async with self.postgres.session() as session:
+            workspace = (
+                await session.execute(
+                    select(
+                        Workspace.id,
+                        Workspace.tenant_id,
+                        Workspace.embedding,
+                    )
+                    .where(Workspace.id == workspace_id)
+                    .with_for_update()
+                )
+            ).mappings().first()
+            if workspace is None or workspace["tenant_id"] != tenant_id:
+                return JobCreateOutcome(WORKSPACE_NOT_FOUND)
+
+            active = (
+                await session.execute(
+                    select(MemoryReembedJobRow.id)
+                    .where(
+                        MemoryReembedJobRow.workspace_id == workspace_id,
+                        MemoryReembedJobRow.status.in_(ACTIVE_JOB_STATUSES),
+                    )
+                    .limit(1)
+                )
+            ).scalar_one_or_none()
+            if active is not None:
+                return JobCreateOutcome(ACTIVE_JOB_EXISTS)
+
+            current_embedding = (
+                None if workspace["embedding"] is None else str(workspace["embedding"])
+            )
+            if current_embedding != str(new_embedding_config_id):
+                return JobCreateOutcome(MODEL_NOT_CURRENT)
+
+            job = MemoryReembedJobRow(
+                id=uuid4(),
+                workspace_id=workspace_id,
+                tenant_id=tenant_id,
+                old_embedding_config_id=old_embedding_config_id,
+                new_embedding_config_id=str(new_embedding_config_id),
+                status=JOB_STATUS_PENDING,
+                old_model_name=old_model_name,
+                new_model_name=new_model_name,
+                created_by_user_id=created_by_user_id,
+                created_at=utcnow_naive(),
+            )
+            session.add(job)
+            await session.commit()
+            return JobCreateOutcome(CREATED, job_id=str(job.id))
 
     async def retry(
         self,
@@ -226,12 +318,18 @@ def _payload(
 
 
 __all__ = [
+    "ACTIVE_JOB_EXISTS",
+    "ACTIVE_JOB_STATUSES",
+    "CREATED",
+    "JobCreateOutcome",
     "MODEL_CONFLICT",
+    "MODEL_NOT_CURRENT",
     "NOT_FOUND",
     "NOTHING_RETRIED",
     "REEMBED_RETRY_BATCH_LIMIT",
     "RETRIED",
     "RetryWriteOutcome",
     "USER_NOT_FAILED",
+    "WORKSPACE_NOT_FOUND",
     "ReembedRetryMutationRepository",
 ]
