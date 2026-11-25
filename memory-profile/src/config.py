@@ -52,6 +52,18 @@ class ProfileSettings(BaseSettings):
     health_probe_timeout_seconds: float = Field(
         2.0, validation_alias="PROFILE_HEALTH_PROBE_TIMEOUT_SECONDS"
     )
+    preference_recall_max_context_messages: int = Field(
+        3, validation_alias="PREFERENCE_RECALL_MAX_CONTEXT_MESSAGES"
+    )
+    preference_recall_max_preferences: int = Field(
+        10, validation_alias="PREFERENCE_RECALL_MAX_PREFERENCES"
+    )
+    preference_recall_timeout_ms: int = Field(
+        3000, validation_alias="PREFERENCE_RECALL_TIMEOUT_MS"
+    )
+    memory_message_max_content_chars: int = Field(
+        12000, validation_alias="MEMORY_MESSAGE_MAX_CONTENT_CHARS"
+    )
 
     # Runtime monitoring: tracemalloc is intentionally opt-in because allocation
     # tracing has measurable CPU/memory overhead and snapshots are expensive.
