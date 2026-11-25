@@ -23,7 +23,6 @@ from dataclasses import replace
 from typing import Any
 
 from task_bridge import CeleryBridge
-from task_bridge.mem_router import TaskPriority
 from task_bridge.transports.celery.config import CeleryConfig
 
 from src.config import ProfileSettings
@@ -45,7 +44,7 @@ API_TASK_DEFAULT_QUEUE = "memory_tasks"
 
 
 async def dispatch_layer2_reflection(
-    task_bridge: object,
+    publisher: object,
     *,
     end_user_id: uuid.UUID | str,
     config_id: uuid.UUID | str,
@@ -54,10 +53,15 @@ async def dispatch_layer2_reflection(
     """Publish ``do_layer2_reflection`` straight to the API worker.
 
     ``from_retry=True`` skips the activity/period gate: a merge must always be
-    followed by a reflection.
+    followed by a reflection. No priority is attached — ``reflection_tasks`` is
+    declared without ``x-max-priority``, and this task is not latency-sensitive.
+
+    ``publisher`` must be the API-facing producer (``ApiTaskPublisher``); the
+    memory-jobs bridge declares every queue with ``x-max-priority``, which the
+    API worker's plain ``reflection_tasks`` declaration rejects.
     """
 
-    return await task_bridge.submit(  # type: ignore[attr-defined]
+    return await publisher.submit(  # type: ignore[attr-defined]
         API_REFLECTION_LAYER2_TASK,
         kwargs={
             "end_user_id": str(end_user_id),
@@ -66,7 +70,6 @@ async def dispatch_layer2_reflection(
             "from_retry": True,
         },
         queue=API_REFLECTION_QUEUE,
-        priority=TaskPriority.BACKGROUND,
     )
 
 

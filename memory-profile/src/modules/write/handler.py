@@ -94,7 +94,11 @@ class MemoryHandler:
         service = EndUserMergeService(
             postgres=self.runtime.postgres,
             settings=self.runtime.settings,
-            task_bridge=self.runtime.task_bridge,
+            # The merge only publishes the API's reflection task, so it must use
+            # the API-facing producer: the memory-jobs bridge declares queues
+            # with ``x-max-priority``, which ``reflection_tasks`` (API-owned,
+            # declared without it) would reject with PRECONDITION_FAILED.
+            task_bridge=self.runtime.api_tasks,
             graph_merge=build_graph_merge(self.runtime.postgres, self.runtime.neo4j),
             rag_merge=build_rag_merge(self.runtime.elasticsearch),
             graph_memory_count=build_graph_memory_count(self.runtime.neo4j),

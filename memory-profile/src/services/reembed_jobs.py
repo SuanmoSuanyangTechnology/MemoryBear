@@ -5,11 +5,12 @@ points at the new config it calls ``POST /workspace_reembed/jobs`` so the durabl
 job row is registered here and the driver is handed to the API worker (the
 re-embed workers are still API-owned until the API is retired).
 
-Registration carries the same guards as the API's own switch flow: one active
-job per workspace, and the job's target must already be the workspace's current
-embedding model. Dispatch is best-effort, exactly like the API's: the row is
-committed first, and a publish failure leaves it ``pending`` for the periodic
-reconciler to pick up.
+Registration carries the same guards as the API's own switch flow: a no-op change
+(same config, or two configs resolving to the same underlying model) registers
+nothing, one active job per workspace, and the job's target must already be the
+workspace's current embedding model. Dispatch is best-effort, exactly like the
+API's: the row is committed first, and a publish failure leaves it ``pending``
+for the periodic reconciler to pick up.
 """
 
 from __future__ import annotations
@@ -75,6 +76,20 @@ class ReembedJobService:
         ):
             raise ReembedJobCreateInvalidError(
                 "old 与 new embedding 配置相同，无需登记重算任务"
+            )
+
+        # The switch flow registers a rebuild only when the *underlying model*
+        # changes: swapping between two configs that resolve to the same model
+        # keeps the vector space, so the host logs it and creates no job. Same
+        # skip here, otherwise a caller that switches configs would start a
+        # pointless full rebuild.
+        if (
+            old_model_name is not None
+            and new_model_name is not None
+            and old_model_name == new_model_name
+        ):
+            raise ReembedJobCreateInvalidError(
+                "embedding 底层模型未变更（仅更换配置），无需登记重算任务"
             )
 
         outcome = await self.repository.create_job(

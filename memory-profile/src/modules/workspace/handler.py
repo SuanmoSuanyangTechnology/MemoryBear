@@ -34,9 +34,10 @@ from src.common.responses import (
     error_response,
     failure,
     http_error_response,
+    server_error_response,
     success,
 )
-from src.i18n import get_request_language
+from src.i18n import get_request_language, t
 from src.middleware.auth import MemoryPrincipal
 from src.runtime import ProfileRuntime
 from src.schemas.workspace_api import (
@@ -201,9 +202,12 @@ class WorkspaceHandler:
             return _invalid_parameter(request, exc)
         except ReembedJobCreateConflictError as exc:
             return _state_conflict(request, exc)
-        except Exception as exc:
+        except Exception:
+            # The host's 500 body never carries the exception text: the generic
+            # handler replaces it with the translated internal-error message and
+            # keeps the traceback in the log only.
             logger.exception("reembed job creation failed")
-            return http_error_response(request, 500, str(exc))
+            return _internal_error(request)
         return success(data=data, msg=_ok_message(request))
 
     # --------------------------------------------------- re-embed retry routes
@@ -240,9 +244,10 @@ class WorkspaceHandler:
             )
         except ReembedRetryConflictError as exc:
             return _state_conflict(request, exc)
-        except Exception as exc:
+        except Exception:
+            # Same as job creation: `str(exc)` stays in the log, never in the body.
             logger.exception("reembed retry failed")
-            return http_error_response(request, 500, str(exc))
+            return _internal_error(request)
         return success(data=result.data, msg=result.message or _ok_message(request))
 
 
@@ -283,4 +288,19 @@ def _invalid_parameter(request: Request, exc: Exception) -> JSONResponse:
         request,
         http_status_for(code),
         failure(code, user_message(code, language) or str(exc), str(exc)),
+    )
+
+
+def _internal_error(request: Request) -> JSONResponse:
+    """The host's unhandled-exception body: ``10001`` and the generic text.
+
+    The API's catch-all replaces the message with the translated internal-error
+    string (production) or a sensitive-filtered one (development); this profile
+    boundary has no such filter, so it never echoes the exception at all — the
+    traceback is on the log line instead.
+    """
+
+    language = get_request_language(request)
+    return server_error_response(
+        request, t("common.http.internal_error", language), language
     )

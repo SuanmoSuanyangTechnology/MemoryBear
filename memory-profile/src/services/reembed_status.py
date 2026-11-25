@@ -208,7 +208,7 @@ class ReembedStatusService:
         page: int,
         pagesize: int,
     ) -> dict[str, Any]:
-        _validate_status(status)
+        status = _validate_status(status)
         job = await self.current_job(workspace_id)
         if job is None:
             return empty_job_end_user_page(page=page, pagesize=pagesize)
@@ -223,7 +223,7 @@ class ReembedStatusService:
         page: int,
         pagesize: int,
     ) -> dict[str, Any]:
-        _validate_status(status)
+        status = _validate_status(status)
         job = await self.repository.job(job_id)
         if job is None or job["workspace_id"] != workspace_id:
             raise ReembedJobNotFoundError(f"reembed job not found: {job_id}")
@@ -269,9 +269,19 @@ class ReembedStatusService:
         ).model_dump(mode="json")
 
 
-def _validate_status(status: str | None) -> None:
-    if status is not None and status not in DISPLAY_STATUSES:
+def _validate_status(status: str | None) -> str | None:
+    """Return the effective filter; an empty ``?status=`` means "no filter".
+
+    The host validates with ``if status and status not in ...``, so a present but
+    empty query value falls through to the unfiltered list instead of failing.
+    Mirroring that here keeps ``?status=`` from turning into a 400.
+    """
+
+    if not status:
+        return None
+    if status not in DISPLAY_STATUSES:
         raise InvalidReembedStatusError(f"未知的状态过滤值: {status}")
+    return status
 
 
 def _item(
