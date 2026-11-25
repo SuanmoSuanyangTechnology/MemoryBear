@@ -36,12 +36,33 @@ from app.schemas.memory_storage_schema import ForgettingConfigUpdateRequest
 from app.schemas.memory_preference_config_schema import PreferenceConfigUpdate
 from app.schemas.personality_anchor_config_schema import PersonalityAnchorConfigUpdate
 from app.schemas.response_schema import ApiResponse
+from app.schemas.spatiotemporal_anchor_config_schema import SpatiotemporalAnchorUpdate
 from app.schemas.scene_memory_schema import SceneConfigUpdate
 from app.services.personality_anchor_config_service import PersonalityAnchorConfigService
 from app.utils.config_utils import resolve_config_id_async
 
 router = APIRouter(prefix="/memory_config", tags=["V1 - Memory Config API"])
 logger = get_business_logger()
+
+
+@router.get("/read_config_spatiotemporal_anchor", response_model=ApiResponse)
+@require_api_key_self_db(scopes=["memory"])
+@memory_profile_proxy(query_fields=("config_id",), preserve_status=True)
+async def read_config_spatiotemporal_anchor(
+    request: Request,
+    config_id: uuid.UUID = Query(..., description="记忆配置ID"),
+):
+    """Read configuration in the API Key's workspace through memory-profile."""
+
+
+@router.post("/update_config_spatiotemporal_anchor", response_model=ApiResponse)
+@require_api_key_self_db(scopes=["memory"])
+@memory_profile_proxy(raw_body=True, preserve_status=True)
+async def update_config_spatiotemporal_anchor(
+    request: Request,
+    payload: SpatiotemporalAnchorUpdate,
+):
+    """Replace configuration in the API Key's workspace through memory-profile."""
 
 
 @router.get("/read_config_personality_anchor", response_model=ApiResponse)
