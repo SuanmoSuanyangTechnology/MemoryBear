@@ -8,11 +8,13 @@ from .routes.metrics import router as metrics_router
 from .routes.models import router as models_router
 from .routes.platform_channels import router as platform_channels_router
 from .routes.platform_models import router as platform_models_router
+from .routes.workspace_model_selection import router as workspace_model_selection_router
 
 internal_v1_router = APIRouter(prefix="/internal/v1")
 internal_v1_router.include_router(health_router)
 internal_v1_router.include_router(invoke_router)
 internal_v1_router.include_router(models_router)
+internal_v1_router.include_router(workspace_model_selection_router)
 internal_v1_router.include_router(platform_models_router)
 internal_v1_router.include_router(platform_channels_router)
 internal_v1_router.include_router(metrics_router)

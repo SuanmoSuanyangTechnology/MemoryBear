@@ -40,6 +40,11 @@ _EXEMPT_PREFIXES = (
     "/internal/v2/chunks", "/internal/v2/files",
     "/internal/v1/invoke", "/internal/v1/platform",
     "/internal/v1/admin", "/internal/v1/catalog",
+    # identity-service sibling faces: JWKS publication and the /internal/*
+    # snapshot/verify/ACL API are consumed by the gateway and peer services,
+    # never by the public edge.
+    "/jwks", "/internal/user-snapshot", "/internal/api-key-verify",
+    "/internal/acl-rules",
 )
 
 

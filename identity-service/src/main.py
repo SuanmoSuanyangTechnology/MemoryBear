@@ -17,6 +17,7 @@ from src import db
 from src import redis as iredis
 from src.config import settings
 from src.controllers import acl, api_key_verify, jwks, user_snapshot
+from src.controllers.router import api_router
 from src.error_handlers import register_error_handlers
 from src.i18n import LanguageContextMiddleware, load_catalogs
 from src.i18n import configure as configure_i18n
@@ -80,6 +81,7 @@ app.include_router(jwks.router)
 app.include_router(user_snapshot.router)
 app.include_router(api_key_verify.router)
 app.include_router(acl.router)
+app.include_router(api_router, prefix="/api")
 register_error_handlers(app)
 
 

@@ -36,3 +36,12 @@ def to_iso_z(dt: datetime | None) -> str | None:
     if aware_dt is None:
         return None
     return aware_dt.isoformat().replace("+00:00", "Z")
+
+
+def parse_timestamp_to_utc_naive(timestamp: int | float | None) -> datetime | None:
+    """Convert a second/millisecond timestamp to naive UTC datetime."""
+    if timestamp is None:
+        return None
+    if timestamp > 1e10:
+        timestamp = timestamp / 1000
+    return datetime.fromtimestamp(timestamp, UTC).replace(tzinfo=None)

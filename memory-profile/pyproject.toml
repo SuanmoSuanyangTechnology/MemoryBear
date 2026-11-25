@@ -51,12 +51,12 @@ dependencies = [
 ]
 
 [tool.uv.sources]
-auth-sdk = { path = "../packages/auth-sdk" }
-error-core = { path = "../packages/error-core" }
-memory-contracts = { path = "../packages/memory-contracts" }
-memory-storage-schema = { path = "../packages/memory-storage-schema" }
-redbear-model = { path = "../packages/redbear-model" }
-task-bridge-sdk = { path = "../packages/task-bridge-sdk" }
+auth-sdk = { path = "../packages/auth-sdk", editable = true }
+error-core = { path = "../packages/error-core", editable = true }
+memory-contracts = { path = "../packages/memory-contracts", editable = true }
+memory-storage-schema = { path = "../packages/memory-storage-schema", editable = true }
+redbear-model = { path = "../packages/redbear-model", editable = true }
+task-bridge-sdk = { path = "../packages/task-bridge-sdk", editable = true }
 
 [dependency-groups]
 dev = [

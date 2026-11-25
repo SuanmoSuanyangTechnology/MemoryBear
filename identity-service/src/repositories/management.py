@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import uuid
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from src.models.tenant_model import Tenants
@@ -55,3 +55,95 @@ def get_member_in_workspace(
         .scalars()
         .first()
     )
+
+
+def get_user_by_email(db: Session, email: str) -> User | None:
+    """Any user with this email (host lookup: no active/tenant filter)."""
+
+    return db.execute(select(User).where(User.email == email)).scalars().first()
+
+
+def create_user_row(
+    db: Session,
+    *,
+    username: str,
+    email: str,
+    hashed_password: str,
+    tenant_id: uuid.UUID,
+    is_superuser: bool = False,
+) -> User:
+    """Insert one ``users`` row and flush; the caller owns commit/refresh."""
+
+    user = User(
+        username=username,
+        email=email,
+        hashed_password=hashed_password,
+        tenant_id=tenant_id,
+        is_superuser=is_superuser,
+    )
+    db.add(user)
+    db.flush()
+    return user
+
+
+def get_user_by_id_regardless_active(db: Session, user_id: uuid.UUID) -> User | None:
+    """User lookup without the active/tenant filters (activate path)."""
+
+    return db.execute(select(User).where(User.id == user_id)).scalars().first()
+
+
+def check_superuser_only(db: Session) -> bool:
+    """True when exactly one active superuser exists (host guard)."""
+
+    count = db.execute(
+        select(func.count())
+        .select_from(User)
+        .where(User.is_active.is_(True), User.is_superuser.is_(True))
+    ).scalar_one()
+    return count == 1
+
+
+def get_superusers_by_tenant(
+    db: Session, tenant_id: uuid.UUID, is_active: bool | None = True
+) -> list[User]:
+    """Tenant superusers; ``is_active=None`` disables the active filter."""
+
+    stmt = select(User).where(
+        User.tenant_id == tenant_id, User.is_superuser.is_(True)
+    )
+    if is_active is not None:
+        stmt = stmt.where(User.is_active.is_(is_active))
+    return list(db.execute(stmt).scalars().all())
+
+
+def get_superuser(db: Session) -> User | None:
+    """First active superuser (host setup guard)."""
+
+    return (
+        db.execute(
+            select(User).where(
+                User.is_active.is_(True), User.is_superuser.is_(True)
+            )
+        )
+        .scalars()
+        .first()
+    )
+
+
+def get_tenant_by_name(db: Session, name: str) -> Tenants | None:
+    """Exact-name tenant lookup (setup bootstrap duplicate guard)."""
+
+    return db.execute(select(Tenants).where(Tenants.name == name)).scalars().first()
+
+
+def create_tenant_row(
+    db: Session, *, name: str, description: str | None
+) -> Tenants:
+    """Insert one ``tenants`` row and flush (setup bootstrap only, decision D6)."""
+
+    tenant = Tenants(
+        id=uuid.uuid4(), name=name, description=description, is_active=True
+    )
+    db.add(tenant)
+    db.flush()
+    return tenant

@@ -1,5 +1,5 @@
 version = 1
-revision = 5
+revision = 3
 requires-python = "==3.12.*"
 
 [[package]]
@@ -147,7 +147,7 @@ wheels = [
 [[package]]
 name = "auth-sdk"
 version = "0.1.0"
-source = { directory = "../packages/auth-sdk" }
+source = { editable = "../packages/auth-sdk" }
 dependencies = [
     { name = "httpx" },
     { name = "pydantic" },
@@ -434,7 +434,7 @@ async = [
 [[package]]
 name = "error-core"
 version = "0.1.0"
-source = { directory = "../packages/error-core" }
+source = { editable = "../packages/error-core" }
 
 [package.metadata]
 
@@ -872,7 +872,7 @@ wheels = [
 [[package]]
 name = "memory-contracts"
 version = "0.1.0"
-source = { directory = "../packages/memory-contracts" }
+source = { editable = "../packages/memory-contracts" }
 
 [[package]]
 name = "memory-profile"
@@ -921,29 +921,29 @@ dev = [
 requires-dist = [
     { name = "alembic", specifier = "==1.20.0" },
     { name = "asyncpg", specifier = "==0.32.0" },
-    { name = "auth-sdk", directory = "../packages/auth-sdk" },
+    { name = "auth-sdk", editable = "../packages/auth-sdk" },
     { name = "certifi", specifier = "==2026.11.20" },
     { name = "elasticsearch", extras = ["async"], specifier = "==8.16.0" },
-    { name = "error-core", directory = "../packages/error-core" },
+    { name = "error-core", editable = "../packages/error-core" },
     { name = "fastapi", specifier = "==0.165.0" },
     { name = "httpx", specifier = "==0.28.1" },
     { name = "jinja2", specifier = "==3.1.6" },
     { name = "json-repair", specifier = "==0.64.9" },
     { name = "langchain-core", specifier = "==1.6.12" },
     { name = "langchain-openai", specifier = "==1.7.2" },
-    { name = "memory-contracts", directory = "../packages/memory-contracts" },
-    { name = "memory-storage-schema", directory = "../packages/memory-storage-schema" },
+    { name = "memory-contracts", editable = "../packages/memory-contracts" },
+    { name = "memory-storage-schema", editable = "../packages/memory-storage-schema" },
     { name = "neo4j", specifier = "==6.4.0" },
     { name = "psutil", specifier = "==7.2.2" },
     { name = "pydantic", specifier = "==2.14.4" },
     { name = "pydantic-settings", specifier = "==2.16.3" },
     { name = "python-dotenv", specifier = "==1.2.4" },
     { name = "python-multipart", specifier = "==0.0.34" },
-    { name = "redbear-model", extras = ["runtime"], directory = "../packages/redbear-model" },
+    { name = "redbear-model", extras = ["runtime"], editable = "../packages/redbear-model" },
     { name = "redis", specifier = "==8.1.0" },
     { name = "sqlalchemy", extras = ["asyncio"], specifier = "==2.1.5" },
     { name = "starlette", specifier = "==1.10.0" },
-    { name = "task-bridge-sdk", extras = ["celery", "mem-router"], directory = "../packages/task-bridge-sdk" },
+    { name = "task-bridge-sdk", extras = ["celery", "mem-router"], editable = "../packages/task-bridge-sdk" },
     { name = "uvicorn", extras = ["standard"], specifier = "==0.54.0" },
     { name = "xxhash", specifier = "==4.1.0" },
     { name = "zttp", specifier = "==0.0.35" },
@@ -960,7 +960,7 @@ dev = [
 [[package]]
 name = "memory-storage-schema"
 version = "0.1.0"
-source = { directory = "../packages/memory-storage-schema" }
+source = { editable = "../packages/memory-storage-schema" }
 
 [package.metadata]
 
@@ -1339,7 +1339,7 @@ wheels = [
 [[package]]
 name = "redbear-model"
 version = "0.1.0"
-source = { directory = "../packages/redbear-model" }
+source = { editable = "../packages/redbear-model" }
 dependencies = [
     { name = "cryptography" },
     { name = "error-core" },
@@ -1361,7 +1361,7 @@ requires-dist = [
     { name = "cryptography", specifier = ">=43" },
     { name = "dashscope", marker = "extra == 'all'", specifier = ">=1.25,<2" },
     { name = "dashscope", marker = "extra == 'dashscope'", specifier = ">=1.25,<2" },
-    { name = "error-core", directory = "../packages/error-core" },
+    { name = "error-core", editable = "../packages/error-core" },
     { name = "httpx", marker = "extra == 'all'", specifier = ">=0.28,<1" },
     { name = "httpx", marker = "extra == 'runtime'", specifier = ">=0.28,<1" },
     { name = "httpx", extras = ["socks"], marker = "extra == 'all'", specifier = ">=0.28,<1" },
@@ -1378,7 +1378,7 @@ requires-dist = [
     { name = "langchain-ollama", marker = "extra == 'ollama'", specifier = ">=1.0,<2" },
     { name = "langchain-openai", marker = "extra == 'all'", specifier = ">=1.0,<2" },
     { name = "langchain-openai", marker = "extra == 'runtime'", specifier = ">=1.0,<2" },
-    { name = "memorybear-grpc", marker = "extra == 'grpc'", directory = "../packages/memorybear-grpc" },
+    { name = "memorybear-grpc", marker = "extra == 'grpc'", editable = "../packages/memorybear-grpc" },
     { name = "pydantic", specifier = ">=2.12,<3" },
     { name = "sqlalchemy", specifier = ">=2.0,<3" },
     { name = "volcengine-python-sdk", extras = ["ark"], marker = "extra == 'all'", specifier = ">=5.0.19,<6" },
@@ -1544,7 +1544,7 @@ wheels = [
 [[package]]
 name = "task-bridge-sdk"
 version = "0.1.0"
-source = { directory = "../packages/task-bridge-sdk" }
+source = { editable = "../packages/task-bridge-sdk" }
 
 [package.optional-dependencies]
 celery = [

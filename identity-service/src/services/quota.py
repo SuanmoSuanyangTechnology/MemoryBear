@@ -452,3 +452,12 @@ def get_quota_snapshot(
         "workspace_id": str(workspace_id) if scoped else None,
         "limit_source": {"plan": plan_limit, "resource_pack": pack_limit},
     }
+
+
+def get_api_ops_rate_limit(db: Session, tenant_id: UUID) -> int | None:
+    """Tenant API-key QPS ceiling from the plan quota config."""
+
+    quota_config = get_quota_config(db, tenant_id)
+    if quota_config:
+        return quota_config.get("api_ops_rate_limit")
+    return None

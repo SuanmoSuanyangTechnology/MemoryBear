@@ -37,7 +37,8 @@ error-core = { path = "../packages/error-core" }
 # 漏掉 src 根模块（main/db/config/keys/redis），uvicorn src.main:app 将不可导入
 [tool.setuptools]
 packages = ["src", "src.controllers", "src.core", "src.models",
-            "src.repositories", "src.schemas", "src.services", "src.plugins"]
+            "src.repositories", "src.schemas", "src.services", "src.plugins",
+            "src.integrations"]
 
 [tool.setuptools.package-data]
 src = ["locales/*.json"]
