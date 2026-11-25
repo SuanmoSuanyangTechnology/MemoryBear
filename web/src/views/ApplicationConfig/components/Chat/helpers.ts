@@ -25,7 +25,7 @@ const findModelIndex = (prev: ChatData[], model_config_id?: string): number => {
  * Applies an updater to the latest version of the targeted model's last message,
  * optionally refreshing that column's conversation id.
  */
-const mapModelLastVersion = (
+export const mapModelLastVersion = (
   prev: ChatData[],
   model_config_id: string | undefined,
   updater: (item: ChatItem) => ChatItem,

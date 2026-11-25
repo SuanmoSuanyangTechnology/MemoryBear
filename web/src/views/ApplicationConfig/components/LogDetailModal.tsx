@@ -1,5 +1,5 @@
 import { forwardRef, useImperativeHandle, useState, useEffect } from 'react';
-import { Flex, Button, Empty, Skeleton } from 'antd';
+import { Flex, Button, Skeleton } from 'antd';
 import { useTranslation } from 'react-i18next';
 
 import type { LogDetailModalRef, LogItem } from '../types'
@@ -9,18 +9,15 @@ import ChatContent from '@/components/Chat/ChatContent'
 import { formatDateTime } from '@/utils/format'
 import type { ChatItem } from '@/components/Chat/types'
 import Runtime from '@/views/Workflow/components/Chat/Runtime'
-import { nodeLibrary } from '@/views/Workflow/constant'
 import type { Application } from '@/views/ApplicationManagement/types'
+import { buildTimelineSteps, nodeIconMap, type Timeline, type TimelineChatItem } from '../utils/logTimeline'
+import Empty from '@/components/Empty'
 
 const PAGE_SIZE = 20
 
-const nodeIconMap = Object.fromEntries(
-  nodeLibrary.flatMap(c => c.nodes.map(n => [n.type, n.icon]))
-)
-
 /** Log detail data with conversation messages */
 type Data = LogItem & {
-  messages: ChatItem[];
+  messages: TimelineChatItem[];
   page?: {
     page: number;
     pagesize: number;
@@ -62,69 +59,82 @@ const LogDetailModal = forwardRef<LogDetailModalRef, { source: string; appType: 
     }
   }, [visible, vo, appType])
 
-  /** Process messages with node executions and interventions */
-  const processMessages = (messages: ChatItem[], node_executions_map: any, pending_intervention: any): ChatItem[] => {
-    let hasSubContentMessages = messages.map((item: any) => ({ ...item, status: item.role === 'user' ? null : item.status }))
-    if (messages && messages.length > 0 && (node_executions_map && Object.keys(node_executions_map).length > 0 || pending_intervention && Object.keys(pending_intervention).length > 0)) {
-      hasSubContentMessages = messages.map((item: any) => {
-        if (item.id && (node_executions_map?.[item.id] || pending_intervention?.[item.id])) {
-          const executions = node_executions_map?.[item.id] || []
-          const interventions = pending_intervention?.[item.id]?.interventions || []
-          const lastExecution = executions?.[executions.length - 1]
-          const meta = lastExecution?.meta
-          let sourceList: any[] = []
-          
-          if (meta?.sources?.length > 0 && (meta?.tool_type === 'knowledge_retrieval' || meta?.tool_type === 'skill')) {
-            const groupedSources = meta?.sources.reduce((acc: any, source: any) => {
-              const key = source.knowledge_name || source.knowledge_id || source.name || source.id || 'default';
-              if (!acc[key]) {
-                acc[key] = { ...source, name: source.knowledge_name || source.name, contentList: [source.content] };
-              } else {
-                acc[key].contentList.push(source.content);
-              }
-              return acc;
-            }, {});
-            sourceList = Object.values(groupedSources).map((group: any) => ({
-              ...lastExecution,
-              icon: nodeIconMap[lastExecution?.node_type],
-              node_name: group.name,
-              content: {
-                input: lastExecution?.input || '',
-                output: group.contentList.join('\n') || lastExecution?.output,
-                error: lastExecution?.error
-              }
-            }));
-          } else if (meta?.sources?.length > 0) {
-            sourceList = meta?.sources?.map((source: any) => ({
-              ...lastExecution,
-              icon: nodeIconMap[lastExecution?.node_type],
-              name: source.name || 'default',
-              content: {
-                input: lastExecution?.input || '',
-                output: source.content || lastExecution?.output,
-                error: lastExecution?.error
-              }
-            }));
-          } else {
-            sourceList = executions.map(({ input, output, cycle_items = [], error, process, ...node }: any) => {
-              const converted: any = { ...node, icon: nodeIconMap[node.node_type], content: { input, output, process, error } }
-              if (node.node_type === 'loop' && Array.isArray(cycle_items) && cycle_items.length > 0) {
-                converted.subContent = cycle_items.map(({ input: cInput, output: cOutput, error: cError, process: cProcess, ...cNode }: any) => ({
-                  ...cNode,
-                  icon: nodeIconMap[cNode.node_type],
-                  content: { input: cInput, output: cOutput, process: cProcess, error: cError }
-                }))
-              }
-              return converted
-            })
-          }
-          item.subContent = sourceList
-          item.interventions = interventions
+  /** Process messages with step timeline, node executions and interventions */
+  const processMessages = (messages: ChatItem[], node_executions_map: any, pending_intervention: any): TimelineChatItem[] => {
+    return (messages || []).map((raw: any) => {
+      const item: TimelineChatItem = {
+        ...raw,
+        status: raw.role === 'user' ? null : raw.status,
+      }
+      const timeline = raw?.meta_data?.timeline as Timeline | undefined
+      const executions: any[] = (raw?.id && node_executions_map?.[raw.id]) || []
+      const interventions: any[] = (raw?.id && pending_intervention?.[raw.id]?.interventions) || []
+
+      /** New shape: render text chunks and tool/agent steps in their original order. */
+      if (timeline?.steps?.length) {
+        item.timeline = buildTimelineSteps(timeline, executions)
+        item.subContent = item.timeline.steps
+        // Text is rendered chunk by chunk from the timeline; avoid duplicating the full content.
+        item.content = ''
+        item.interventions = interventions
+        return item
+      }
+
+      /** Legacy shape: flatten node executions into the runtime step cards. */
+      if (executions.length || interventions.length) {
+        const lastExecution = executions?.[executions.length - 1]
+        const meta = lastExecution?.meta
+        let sourceList: any[] = []
+
+        if (meta?.sources?.length > 0 && (meta?.tool_type === 'knowledge_retrieval' || meta?.tool_type === 'skill')) {
+          const groupedSources = meta?.sources.reduce((acc: any, source: any) => {
+            const key = source.knowledge_name || source.knowledge_id || source.name || source.id || 'default';
+            if (!acc[key]) {
+              acc[key] = { ...source, name: source.knowledge_name || source.name, contentList: [source.content] };
+            } else {
+              acc[key].contentList.push(source.content);
+            }
+            return acc;
+          }, {});
+          sourceList = Object.values(groupedSources).map((group: any) => ({
+            ...lastExecution,
+            icon: nodeIconMap[lastExecution?.node_type],
+            node_name: group.name,
+            content: {
+              input: lastExecution?.input || '',
+              output: group.contentList.join('\n') || lastExecution?.output,
+              error: lastExecution?.error
+            }
+          }));
+        } else if (meta?.sources?.length > 0) {
+          sourceList = meta?.sources?.map((source: any) => ({
+            ...lastExecution,
+            icon: nodeIconMap[lastExecution?.node_type],
+            name: source.name || 'default',
+            content: {
+              input: lastExecution?.input || '',
+              output: source.content || lastExecution?.output,
+              error: lastExecution?.error
+            }
+          }));
+        } else {
+          sourceList = executions.map(({ input, output, cycle_items = [], error, process, ...node }: any) => {
+            const converted: any = { ...node, icon: nodeIconMap[node.node_type], content: { input, output, process, error } }
+            if (node.node_type === 'loop' && Array.isArray(cycle_items) && cycle_items.length > 0) {
+              converted.subContent = cycle_items.map(({ input: cInput, output: cOutput, error: cError, process: cProcess, ...cNode }: any) => ({
+                ...cNode,
+                icon: nodeIconMap[cNode.node_type],
+                content: { input: cInput, output: cOutput, process: cProcess, error: cError }
+              }))
+            }
+            return converted
+          })
         }
-        return { ...item }
-      })
-    }
-    return hasSubContentMessages
+        item.subContent = sourceList
+        item.interventions = interventions
+      }
+      return item
+    })
   }
 
   /** Fetch conversation log detail from API (first page) */
@@ -205,7 +215,7 @@ const LogDetailModal = forwardRef<LogDetailModalRef, { source: string; appType: 
       {loading
         ? <Skeleton active />
         : data.messages?.length === 0
-          ? <Empty className="rb:my-20" />
+          ? <Empty size={88} className="rb:h-full! rb:my-15!" />
           : (<>
             {pageInfo.hasNext && (
               <Flex justify="center">
@@ -223,6 +233,7 @@ const LogDetailModal = forwardRef<LogDetailModalRef, { source: string; appType: 
             <ChatContent
               contentClassNames="rb:max-w-110!"
               data={data.messages || []}
+              source={source}
               streamLoading={false}
               labelFormat={(item) => formatDateTime(item.created_at)}
               renderRuntime={(item, index) => <Runtime source={source} item={item} index={index} />}
