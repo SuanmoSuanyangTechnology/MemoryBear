@@ -22,6 +22,7 @@ from app.dependencies import get_current_user, get_current_user_async, CurrentUs
 from app.integrations.profile.contracts import MemoryProfileAuthSource
 from app.integrations.profile.proxy import memory_profile_proxy
 from app.models.user_model import User
+from app.repositories.workspace_repository import get_workspace_by_id
 from app.schemas.memory_dashboard_schema import EndUserMemoryCountsRequest
 from app.schemas.response_schema import ApiResponse
 from app.services import memory_dashboard_service, workspace_service
@@ -121,9 +122,7 @@ async def get_workspace_total_end_users(
 
 
 @router.get("/end_users", response_model=ApiResponse)
-@memory_profile_proxy(query_fields=("workspace_id", "page", "pagesize", "keyword", "label"), upper_bounds={"pagesize": 100})
 async def get_workspace_end_users(
-    request: Request,
     background_tasks: BackgroundTasks,
     workspace_id: Optional[uuid.UUID] = Query(None, description="工作空间ID（可选，默认当前用户工作空间）"),
     keyword: Optional[str] = Query(None, description="搜索关键词（同时模糊匹配 other_name 和 id）"),
@@ -165,12 +164,18 @@ async def get_workspace_end_users(
     Returns:
         ApiResponse: 包含宿主列表和分页信息
     """
-    # 如果未提供 workspace_id，使用当前用户的工作空间
-    if workspace_id is None:
-        workspace_id = current_user.current_workspace_id
+    current_workspace_id = current_user.current_workspace_id
+    if current_workspace_id is None:
+        return fail(BizCode.INVALID_PARAMETER, "请先切换到一个工作空间", "current_workspace_id is None")
+    if workspace_id is not None and workspace_id != current_workspace_id:
+        return fail(BizCode.WORKSPACE_ACCESS_DENIED, "工作空间不可访问")
 
-    # 获取当前空间类型
-    current_workspace_type = memory_dashboard_service.get_current_workspace_type(db, workspace_id, current_user)
+    workspace_id = current_workspace_id
+    workspace = get_workspace_by_id(db, workspace_id)
+    if workspace is None or not workspace.is_active or workspace.tenant_id != current_user.tenant_id:
+        return fail(BizCode.WORKSPACE_ACCESS_DENIED, "工作空间不可访问")
+    current_workspace_type = workspace.storage_type
+    pagesize = min(pagesize, 100)
 
     api_logger.info(f"用户 {current_user.username} 请求获取工作空间 {workspace_id} 的宿主列表, 类型: {current_workspace_type}")
 

@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 from app.core.config import settings
 from app.core.error_codes import BizCode
 from app.core.exceptions import BusinessException, ResourceNotFoundException
+from app.core.workflow.error_info import workflow_error_info
 from app.core.logging_config import get_business_logger
 from app.models import MultiAgentConfig
 from app.models import ReleaseShare, AppRelease, Conversation
@@ -671,8 +672,23 @@ class SharedChatService:
             raise
         except Exception as e:
             logger.error(f"流式聊天失败: {str(e)}", exc_info=True)
-            # 发送错误事件
-            yield f"event: error\ndata: {json.dumps({'error': str(e)}, ensure_ascii=False)}\n\n"
+            # 统一错误帧：code/msg/error/retryable/time（data 仅非流式响应使用）
+            _info = workflow_error_info(e)
+            yield (
+                "event: error\ndata: "
+                + json.dumps(
+                    {
+                        "code": _info["code"],
+                        "msg": _info["msg"],
+                        "error": _info["error"],
+                        "message": _info["error"],
+                        "retryable": _info["retryable"],
+                        "time": int(time.time() * 1000),
+                    },
+                    ensure_ascii=False,
+                )
+                + "\n\n"
+            )
 
     def get_conversation_messages(
             self,
@@ -921,5 +937,20 @@ class SharedChatService:
             raise
         except Exception as e:
             logger.error(f"多 Agent 流式聊天失败: {str(e)}", exc_info=True)
-            # 发送错误事件
-            yield f"event: error\ndata: {json.dumps({'error': str(e)}, ensure_ascii=False)}\n\n"
+            # 统一错误帧：code/msg/error/retryable/time（data 仅非流式响应使用）
+            _info = workflow_error_info(e)
+            yield (
+                "event: error\ndata: "
+                + json.dumps(
+                    {
+                        "code": _info["code"],
+                        "msg": _info["msg"],
+                        "error": _info["error"],
+                        "message": _info["error"],
+                        "retryable": _info["retryable"],
+                        "time": int(time.time() * 1000),
+                    },
+                    ensure_ascii=False,
+                )
+                + "\n\n"
+            )

@@ -40,7 +40,10 @@ from app.schemas.workspace_schema import (
 )
 from app.i18n import t
 from app.integrations.model.invoke_backend import RemoteInvokeRef
-from app.integrations.model.validate_backend import aprobe_stored_config
+from app.integrations.model.validate_backend import (
+    StoredValidationOutcome,
+    aprobe_stored_config,
+)
 from app.invalidation_notify import notify_user_async, notify_user_sync
 from app.services.channel_registry import candidate_channels_batch_sync
 from app.services.memory_config_service import MemoryConfigService
@@ -791,6 +794,47 @@ _REMOTE_PROBE_REASONS = {
 }
 
 
+async def _load_workspace_model(
+    async_db: AsyncSession,
+    model_id: str,
+    tenant_id: uuid.UUID,
+) -> tuple[ModelConfig | None, dict | None]:
+    """Load the bound model row and run slot-independent checks.
+
+    Returns ``(model_config, issue_kwargs)``. ``issue_kwargs`` carries the reason
+    (plus display context) when the row itself is unusable; slot-dependent
+    capability checks stay in the per-slot path.
+    """
+    from app.services.model_service import ModelConfigService as ModelSvc
+
+    try:
+        model_config = await ModelSvc.get_model_by_id_async(
+            async_db, uuid.UUID(str(model_id)), tenant_id
+        )
+    except BusinessException as exc:
+        reason = "deprecated" if exc.code == BizCode.MODEL_DEPRECATED else "not_found"
+        return None, {"reason": reason, "detail": exc.message}
+    except Exception as exc:
+        return None, {"reason": "not_found", "detail": str(exc)}
+
+    is_tenant_model = model_config.tenant_id == tenant_id
+    is_public_speedbear = (
+        model_config.provider == ModelProvider.SPEEDBEAR and bool(model_config.is_public)
+    )
+    if not (is_tenant_model or is_public_speedbear):
+        # Cross-tenant rows surface only the requested id: no name/provider/status leak.
+        return None, {"reason": "not_accessible"}
+
+    if not model_config.is_active:
+        return None, {
+            "reason": "inactive",
+            "model_name": model_config.name,
+            "provider": _serialize_provider(model_config),
+            "model_type": str(getattr(model_config.type, "value", model_config.type)),
+        }
+    return model_config, None
+
+
 async def _validate_workspace_slot_runtime(
     async_db: AsyncSession,
     slot: str,
@@ -801,77 +845,58 @@ async def _validate_workspace_slot_runtime(
     workspace_id: uuid.UUID | None = None,
     actor_id: uuid.UUID | None = None,
     actor_name: str | None = None,
+    model_cache: dict[str, tuple[ModelConfig | None, dict | None]] | None = None,
+    probe_cache: dict[tuple[str, str], StoredValidationOutcome] | None = None,
 ) -> dict | None:
     """校验单个模型位的运行时可用性，返回精确的问题详情（可用则返回 None）。
 
     静态检查（可见性/停用/能力匹配）读同一库、留在本地；凭据解密与活体探测走模型服务
-    （设计 §2.2：宿主不持有明文）。
+    （设计 §2.2：宿主不持有明文）。``model_cache`` / ``probe_cache`` 供聚合入口在一次
+    校验内跨槽位复用同一模型的行读取与探活结果；省略即逐槽位独立校验。
     """
-    from app.services.model_service import ModelConfigService as ModelSvc
+    cache_key = str(model_id)
+    if model_cache is not None and cache_key in model_cache:
+        model_config, load_issue = model_cache[cache_key]
+    else:
+        model_config, load_issue = await _load_workspace_model(
+            async_db, cache_key, tenant_id
+        )
+        if model_cache is not None:
+            model_cache[cache_key] = (model_config, load_issue)
 
-    try:
-        model_config = await ModelSvc.get_model_by_id_async(
-            async_db, uuid.UUID(str(model_id)), tenant_id
-        )
-    except BusinessException as exc:
-        reason = "deprecated" if exc.code == BizCode.MODEL_DEPRECATED else "not_found"
-        return _model_issue(
-            slot,
-            reason=reason,
-            locale=locale,
-            model_id=model_id,
-            detail=exc.message,
-        )
-    except Exception as exc:
-        return _model_issue(
-            slot,
-            reason="not_found",
-            locale=locale,
-            model_id=model_id,
-            detail=str(exc),
-        )
+    if load_issue is not None:
+        return _model_issue(slot, locale=locale, model_id=model_id, **load_issue)
 
-    model_name = model_config.name
-    provider = _serialize_provider(model_config)
     issue_context = {
         "locale": locale,
         "model_id": model_id,
-        "model_name": model_name,
-        "provider": provider,
+        "model_name": model_config.name,
+        "provider": _serialize_provider(model_config),
         "model_type": str(getattr(model_config.type, "value", model_config.type)),
     }
-
-    is_tenant_model = model_config.tenant_id == tenant_id
-    is_public_speedbear = (
-        model_config.provider == ModelProvider.SPEEDBEAR and bool(model_config.is_public)
-    )
-    if not (is_tenant_model or is_public_speedbear):
-        # 跨租户模型只返回请求中的模型 ID，不泄露名称、供应商或状态。
-        return _model_issue(
-            slot,
-            reason="not_accessible",
-            locale=locale,
-            model_id=model_id,
-        )
-
-    if not model_config.is_active:
-        return _model_issue(slot, reason="inactive", **issue_context)
 
     # KB 侧槽位名（image2text 等）经别名归一到规范槽位后同口径判定
     if not _slot_matches_model(_SLOT_ALIASES.get(slot, slot), model_config):
         return _model_issue(slot, reason="capability_mismatch", **issue_context)
 
     validate_type = "llm" if slot in _VALIDATE_AS_LLM_SLOTS else slot
-    outcome = await aprobe_stored_config(
-        RemoteInvokeRef(
-            config_id=model_config.id,
-            tenant_id=tenant_id,
-            workspace_id=workspace_id,
-            actor_id=actor_id,
-            actor_name=actor_name,
-        ),
-        model_type=validate_type,
-    )
+    probe_key = (cache_key, validate_type)
+    if probe_cache is not None and probe_key in probe_cache:
+        outcome = probe_cache[probe_key]
+    else:
+        outcome = await aprobe_stored_config(
+            RemoteInvokeRef(
+                config_id=model_config.id,
+                tenant_id=tenant_id,
+                workspace_id=workspace_id,
+                actor_id=actor_id,
+                actor_name=actor_name,
+            ),
+            model_type=validate_type,
+        )
+        if probe_cache is not None:
+            probe_cache[probe_key] = outcome
+
     if outcome.kind != "valid":
         return _model_issue(
             slot,
@@ -914,10 +939,16 @@ async def validate_model_bindings_runtime_async(
     actor_id: uuid.UUID | None = None,
     actor_name: str | None = None,
 ) -> list[dict]:
-    """校验最终绑定模型的可见性、能力、API Key 与连通性，并聚合问题。"""
+    """校验最终绑定模型的可见性、能力、API Key 与连通性，并聚合问题。
+
+    同一次校验内按模型去重：行读取按 ``model_id``、探活按 ``(model_id, 探活类型)``
+    复用；槽位相关的能力检查与问题上报仍逐槽位进行。
+    """
     from app.db import get_async_db_context
 
     warnings: list[dict] = []
+    model_cache: dict[str, tuple[ModelConfig | None, dict | None]] = {}
+    probe_cache: dict[tuple[str, str], StoredValidationOutcome] = {}
     async with get_async_db_context() as async_db:
         for slot in slots_to_validate:
             model_id = values.get(slot)
@@ -934,6 +965,8 @@ async def validate_model_bindings_runtime_async(
                 workspace_id=workspace_id,
                 actor_id=actor_id,
                 actor_name=actor_name,
+                model_cache=model_cache,
+                probe_cache=probe_cache,
             )
             if issue is not None:
                 business_logger.warning(

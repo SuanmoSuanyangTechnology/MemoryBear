@@ -477,6 +477,7 @@ async def _bulk_persist_messages(
         assistant_content = args.get("content_override") or (
             result.full_content if result else "")
         _add_row(_row(msg_id, conv_id, "assistant", assistant_content, assistant_meta,
+                      status=args.get("assistant_status", "completed"),
                       parent_message_id=user_msg_id), conv_id)
 
         conv_titles[conv_id] = (

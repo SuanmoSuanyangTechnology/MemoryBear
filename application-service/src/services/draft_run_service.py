@@ -20,6 +20,11 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from error_core.codes import coerce_code, http_status_for
+from error_core.diagnostics import format_diagnostics
+from error_core.envelope import now_ms
+from error_core.messages import user_message
+
 from ..utils.datetime_utils import to_iso_z, utcnow_naive
 from ..workflow.node_cache import sanitize_json_text
 from ..agent.agent_middleware import AgentMiddleware
@@ -27,13 +32,15 @@ from ..agent.langchain_agent import DEFAULT_AGENT_ROLE_PROMPT, LangChainAgent
 from ..config import current_settings
 from ..errors import BizCode
 from ..errors import BusinessException
+from ..errors import get_current_locale
+from ..trace import get_trace_id
 from ..llm_error_handler import classify_multimodal_exception
 from ..model_clients.embedding import RedBearEmbeddings
 from ..usage_context import bind_usage
 from ..integrations.knowledge.context_factory import build_app_knowledge_context
 from ..integrations.knowledge.contracts import KnowledgeRetrievalSource
 from ..integrations.knowledge.runtime import get_knowledge_retriever
-from ..integrations.model.errors import ModelInvokeCancelledError
+from ..integrations.model.errors import ModelInvokeCancelledError, ModelInvokeFailedError
 from ..schemas.chunk_schema import RetrieveType
 from ..schemas.knowledge_retrieval_schema import KnowledgeRetrievalRequest
 from ..db import get_async_db_context
@@ -982,8 +989,20 @@ class AgentRunService:
 
         return str(error)
 
-    def _build_compact_error(self, error: Exception, *, debug_id: Optional[str] = None) -> Dict[str, Any]:
-        """Build a compact but sufficient structured error payload."""
+    def _build_compact_error(
+            self,
+            error: Exception,
+            *,
+            debug_id: Optional[str] = None,
+            fallback_code: BizCode = BizCode.INTERNAL_ERROR,
+    ) -> Dict[str, Any]:
+        """Build a compact structured error payload.
+
+        Legacy fields (message/type/debug_id/code/...) are preserved while the
+        unified error-core fields are added: ``msg`` is the localized
+        user-facing copy, ``error`` is the diagnostic, and ``retryable``
+        decides whether a retry makes sense.
+        """
         compact_error: Dict[str, Any] = {
             "message": self._extract_exception_message(error),
             "type": type(error).__name__,
@@ -1013,11 +1032,93 @@ class AgentRunService:
                 if cause_message:
                     compact_error["message"] = cause_message
                 apply_exception_fields(compact_error, error.cause)
+            self._apply_unified_error_fields(
+                compact_error, error, detail=error.message, fallback_code=fallback_code
+            )
             return compact_error
 
         apply_exception_fields(compact_error, error)
+        self._apply_unified_error_fields(
+            compact_error, error, detail=compact_error["message"], fallback_code=fallback_code
+        )
 
         return compact_error
+
+    def _apply_unified_error_fields(
+            self,
+            compact_error: Dict[str, Any],
+            error: Exception,
+            *,
+            detail: str,
+            fallback_code: BizCode,
+    ) -> None:
+        """Write the unified contract fields; legacy keys stay untouched.
+
+        ``code`` is normalized to a numeric BusinessCode so a failure payload
+        can never carry OK (0) or a provider-side string code.
+        """
+        locale = get_current_locale()
+        if isinstance(error, ModelInvokeFailedError):
+            numeric = coerce_code(error.biz_code)
+            if numeric in (None, BizCode.OK.value):
+                numeric = fallback_code.value
+            msg = getattr(error, "user_msg", None) or user_message(numeric, locale) or str(error)
+            detail = getattr(error, "detail", "") or detail
+            retryable = bool(error.retryable)
+        elif isinstance(error, BusinessException):
+            numeric = coerce_code(error.code)
+            if numeric in (None, BizCode.OK.value):
+                numeric = fallback_code.value
+            msg = user_message(numeric, locale) or error.message
+            retryable = (
+                http_status_for(numeric) >= 500
+                or numeric == BizCode.RATE_LIMITED.value
+            )
+        else:
+            numeric = fallback_code.value
+            msg = user_message(numeric, locale) or compact_error["message"]
+            retryable = (
+                http_status_for(numeric) >= 500
+                or numeric == BizCode.RATE_LIMITED.value
+            )
+        compact_error["code"] = numeric
+        compact_error["msg"] = msg
+        compact_error["error"] = format_diagnostics(
+            trace_id=get_trace_id() or None, detail=detail
+        )
+        compact_error["retryable"] = retryable
+
+    @staticmethod
+    def _compare_error_fields(error: Any) -> Dict[str, Any]:
+        """Flatten a per-model error into unified SSE error-frame fields.
+
+        ``msg`` is user-facing (localized catalog text); ``error`` carries the
+        diagnostic (never rendered); ``message`` is the deprecated alias.
+        """
+        locale = get_current_locale()
+        if isinstance(error, dict):
+            numeric = coerce_code(error.get("code"))
+            if numeric in (None, BizCode.OK.value):
+                numeric = BizCode.INTERNAL_ERROR.value
+            msg = (
+                error.get("msg")
+                or error.get("message")
+                or user_message(numeric, locale)
+            )
+            detail = str(error.get("error") or "")
+            retryable = bool(error.get("retryable", False))
+        else:
+            numeric = BizCode.INTERNAL_ERROR.value
+            msg = user_message(numeric, locale) or "服务内部错误，请稍后重试"
+            detail = str(error or "")
+            retryable = False
+        return {
+            "code": numeric,
+            "msg": msg,
+            "error": detail,
+            "message": detail,
+            "retryable": retryable,
+        }
 
     def _build_model_error_event_data(
             self,
@@ -1035,8 +1136,9 @@ class AgentRunService:
             "model_config_id": model_config_id,
             "label": label,
             "conversation_id": conversation_id,
-            "error": error,
-            "timestamp": timestamp if timestamp is not None else time.time()
+            **self._compare_error_fields(error),
+            "timestamp": timestamp if timestamp is not None else time.time(),
+            "time": now_ms(),
         }
 
     def _build_model_end_event_data(
@@ -1070,10 +1172,11 @@ class AgentRunService:
             "suggested_questions": suggested_questions or [],
             "status": status,
             "message_id": message_id,
-            "timestamp": time.time()
+            "timestamp": time.time(),
+            "time": now_ms(),
         }
-        if error is not None:
-            data["error"] = error
+        if status == "failed" or error is not None:
+            data.update(self._compare_error_fields(error))
         return data
 
     async def _check_annotation_match(self, app_id: uuid.UUID, message: str,
@@ -2975,7 +3078,14 @@ class AgentRunService:
             debug_id = self._build_debug_id()
             public_error = classify_multimodal_exception(e, debug_id=debug_id)
             if public_error is not None:
-                compact_error = public_error
+                compact_error = {
+                    **public_error,
+                    "msg": public_error["message"],
+                    "error": format_diagnostics(
+                        trace_id=get_trace_id() or None,
+                        detail=f"{type(e).__name__}: {e}",
+                    ),
+                }
                 logger.error(
                     "流式 Agent 多模态输入失败（已安全处理）",
                     extra={
@@ -4553,11 +4663,10 @@ class AgentRunService:
 
             except TimeoutError:
                 logger.warning(f"模型运行超时: {model_label}")
-                compact_error = {
-                    "message": f"执行超时（{timeout}秒）",
-                    "type": "TimeoutError",
-                    "debug_id": self._build_debug_id(),
-                }
+                compact_error = self._build_compact_error(
+                    TimeoutError(f"执行超时（{timeout}秒）"),
+                    fallback_code=BizCode.LLM_ERROR,
+                )
                 result = {
                     "model_config_id": model_info["model_config_id"],
                     "model_name": model_info["model_config"].name,
@@ -4783,7 +4892,7 @@ class AgentRunService:
                         logger.exception("Failed to enqueue compare model save for %s", r.get("label"))
 
         # Send the compare completion event (format modeled on run_compare's return)
-        yield self._format_sse_event("compare_end", {
+        compare_end_data: Dict[str, Any] = {
             "conversation_id": conversation_id,
             "results": results_summary,  # contains full results
             "total_elapsed_time": sum(r.get("elapsed_time", 0) for r in results),
@@ -4791,8 +4900,26 @@ class AgentRunService:
             "failed_count": len(failed),
             "fastest_model": fastest["label"] if fastest else None,
             "cheapest_model": cheapest["label"] if cheapest else None,
-            "timestamp": time.time()
-        })
+            "status": "completed" if successful else "failed",
+            "timestamp": time.time(),
+            "time": now_ms(),
+        }
+        if failed and not successful:
+            # When every model failed, mirror the unified error fields so
+            # clients can treat compare_end like any other error frame.
+            first_error = failed[0].get("error")
+            error_fields = first_error if isinstance(first_error, dict) else {}
+            numeric = coerce_code(error_fields.get("code"))
+            if numeric in (None, BizCode.OK.value):
+                numeric = BizCode.INTERNAL_ERROR.value
+            compare_end_data.update({
+                "code": numeric,
+                "msg": error_fields.get("msg") or error_fields.get("message")
+                or user_message(numeric, get_current_locale()),
+                "error": error_fields.get("error") or str(error_fields.get("message") or ""),
+                "retryable": bool(error_fields.get("retryable", False)),
+            })
+        yield self._format_sse_event("compare_end", compare_end_data)
 
         logger.info(
             "多模型对比流式完成",

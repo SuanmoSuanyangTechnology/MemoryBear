@@ -808,6 +808,11 @@ class MultiAgentService:
         total_tokens = 0
         # end 事件携带的对话能力附加字段（建议问题/引用/语音）；features 未开启时为空
         end_extras: dict = {}
+        # 编排器内部捕获异常后只发 error 帧不抛出：记下统一错误帧，本轮按 failed
+        # 落库（content=用户可读 msg，meta.error=诊断），否则日志 content 为空。
+        _stream_failure: Optional[Dict[str, Any]] = None
+        # 带 Agent 归属的 error 帧先记下；若整轮没有任何主气泡正文再升级为失败。
+        _last_error_frame: Optional[Dict[str, Any]] = None
         async for event in orchestrator.execute_stream(
             message=request.message,
             conversation_id=request.conversation_id,
@@ -842,6 +847,25 @@ class MultiAgentService:
                 except Exception:
                     pass
 
+            if _event_name == "error" and "data:" in event:
+                try:
+                    _error_payload = json.loads(event.split("data: ", 1)[1].strip())
+                except Exception:
+                    _error_payload = None
+                # 带 Agent 归属的 error 帧只标记子 Agent 区块失败（与前端
+                # hasAgentOwner 同口径）；只有集群级 error（无归属字段）直接判失败。
+                if isinstance(_error_payload, dict):
+                    if any(
+                        _k in _error_payload
+                        for _k in (
+                            "execution_id", "parent_execution_id",
+                            "orchestration_mode", "agent_id", "agent_name",
+                        )
+                    ):
+                        _last_error_frame = _error_payload
+                    else:
+                        _stream_failure = _error_payload
+
             yield event
             # 落库正文只认集群级的 `message` 事件（按事件名判定）。
             # 子 Agent 的正文走 `sub_agent_message`：若一并累加，落库的 assistant
@@ -854,6 +878,15 @@ class MultiAgentService:
                         full_content += data["content"]
                 except Exception:
                     pass
+
+        # 子 Agent 失败且本轮没有任何主气泡正文（如协作模式首个 Agent 即失败）：
+        # 空正文按 failed 落库，content 用该错误帧的 msg。
+        if (
+            _stream_failure is None
+            and _last_error_frame is not None
+            and not full_content.strip()
+        ):
+            _stream_failure = _last_error_frame
 
         # S3 落库收口：本服务（试运行/API 场景）作为多 Agent 流的唯一落库层，
         # 改经 BatchPersistQueue 统一写入；_save_conversation_message 直存废弃
@@ -892,32 +925,44 @@ class MultiAgentService:
             _files_meta, _history_files = await self._build_cluster_files_persist(request.files, orchestrator)
             if _history_files:
                 _result.history_files = _history_files
+        _persist_args = {
+            "conversation_id": str(request.conversation_id),
+            "result": _result,
+            "user_message_id_override": user_message_id,
+            "user_message_content": request.message,
+            # 本轮变量值随user 消息落库，重新生成时回读（无变量不加键）
+            "variables_meta": request.variables or None,
+            # 本轮附件引用（重新生成时据此还原 FileInput）
+            "files_meta": _files_meta,
+
+            # user 消息接在用户当前所处的 assistant 版本之后，使切换版本时按 parent 隔离后续对话
+            "user_parent_message_id": await self._get_last_current_assistant_id(request.conversation_id),
+            "should_memorize": orchestrator.cluster_memory_enabled(),
+            # 新会话开场白随本轮落库（与 Agent 一致），切版本分支链才能带出开场白；无开场白不加键
+            **(
+                {
+                    "is_new_conversation": True,
+                    "opening_statement": opening_statement,
+                    "opening_message_id": uuid.uuid4(),
+                    "opening_suggested_questions": _opening_suggested_questions,
+                }
+                if opening_statement else {}
+            ),
+        }
+        if _stream_failure is not None:
+            from app.i18n.exceptions import get_current_locale
+            from error_core.messages import user_message
+
+            _result.full_content = (
+                _stream_failure.get("msg")
+                or user_message(BizCode.INTERNAL_ERROR.value, get_current_locale())
+                or "服务内部错误，请稍后重试"
+            )
+            _result.assistant_meta["error"] = _stream_failure.get("error") or ""
+            _persist_args["assistant_status"] = "failed"
         await BatchPersistQueue.enqueue(PersistTask(
             task_type="save_messages",
-            args={
-                "conversation_id": str(request.conversation_id),
-                "result": _result,
-                "user_message_id_override": user_message_id,
-                "user_message_content": request.message,
-                # 本轮变量值随user 消息落库，重新生成时回读（无变量不加键）
-                "variables_meta": request.variables or None,
-                # 本轮附件引用（重新生成时据此还原 FileInput）
-                "files_meta": _files_meta,
-
-                # user 消息接在用户当前所处的 assistant 版本之后，使切换版本时按 parent 隔离后续对话
-                "user_parent_message_id": await self._get_last_current_assistant_id(request.conversation_id),
-                "should_memorize": orchestrator.cluster_memory_enabled(),
-                # 新会话开场白随本轮落库（与 Agent 一致），切版本分支链才能带出开场白；无开场白不加键
-                **(
-                    {
-                        "is_new_conversation": True,
-                        "opening_statement": opening_statement,
-                        "opening_message_id": uuid.uuid4(),
-                        "opening_suggested_questions": _opening_suggested_questions,
-                    }
-                    if opening_statement else {}
-                ),
-            },
+            args=_persist_args,
         ))
 
         # context_engine 轮后摘要（仅本轮实际走了上下文引擎才入队；老集群恒为 None）
@@ -1439,6 +1484,7 @@ class MultiAgentService:
         stream_failed = False
         error_emitted = False
         failure_error: Optional[str] = None
+        failure_exc: Optional[Exception] = None
         try:
             async for event in orchestrator.execute_stream(
                 message=user_message_content,
@@ -1503,6 +1549,7 @@ class MultiAgentService:
         except Exception as e:
             stream_failed = True
             failure_error = str(e)
+            failure_exc = e
 
         # 失败回滚：恢复原版本为当前，不落新版本。
         # 失败帧用 error 事件（与 Agent / 编排器失败语义一致），不再发 status=failed 的 end；
@@ -1510,10 +1557,18 @@ class MultiAgentService:
         if stream_failed:
             self._mark_message_current(original_msg.id, True)
             if not error_emitted:
+                from app.core.workflow.error_info import workflow_error_info
+
+                _info = workflow_error_info(failure_exc) if failure_exc is not None else {}
                 yield _sse("error", {
                     "conversation_id": str(conversation_id),
-                    "error": failure_error or "集群重新生成失败",
+                    "code": _info.get("code") or BizCode.INTERNAL_ERROR.value,
+                    "msg": _info.get("msg") or "集群重新生成失败",
+                    "error": _info.get("error") or failure_error or "集群重新生成失败",
+                    "message": _info.get("error") or failure_error or "集群重新生成失败",
+                    "retryable": bool(_info.get("retryable", False)),
                     "elapsed_time": _time.time() - start_time,
+                    "time": int(_time.time() * 1000),
                     "timestamp": _time.time(),
                 })
             return

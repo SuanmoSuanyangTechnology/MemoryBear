@@ -37,7 +37,6 @@ api_logger = get_business_logger()
 
 @router.get("/end_users", response_model=ApiResponse)
 @require_api_key_self_db(scopes=["memory"])
-@memory_profile_proxy(query_fields=("page", "pagesize", "keyword", "label"), upper_bounds={"pagesize": 100}, source=MemoryProfileAuthSource.APIKEY)
 async def get_workspace_end_users(
     request: Request,
     background_tasks: BackgroundTasks,

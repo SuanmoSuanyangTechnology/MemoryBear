@@ -1073,6 +1073,9 @@ class AppChatService:
         except Exception as e:
             # Agent failed: mark the execution record failed
             elapsed_time = time.time() - start_time
+            failure_payload = error_payload(
+                e, locale=get_current_locale(), trace_id=get_trace_id()
+            )
             await self._update_agent_execution(
                 agent_exec_repo,
                 execution_id=agent_execution_id,
@@ -1081,6 +1084,23 @@ class AppChatService:
                 elapsed_time=elapsed_time,
                 error_message=str(e)[:2000],
             )
+            if not skip_save:
+                try:
+                    from .batch_persist_queue import BatchPersistQueue, PersistTask
+                    await BatchPersistQueue.enqueue(PersistTask(
+                        task_type="save_failed_message",
+                        args={
+                            "conversation_id": str(conversation_id),
+                            "user_message_id": str(user_message_id),
+                            "message_id": str(message_id),
+                            "user_message_content": message,
+                            "files_meta": [],
+                            "error_message": failure_payload["msg"],
+                            "error_detail": str(e)[:2000],
+                        },
+                    ))
+                except Exception:
+                    pass
             raise
 
         await self._record_api_key_usage(api_key_obj.id)
@@ -2268,6 +2288,14 @@ class AppChatService:
 
             full_content = ""
             total_tokens = 0
+            # The orchestrator catches exceptions internally and only emits an
+            # error frame: record the unified frame so this turn persists as
+            # failed (content=user-facing msg, meta.error=diagnostic) instead
+            # of an empty completed assistant row.
+            _stream_failure: Optional[Dict[str, Any]] = None
+            # Agent-owned error frames are remembered separately; they only
+            # escalate to a failed turn when the main bubble has no body at all.
+            _last_error_frame: Optional[Dict[str, Any]] = None
             # Conversation-capability extras (suggested questions / citations /
             # audio) carried by the end event; empty when features are off
             end_extras: Dict[str, Any] = {}
@@ -2335,6 +2363,13 @@ class AppChatService:
                 if event.startswith("event:"):
                     _event_name = event[6:].split("\n", 1)[0].strip()
 
+                # This layer already emits the unified start frame (with
+                # conversation_id/message_id/user_message_id; the annotation-hit
+                # branch has only that one). The orchestrator start adds only
+                # `mode`; forwarding it would hand the client two start frames.
+                if _event_name == "start":
+                    continue
+
                 if _event_name == "end" and "data:" in event:
                     try:
                         data_line = event.split("data: ", 1)[1].strip()
@@ -2347,6 +2382,27 @@ class AppChatService:
                                 end_extras[_k] = data[_k]
                     except Exception:
                         pass
+
+                if _event_name == "error" and "data:" in event:
+                    try:
+                        _error_payload = json.loads(event.split("data: ", 1)[1].strip())
+                    except Exception:
+                        _error_payload = None
+                    # Agent-owned error frames only mark the sub-agent block
+                    # failed (same rule as the frontend's hasAgentOwner); the
+                    # turn may still end normally. Only a cluster-level error
+                    # (no ownership keys) marks this turn failed.
+                    if _error_payload is not None:
+                        if any(
+                            _k in _error_payload
+                            for _k in (
+                                "execution_id", "parent_execution_id",
+                                "orchestration_mode", "agent_id", "agent_name",
+                            )
+                        ):
+                            _last_error_frame = _error_payload
+                        else:
+                            _stream_failure = _error_payload
 
                 if _event_name == "end":
                     held_end_event = event
@@ -2372,6 +2428,24 @@ class AppChatService:
                         pass
 
             elapsed_time = time.time() - start_time
+
+            # A sub-agent failed and the turn produced no main-bubble body at
+            # all (e.g. the first collaboration agent errored): persist the
+            # empty turn as failed with the error frame's msg as content.
+            if (
+                _stream_failure is None
+                and _last_error_frame is not None
+                and not full_content.strip()
+            ):
+                _stream_failure = _last_error_frame
+
+            if _stream_failure is not None:
+                from error_core.messages import user_message
+                full_content = (
+                    _stream_failure.get("msg")
+                    or user_message(BizCode.INTERNAL_ERROR.value, get_current_locale())
+                    or "服务内部错误，请稍后重试"
+                )
 
             # Enqueue async batch persist
             # S3 persistence convergence: this entry (the app-orchestration
@@ -2410,6 +2484,11 @@ class AppChatService:
                 ),
                 "should_memorize": orchestrator.cluster_memory_enabled(),
             }
+            if _stream_failure is not None:
+                # content=msg, meta.error=diagnostic — same contract as Agent
+                # and workflow failed turns.
+                _result.assistant_meta["error"] = _stream_failure.get("error") or ""
+                _persist_args["assistant_status"] = "failed"
             # This turn's variable values persist with the user message so
             # regeneration can read them back (no key when empty: legacy unchanged)
             if variables:
@@ -2495,6 +2574,9 @@ class AppChatService:
             )
         except Exception as e:
             logger.error(f"多 Agent 流式聊天失败: {str(e)}", exc_info=True)
+            failure_payload = error_payload(
+                e, locale=get_current_locale(), trace_id=get_trace_id()
+            )
             # Once save_messages is enqueued, do not enqueue
             # save_failed_message — the identical message_id would collide on
             # the messages primary key.
@@ -2509,16 +2591,14 @@ class AppChatService:
                             "message_id": str(message_id) if 'message_id' in locals() else str(uuid.uuid4()),
                             "user_message_content": message if 'message' in locals() else "",
                             "files_meta": [],
-                            "error_message": "An error occurred during generation.",
+                            "error_message": failure_payload["msg"],
                             "error_detail": str(e)[:2000],
                         },
                     ))
                 except Exception:
                     pass
             # Emit the error event
-            yield error_frame(error_payload(
-                e, locale=get_current_locale(), trace_id=get_trace_id()
-            ))
+            yield error_frame(failure_payload)
 
     async def workflow_chat(
             self,
