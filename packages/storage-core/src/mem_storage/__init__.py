@@ -22,6 +22,12 @@ from .errors import (
 )
 from .factory import create_storage
 from .interface import StorageBackend
+from .object_keys import (
+    ObjectKeyError,
+    ObjectKeyInvalid,
+    ObjectKeyMissing,
+    normalise_object_key,
+)
 
 _BACKEND_EXPORTS = {
     "LocalStorage": (".local", "LocalStorage"),
@@ -37,6 +43,9 @@ __all__ = [
     "MinIOStorageConfig",
     "OSSStorage",
     "OSSStorageConfig",
+    "ObjectKeyError",
+    "ObjectKeyInvalid",
+    "ObjectKeyMissing",
     "S3Storage",
     "S3StorageConfig",
     "StorageBackend",
@@ -49,6 +58,7 @@ __all__ = [
     "StorageType",
     "StorageUploadError",
     "create_storage",
+    "normalise_object_key",
 ]
 
 

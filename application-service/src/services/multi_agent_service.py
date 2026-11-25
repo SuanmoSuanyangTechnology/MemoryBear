@@ -22,6 +22,7 @@ from ..errors import (
     BusinessException,
     ResourceNotFoundException,
     SubAgentValidationError,
+    get_current_locale,
 )
 from ..integrations.model.errors import ModelInvokeCancelledError
 from ..models import App, AppRelease
@@ -30,6 +31,8 @@ from ..models.multi_agent_model import MultiAgentConfig
 from ..repositories import cross_domain_read
 from ..repositories.multi_agent_repository import MultiAgentConfigRepository
 from ..schemas.multi_agent_schema import MultiAgentConfigUpdate, MultiAgentRunRequest
+from ..trace import get_trace_id
+from .chat_errors import error_frame, error_payload
 from .model_ref_gate import raise_model_unavailable, resolve_invoke_ref
 from .multi_agent_orchestrator import MultiAgentOrchestrator
 from .multi_agent_release_resolver import describe_release_state, resolve_release_for_save
@@ -256,11 +259,36 @@ class MultiAgentService:
                 master_release.default_model_config_id if master_release else None
             )
 
-        # Convert sub_agents agent_id (release_id) to app_id and expose
-        # release-policy info: release_policy / release_id (pinned only) /
-        # current_release_id / has_newer_release
+        # Build the returned config dict
+        return {
+            "id": config.id,
+            "app_id": config.app_id,
+            # The master agent is stored as a release id and validated on write;
+            # echoing it back keeps create → read verifiable (the PUT response
+            # already carries it through MultiAgentConfigSchema).
+            "master_agent_id": config.master_agent_id,
+            "master_agent_name": config.master_agent_name,
+            "default_model_config_id": config.default_model_config_id,
+            "model_parameters": config.model_parameters,
+            "orchestration_mode": config.orchestration_mode,
+            "sub_agents": self.describe_sub_agents(config.sub_agents),
+            "routing_rules": config.routing_rules,
+            "execution_config": config.execution_config,
+            # Supervisor-as-agent: the read-back must include this key, otherwise
+            # the frontend getData cannot see it, and default backfill resets the
+            # supervisor capability surface to all defaults (the toggle
+            # "turns off after save")
+            "supervisor_config": config.supervisor_config,
+            "aggregation_strategy": config.aggregation_strategy,
+            "is_active": config.is_active,
+            "created_at": config.created_at,
+            "updated_at": config.updated_at
+        }
+
+    def describe_sub_agents(self, sub_agents: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Serialize sub-agents with app IDs and release metadata."""
         converted_sub_agents = []
-        for sub_agent in config.sub_agents:
+        for sub_agent in sub_agents:
             sub_agent_copy = sub_agent.copy()
             try:
                 state = describe_release_state(self.db, sub_agent)
@@ -275,27 +303,7 @@ class MultiAgentService:
                     f"转换 sub_agent agent_id 失败: {sub_agent.get('agent_id')}, 错误: {str(e)}"
                 )
             converted_sub_agents.append(sub_agent_copy)
-
-        # Build the returned config dict
-        return {
-            "id": config.id,
-            "app_id": config.app_id,
-            "default_model_config_id": config.default_model_config_id,
-            "model_parameters": config.model_parameters,
-            "orchestration_mode": config.orchestration_mode,
-            "sub_agents": converted_sub_agents,
-            "routing_rules": config.routing_rules,
-            "execution_config": config.execution_config,
-            # Supervisor-as-agent: the read-back must include this key, otherwise
-            # the frontend getData cannot see it, and default backfill resets the
-            # supervisor capability surface to all defaults (the toggle
-            # "turns off after save")
-            "supervisor_config": config.supervisor_config,
-            "aggregation_strategy": config.aggregation_strategy,
-            "is_active": config.is_active,
-            "created_at": config.created_at,
-            "updated_at": config.updated_at
-        }
+        return converted_sub_agents
 
     def check_config_data(
         self,
@@ -323,6 +331,33 @@ class MultiAgentService:
                     self.db,
                     data.default_model_config_id,
                     tenant_id=tenant_id,
+                )
+
+        # 2b. Validate the master agent when provided.
+        #
+        # `multi_agent_configs.master_agent_id` FKs `app_releases.id` (the master
+        # is referenced by its published release, not by `agent_configs.id`).
+        # Without this check an unknown id reached the INSERT and surfaced as
+        # `ForeignKeyViolation` → 500 / INTERNAL_ERROR on both the create and the
+        # update path. Validation lives here so both paths answer identically.
+        if data.master_agent_id is not None:
+            master_release = self.db.get(AppRelease, data.master_agent_id)
+            if master_release is None:
+                raise BusinessException(
+                    f"主 Agent 不存在：{data.master_agent_id}（该字段要填主 Agent 的"
+                    f"发布版本 ID，不是应用 ID 或配置 ID）",
+                    BizCode.INVALID_PARAMETER,
+                )
+            master_app = self.db.get(App, master_release.app_id)
+            if master_app is None or master_app.workspace_id != app.workspace_id:
+                raise BusinessException(
+                    f"主 Agent 不属于本空间：{data.master_agent_id}",
+                    BizCode.INVALID_PARAMETER,
+                )
+            if not master_release.is_active:
+                raise BusinessException(
+                    f"主 Agent 发布版本已停用：{data.master_agent_id}",
+                    BizCode.INVALID_PARAMETER,
                 )
 
         # 3. Validate sub-agents exist and resolve their release IDs
@@ -375,6 +410,17 @@ class MultiAgentService:
         # routing_rules_data = [
         #     convert_uuids_to_str(rule.model_dump()) for rule in data.routing_rules
         # ] if data.routing_rules else None
+        # Was left commented out, which meant the field was accepted and then
+        # silently dropped: GET always answered null, and the publish snapshot
+        # carried it through as null too. Persist it like every other field.
+        routing_rules_data = (
+            [
+                convert_uuids_to_str(rule.model_dump())
+                for rule in data.routing_rules
+            ]
+            if data.routing_rules
+            else None
+        )
 
         # Handle execution_config (may be None, a dict, or a Pydantic model)
         if data.execution_config is None:
@@ -421,7 +467,7 @@ class MultiAgentService:
             model_parameters=model_parameters_data,
             orchestration_mode=data.orchestration_mode,
             sub_agents=sub_agents_data,
-            # routing_rules=routing_rules_data,
+            routing_rules=routing_rules_data,
             execution_config=execution_config_data,
             supervisor_config=supervisor_config_data,
             aggregation_strategy=data.aggregation_strategy
@@ -472,6 +518,13 @@ class MultiAgentService:
 
         # Fully replace the config; for DB NOT NULL columns, keep the old value
         # when the new value is None
+        #
+        # ``master_agent_id`` is validated by ``check_config_data`` but the row is
+        # NOT NULL-safe on its own (column is nullable), so it must be copied
+        # explicitly. Omitting these two lines made a PUT that only changed the
+        # master agent return 200 without persisting anything.
+        config.master_agent_id = new_config.master_agent_id
+        config.master_agent_name = new_config.master_agent_name
         config.default_model_config_id = new_config.default_model_config_id
         config.model_parameters = new_config.model_parameters
         config.orchestration_mode = new_config.orchestration_mode or config.orchestration_mode
@@ -765,6 +818,14 @@ class MultiAgentService:
         # Conversation-capability extras carried by the end event (suggested
         # questions / citations / voice); empty when the features are off.
         end_extras: dict = {}
+        # The orchestrator catches exceptions internally and only emits an
+        # error frame: record the unified frame so this turn persists as
+        # failed (content=user-facing msg, meta.error=diagnostic) instead of
+        # an empty completed assistant row.
+        _stream_failure: dict[str, Any] | None = None
+        # Agent-owned error frames are remembered separately; they only
+        # escalate to a failed turn when the main bubble has no body at all.
+        _last_error_frame: dict[str, Any] | None = None
         async for event in orchestrator.execute_stream(
             message=request.message,
             conversation_id=request.conversation_id,
@@ -801,6 +862,26 @@ class MultiAgentService:
                 except Exception:
                     pass
 
+            if _event_name == "error" and "data:" in event:
+                try:
+                    _error_payload = json.loads(event.split("data: ", 1)[1].strip())
+                except Exception:
+                    _error_payload = None
+                # Agent-owned error frames only mark the sub-agent block failed
+                # (same rule as the frontend's hasAgentOwner); a cluster-level
+                # error (no ownership keys) marks the whole turn failed.
+                if isinstance(_error_payload, dict):
+                    if any(
+                        _k in _error_payload
+                        for _k in (
+                            "execution_id", "parent_execution_id",
+                            "orchestration_mode", "agent_id", "agent_name",
+                        )
+                    ):
+                        _last_error_frame = _error_payload
+                    else:
+                        _stream_failure = _error_payload
+
             yield event
             # Persist only the cluster-level `message` events (decided by event
             # name). Sub-agent bodies arrive as `sub_agent_message`; counting
@@ -814,6 +895,16 @@ class MultiAgentService:
                         full_content += data["content"]
                 except Exception:
                     pass
+
+        # A sub-agent failed and the turn produced no main-bubble body at all
+        # (e.g. the first collaboration agent errored): persist the empty turn
+        # as failed with the error frame's msg as content.
+        if (
+            _stream_failure is None
+            and _last_error_frame is not None
+            and not full_content.strip()
+        ):
+            _stream_failure = _last_error_frame
 
         # Persistence closure: this service (draft/API scenario) is the single
         # persistence layer for the multi-agent stream — writes go through
@@ -857,38 +948,49 @@ class MultiAgentService:
             )
             if _history_files:
                 _result.history_files = _history_files
+        _persist_args = {
+            "conversation_id": str(request.conversation_id),
+            "result": _result,
+            "user_message_id_override": user_message_id,
+            "user_message_content": request.message,
+            # This turn's variable values are persisted on the user row so a
+            # cluster regeneration can read them back (key omitted when absent)
+            "variables_meta": request.variables or None,
+            # Attachment references persisted for this turn (regeneration
+            # restores FileInput from them)
+            "files_meta": _files_meta,
+            # The user message attaches to the version the user is currently
+            # viewing, so a version switch isolates follow-up turns by parent
+            "user_parent_message_id": await self._get_last_current_assistant_id(
+                request.conversation_id
+            ),
+            "should_memorize": orchestrator.cluster_memory_enabled(),
+            # The new-conversation opening statement persists with this round
+            # (same as Agent apps) so the version-switch branch chain can
+            # include it; key omitted when there is no opening
+            **(
+                {
+                    "is_new_conversation": True,
+                    "opening_statement": opening_statement,
+                    "opening_message_id": uuid.uuid4(),
+                    "opening_suggested_questions": _opening_suggested_questions,
+                }
+                if opening_statement else {}
+            ),
+        }
+        if _stream_failure is not None:
+            from error_core.messages import user_message
+
+            _result.full_content = (
+                _stream_failure.get("msg")
+                or user_message(BizCode.INTERNAL_ERROR.value, get_current_locale())
+                or "服务内部错误，请稍后重试"
+            )
+            _result.assistant_meta["error"] = _stream_failure.get("error") or ""
+            _persist_args["assistant_status"] = "failed"
         await BatchPersistQueue.enqueue(PersistTask(
             task_type="save_messages",
-            args={
-                "conversation_id": str(request.conversation_id),
-                "result": _result,
-                "user_message_id_override": user_message_id,
-                "user_message_content": request.message,
-                # This turn's variable values are persisted on the user row so a
-                # cluster regeneration can read them back (key omitted when absent)
-                "variables_meta": request.variables or None,
-                # Attachment references persisted for this turn (regeneration
-                # restores FileInput from them)
-                "files_meta": _files_meta,
-                # The user message attaches to the version the user is currently
-                # viewing, so a version switch isolates follow-up turns by parent
-                "user_parent_message_id": await self._get_last_current_assistant_id(
-                    request.conversation_id
-                ),
-                "should_memorize": orchestrator.cluster_memory_enabled(),
-                # The new-conversation opening statement persists with this round
-                # (same as Agent apps) so the version-switch branch chain can
-                # include it; key omitted when there is no opening
-                **(
-                    {
-                        "is_new_conversation": True,
-                        "opening_statement": opening_statement,
-                        "opening_message_id": uuid.uuid4(),
-                        "opening_suggested_questions": _opening_suggested_questions,
-                    }
-                    if opening_statement else {}
-                ),
-            },
+            args=_persist_args,
         ))
 
         # Context-engine after-turn summary (enqueued only when this turn
@@ -1464,6 +1566,7 @@ class MultiAgentService:
         stream_failed = False
         error_emitted = False
         failure_error: str | None = None
+        failure_exc: Exception | None = None
         try:
             async for event in orchestrator.execute_stream(
                 message=user_message_content,
@@ -1543,6 +1646,7 @@ class MultiAgentService:
         except Exception as e:
             stream_failed = True
             failure_error = str(e)
+            failure_exc = e
 
         # Failure rollback: restore the original version as current, persist no new
         # version. The failure frame is an error event (same semantics as Agent /
@@ -1551,12 +1655,20 @@ class MultiAgentService:
         if stream_failed:
             self._mark_message_current(original_msg.id, True)
             if not error_emitted:
-                yield _sse("error", {
+                _payload = error_payload(
+                    failure_exc
+                    or BusinessException(
+                        failure_error or "集群重新生成失败", BizCode.INTERNAL_ERROR
+                    ),
+                    locale=get_current_locale(),
+                    trace_id=get_trace_id(),
+                )
+                _payload.update({
                     "conversation_id": str(conversation_id),
-                    "error": failure_error or "集群重新生成失败",
                     "elapsed_time": _time.time() - start_time,
                     "timestamp": _time.time(),
                 })
+                yield error_frame(_payload)
             return
 
         # 7. Persist the new-version assistant message
@@ -1612,3 +1724,33 @@ class MultiAgentService:
             "version": new_version,
             "conversation_id": str(conversation_id),
         })
+def default_multi_agent_config(app_id: uuid.UUID) -> dict[str, Any]:
+    """The cluster default template, returned when no config row exists yet.
+
+    Kept here rather than in a route module because two faces read it (the JWT
+    ``GET /apps/{id}/multi-agent`` and the v1 ``GET /apps/{id}/app-config``);
+    copying it into both would let the templates drift apart silently.
+    """
+
+    return {
+        "app_id": str(app_id),
+        "default_model_config_id": None,
+        "model_parameters": None,
+        "orchestration_mode": "supervisor_loop",
+        "sub_agents": [],
+        "routing_rules": [],
+        "execution_config": {
+            # Aligned with the ExecutionConfig schema defaults. The advanced guard
+            # options (timeout / stream_idle_timeout / parallel_limit /
+            # retry_on_failure / max_retries) have no frontend entry point and
+            # take effect via the backend schema defaults instead
+            "max_iterations": 10
+        },
+        # The supervisor is an Agent: default is the bare supervisor
+        # (None = hardcoded prompt + SubAgentTool only)
+        "supervisor_config": None,
+        # No cluster variables declared by default (None = runtime falls back
+        # to the union of sub-agent variables)
+        "variables": None,
+        "aggregation_strategy": "merge",
+    }

@@ -37,6 +37,8 @@ api/tests/rag/
 api/migrations/versions
 tmp
 files
+# The migrated upload module is source code, not a runtime upload directory.
+!memory-profile/src/modules/files/
 powers/ 
 
 # Exclude dep files

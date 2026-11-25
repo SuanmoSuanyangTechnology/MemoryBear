@@ -19,7 +19,11 @@ from src.domain.end_user.model import (
 )
 from src.domain.model_config.model import ModelConfigRow
 from src.domain.profile.model import SourceVersion
-from src.domain.profile.read_models import InsightSource, RefreshCandidate
+from src.domain.profile.read_models import (
+    InsightSource,
+    MetadataMigrationCandidate,
+    RefreshCandidate,
+)
 from src.domain.shared.ids import EndUserId, ModelConfigId, TenantId, WorkspaceId
 from src.domain.workspace.model import (
     ModelSlots,
@@ -46,9 +50,7 @@ def to_workspace(row: Mapping[str, Any]) -> Workspace:
     storage_type_raw = None if raw_storage is None else str(raw_storage)
     return Workspace(
         id=WorkspaceId(_as_uuid(row["id"])),
-        tenant_id=(
-            None if row["tenant_id"] is None else TenantId(_as_uuid(row["tenant_id"]))
-        ),
+        tenant_id=(None if row["tenant_id"] is None else TenantId(_as_uuid(row["tenant_id"]))),
         name=str(row["name"] or ""),
         status=WorkspaceStatus.ACTIVE if row["is_active"] else WorkspaceStatus.INACTIVE,
         storage=StoragePolicy.parse(storage_type_raw),
@@ -146,4 +148,15 @@ def to_model_config_row(row: Mapping[str, Any] | None) -> ModelConfigRow | None:
         tenant_id=None if tenant_id is None else TenantId(_as_uuid(tenant_id)),
         is_active=bool(row["is_active"]),
         is_public=bool(row["is_public"]),
+    )
+
+
+def to_metadata_migration_candidate(row: Mapping[str, Any]) -> MetadataMigrationCandidate:
+    return MetadataMigrationCandidate(
+        end_user_id=EndUserId(_as_uuid(row["end_user_id"])),
+        workspace_id=WorkspaceId(_as_uuid(row["workspace_id"])),
+        created_at=row["created_at"],
+        has_info_row=row["metadata_id"] is not None,
+        meta_data=row["meta_data"],
+        meta_data_new=row["meta_data_new"],
     )

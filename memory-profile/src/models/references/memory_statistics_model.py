@@ -48,6 +48,17 @@ class ShortTermMemory(ReadOnlyBase):
     created_at = Column(DateTime, nullable=False)
 
 
+class LongTermMemory(ReadOnlyBase):
+    """``memory_long_term``: only the merge's reference reassignment needs it."""
+
+    __tablename__ = "memory_long_term"
+
+    id = Column(UUID(as_uuid=True), primary_key=True)
+    end_user_id = Column(String(255), nullable=False)
+    retrieved_content = Column(JSON, nullable=True)
+    created_at = Column(DateTime, nullable=False)
+
+
 class ForgetAudit(ReadOnlyBase):
     """One forgotten-memory audit row (``memory_forget_log``).
 
@@ -69,3 +80,24 @@ class ForgetAudit(ReadOnlyBase):
     operator = Column(UUID(as_uuid=True), nullable=True)
     delete_at = Column(DateTime, nullable=False)
     is_recovered = Column(Boolean, nullable=False)
+
+
+
+class MemoryIncrement(ReadOnlyBase):
+    __tablename__ = "memory_increments"
+
+    id = Column(UUID(as_uuid=True), primary_key=True)
+    workspace_id = Column(UUID(as_uuid=True), nullable=False)
+    total_num = Column(Integer, nullable=False)
+    created_at = Column(DateTime, nullable=True)
+    updated_at = Column(DateTime, nullable=True)
+
+
+class DialogueEmotionRaw(ReadOnlyBase):
+    __tablename__ = "dialogue_emotion_raw"
+
+    id = Column(UUID(as_uuid=True), primary_key=True)
+    dialogue_id = Column(String(255), nullable=False)
+    end_user_id = Column(UUID(as_uuid=True), nullable=False)
+    created_at = Column(DateTime, nullable=False)
+    emotion = Column(String(50), nullable=False)

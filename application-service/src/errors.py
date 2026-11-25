@@ -47,6 +47,15 @@ class BusinessException(Exception):
         return f"{code_name}: {self.message}{ctx}"
 
 
+class ChatDatabaseBusy(BusinessException):
+    retry_after = "3"
+
+    def __init__(self) -> None:
+        super().__init__(
+            "Chat could not acquire a database connection", BizCode.SERVICE_UNAVAILABLE
+        )
+
+
 class I18nException(HTTPException):
     """Translated error carrying the host's detail payload inside HTTPException."""
 

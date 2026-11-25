@@ -74,37 +74,40 @@ async def get_user_entity_id(end_user_id: str) -> str | None:
     return str(node_id) if node_id is not None else None
 
 
-@redis_cache(ttl=60, prefix="memory", id_arg="end_user_id")
 async def get_user_metadata(end_user_id: str) -> dict:
+    """每次确认 PG 权威来源；缓存按投影内容分版本，旧请求回填不污染新来源。"""
+    meta_data = await _get_user_meta_data_from_pg(end_user_id)
+    return await _get_user_metadata_cached(end_user_id, meta_data)
+
+
+@redis_cache(ttl=60, prefix="memory", id_arg="end_user_id")
+async def _get_user_metadata_cached(end_user_id: str, meta_data: dict) -> dict:
     """Return the fields used to build the L0 user profile.
 
     ``id``、``aliases``、``description``、``event_timeline`` come from the active
     Neo4j user entity; metadata (legacy 8 fields + identity_background /
-    relationships / domain_specific_info) comes from PG ``end_user_info.meta_data``.
+    relationships / domain_specific_info) comes from the authoritative PG old/new column projection.
     Exceptions from either source propagate to the caller.
     """
     service = get_storage_service()
-    node_result, meta_data = await asyncio.gather(
-        service.get_node(
-            MemoryNodeType.EXTRACTED_ENTITY,
-            NodeFilter.all_of(
-                FilterCondition(field="end_user_id", value=end_user_id),
-                FilterCondition(field="entity_type", value="用户"),
-                FilterCondition(
-                    field="delete_at",
-                    operator=FilterOperator.EXISTS,
-                    value=False,
-                ),
+    node_result = await service.get_node(
+        MemoryNodeType.EXTRACTED_ENTITY,
+        NodeFilter.all_of(
+            FilterCondition(field="end_user_id", value=end_user_id),
+            FilterCondition(field="entity_type", value="用户"),
+            FilterCondition(
+                field="delete_at",
+                operator=FilterOperator.EXISTS,
+                value=False,
             ),
-            NodeProjection.of(
-                "description",
-                "aliases",
-                "event_timeline",
-                "id",
-            ),
-            None,
         ),
-        _get_user_meta_data_from_pg(end_user_id),
+        NodeProjection.of(
+            "description",
+            "aliases",
+            "event_timeline",
+            "id",
+        ),
+        None,
     )
     node_data = node_result.items[0].data if node_result.items else {}
     metadata = {
@@ -121,7 +124,7 @@ def _read_user_meta_data_sync(user_uuid: uuid.UUID) -> dict:
 
 
 async def _get_user_meta_data_from_pg(end_user_id: str) -> dict:
-    """Read PG ``end_user_info.meta_data`` via thread-local sync session; a non-UUID end_user_id has no record."""
+    """Read the selected PG metadata column via thread-local sync session; a non-UUID end_user_id has no record."""
     try:
         user_uuid = uuid.UUID(str(end_user_id))
     except ValueError:

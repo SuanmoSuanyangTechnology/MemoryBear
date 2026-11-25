@@ -4,11 +4,12 @@ import logging
 import uuid
 from datetime import timedelta
 
-from sqlalchemy import func, select, update
+from sqlalchemy import func, or_, select, update
 from sqlalchemy.exc import DataError, IntegrityError
 
+from ...config import DEFAULT_FAQ_IMPORT_PENDING_TIMEOUT_SECONDS
 from ...errors import KnowledgeError
-from ...models.owned import Knowledge, WikiFAQ
+from ...models.owned import WikiFAQ
 from ...models.owned.wiki_faq_import import WikiFAQImportJob as Job
 from ...rag.wiki.config import WikiError
 from ...utils.datetime_utils import utcnow_naive
@@ -19,6 +20,7 @@ from .common import scoped
 logger = logging.getLogger(__name__)
 
 TERMINAL = frozenset({"succeeded", "partially_succeeded", "failed"})
+PENDING_TIMEOUT_MESSAGE = "导入任务等待执行超时，请重新导入。"
 
 
 def scope_of(job):
@@ -42,28 +44,78 @@ def view(job):
     }
 
 
-def validate_scope(session, scope):
+def validate_scope(session, scope, *, repeatable_read=True):
     try:
-        begin_read(session, scope)
+        kb = begin_read(session, scope, repeatable_read=repeatable_read)
     except WikiError as exc:
         raise KnowledgeError.from_code("KB_RESOURCE_NOT_FOUND", status_code=404) from exc
-    kb = session.get(Knowledge, scope["kb_id"])
     if kb.is_folder:
         raise KnowledgeError.from_code("KB_RESOURCE_NOT_FOUND", status_code=404)
     return {"embedding_id": kb.embedding_id}
 
 
-def create(session, scope, actor_id, task_id, mode, payload_key, total):
-    lock_knowledge(session, scope["kb_id"], scope)
-    active = session.scalar(
-        select(Job.id)
+def _pending_cutoff(timeout_seconds):
+    return utcnow_naive() - timedelta(seconds=timeout_seconds)
+
+
+def _pending_expired(job, cutoff):
+    return job.status == "pending" and job.created_at <= cutoff
+
+
+def _find_active_task_id(session, scope, cutoff=None) -> uuid.UUID | None:
+    query = select(Job.id).where(
+        *scoped(Job, scope),
+        Job.status.in_(["pending", "running"]),
+    )
+    if cutoff is not None:
+        query = query.where(or_(Job.status == "running", Job.created_at > cutoff))
+    return session.scalar(query.limit(1))
+
+
+def active_task_id(
+    session, scope, timeout_seconds=DEFAULT_FAQ_IMPORT_PENDING_TIMEOUT_SECONDS
+) -> uuid.UUID | None:
+    validate_scope(session, scope)
+    return _find_active_task_id(session, scope, _pending_cutoff(timeout_seconds))
+
+
+def _expire_pending(session, scope, timeout_seconds):
+    rows = session.scalars(
+        select(Job)
         .where(
             *scoped(Job, scope),
-            Job.status.in_(["pending", "running"]),
+            Job.status == "pending",
+            Job.created_at <= _pending_cutoff(timeout_seconds),
         )
-        .limit(1)
+        .order_by(Job.id)
+        .with_for_update()
     )
-    if active:
+    return [_mark_failed(session, row, PENDING_TIMEOUT_MESSAGE) for row in rows]
+
+
+def prepare_submission(session, scope, timeout_seconds):
+    validate_scope(session, scope, repeatable_read=False)
+    expired = _expire_pending(session, scope, timeout_seconds)
+    return _find_active_task_id(session, scope), expired
+
+
+def create(
+    session,
+    scope,
+    actor_id,
+    task_id,
+    mode,
+    payload_key,
+    total,
+    timeout_seconds=DEFAULT_FAQ_IMPORT_PENDING_TIMEOUT_SECONDS,
+):
+    # 沿用 Worker 的任务行 → 知识库行锁顺序。
+    expired = _expire_pending(session, scope, timeout_seconds)
+    try:
+        lock_knowledge(session, scope["kb_id"], scope)
+    except WikiError as exc:
+        raise KnowledgeError.from_code("KB_RESOURCE_NOT_FOUND", status_code=404) from exc
+    if _find_active_task_id(session, scope) is not None:
         raise KnowledgeError.from_code("KB_FAQ_IMPORT_BUSY", status_code=409)
     row = Job(
         id=task_id,
@@ -81,15 +133,28 @@ def create(session, scope, actor_id, task_id, mode, payload_key, total):
     )
     session.add(row)
     session.flush()
-    return view(row)
+    return expired
 
 
-def progress(session, scope, task_id):
-    validate_scope(session, scope)
-    row = session.scalar(select(Job).where(Job.id == task_id, *scoped(Job, scope)))
+def progress(session, scope, task_id, timeout_seconds=DEFAULT_FAQ_IMPORT_PENDING_TIMEOUT_SECONDS):
+    validate_scope(session, scope, repeatable_read=False)
+    query = select(Job).where(Job.id == task_id, *scoped(Job, scope))
+    row = session.scalar(query)
+    cutoff = _pending_cutoff(timeout_seconds)
+    if row is not None and _pending_expired(row, cutoff):
+        # 与正在领取的 Worker 同步，避免把已经领取的任务显示为失败。
+        row = session.scalar(
+            query.with_for_update(read=True).execution_options(populate_existing=True)
+        )
     if row is None:
         raise KnowledgeError.from_code("KB_RESOURCE_NOT_FOUND", status_code=404)
-    return view(row)
+    result = view(row)
+    if _pending_expired(row, cutoff):
+        failure, summary = _failure_details(session, row, PENDING_TIMEOUT_MESSAGE)
+        result.update(
+            status="failed", stage="finished", failure=failure, summary=summary, failed_entries=[]
+        )
+    return result
 
 
 def load(session, task_id):
@@ -97,9 +162,18 @@ def load(session, task_id):
     return snapshot(row) if row else None
 
 
-def claim(session, task_id, token, lease_seconds):
+def claim(
+    session,
+    task_id,
+    token,
+    lease_seconds,
+    timeout_seconds=DEFAULT_FAQ_IMPORT_PENDING_TIMEOUT_SECONDS,
+):
     row = session.scalar(select(Job).where(Job.id == task_id).with_for_update())
     if row is None or row.status in TERMINAL:
+        return None
+    if _pending_expired(row, _pending_cutoff(timeout_seconds)):
+        _mark_failed(session, row, PENDING_TIMEOUT_MESSAGE)
         return None
     if row.lease_expires_at and row.lease_expires_at > utcnow_naive():
         return {"busy": True}
@@ -180,7 +254,7 @@ def commit_faqs(session, task_id, token, items, model_id):
                         negative_questions=[],
                         answer_strategy="all",
                         review_state="approved",
-                        is_enabled=True,
+                        is_enabled=False,
                         content_revision=1,
                         row_version=1,
                         created_by=job.actor_id,
@@ -261,7 +335,7 @@ def fail(session, task_id, token, message):
     return _mark_failed(session, row, message)
 
 
-def _mark_failed(session, row, message):
+def _failure_details(session, row, message):
     total = session.scalar(
         select(func.count())
         .select_from(WikiFAQ)
@@ -270,15 +344,18 @@ def _mark_failed(session, row, message):
             WikiFAQ.deleted_at.is_(None),
         )
     )
-    row.status, row.stage = "failed", "finished"
-    row.failure = {"code": "KB_FAQ_IMPORT_FAILED", "message": message}
-    row.summary = {
+    return {"code": "KB_FAQ_IMPORT_FAILED", "message": message}, {
         "total_count": row.total_count,
         "success_count": 0,
         "failure_count": row.total_count,
         "removed_count": 0,
         "total_all": total,
     }
+
+
+def _mark_failed(session, row, message):
+    row.status, row.stage = "failed", "finished"
+    row.failure, row.summary = _failure_details(session, row, message)
     row.cleanup_ids = [item["id"] for item in row.candidates]
     row.execution_token = None
     row.lease_expires_at = None

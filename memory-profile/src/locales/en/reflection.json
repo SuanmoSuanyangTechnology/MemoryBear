@@ -1,0 +1,9 @@
+{
+  "trial": {
+    "success": "Reflection trial run",
+    "forbidden": "Reflection trial requires a management account",
+    "failed": "Reflection failed: conflicts were not resolved",
+    "config_not_found": "Configuration {config_id} was not found",
+    "unavailable": "Reflection trial failed; check the model configuration or try again later"
+  }
+}

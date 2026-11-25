@@ -28,6 +28,7 @@ from app.core.memory.storage.enums import MemoryNodeType
 from app.core.quota_stub import check_end_user_quota
 from app.core.response_utils import success, fail
 from app.db import get_db, get_async_db_context, get_async_db
+from app.integrations.profile.proxy import memory_profile_proxy
 from app.repositories.end_user_repository import EndUserRepository
 from app.schemas.api_key_schema import ApiKeyAuth
 from app.schemas.memory_agent_schema import Write_UserInput, InternalReadInput, ReadSyncInput, MergeEndUserInput
@@ -68,6 +69,7 @@ async def get_memory_info():
 
 @router.post("/read/sync")
 @require_api_key_self_db(scopes=["memory"])
+@memory_profile_proxy(raw_body=True)
 async def read_memory_sync(
         request: Request,
         api_key_auth: ApiKeyAuth = None,
@@ -76,15 +78,15 @@ async def read_memory_sync(
     """
     Read memory synchronously.
 
-    Requires API Key with 'memory' scope. The public response removes the eight
-    legacy profile fields only from the terminal-user profile node
-    (id == end_user_id); ordinary memory nodes are returned unchanged.
+    Requires API Key with 'memory' scope. Forwarded verbatim to the profile
+    service (``POST /internal/v1/memory/read/sync``); the profile side keeps the
+    legacy V1 payload and the merge routing.
 
     Supports two modes:
     - Single user (backward-compatible): pass ``end_user_id`` (string).
       Returns ``{"answer": "...", "intermediate_outputs": [...]}``.
-    - Multi user: pass ``end_user_ids`` (list of strings). Reads are executed
-      concurrently via ``asyncio.gather``.
+    - Multi user: pass ``end_user_ids`` (list of strings). The profile service
+      reads them concurrently and keys the map by the requested id.
       Returns ``{"<end_user_id>": {"answer": "...", "intermediate_outputs": [...]}, ...}``.
     """
     body = await request.json()
@@ -173,6 +175,7 @@ async def read_memory_sync(
 
 @router.post("/read/internal")
 @require_api_key_self_db(scopes=["memory"])
+@memory_profile_proxy(raw_body=True)
 async def read_memory_internal(
         request: Request,
         api_key_auth: ApiKeyAuth = None,
@@ -181,12 +184,9 @@ async def read_memory_internal(
     """
     Read memory synchronously (internal).
 
-    Requires API Key with 'memory' scope.
-    Extended version of /read/sync that supports `include` (Neo4j node types filter)
-    and `limit` (max memories to return).
-    ``include_metadata`` (default True) controls whether the user profile metadata
-    is loaded at all: when False it is excluded from both the returned memories and
-    the query-splitting / summary context.
+    Requires API Key with 'memory' scope. Forwarded verbatim to the profile
+    service (``POST /internal/v1/memory/read/internal``); ``includes`` and
+    ``include_metadata`` keep their legacy semantics there.
     """
     body = await request.json()
     payload = InternalReadInput(**body)

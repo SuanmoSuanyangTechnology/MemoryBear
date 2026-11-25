@@ -2,11 +2,14 @@
 
 from fastapi import APIRouter
 
+from ..plugins import get_registered_routers
 from .routes.annotations import router as annotations_router
 from .routes.annotations import v1_router as annotations_v1_router
 from .routes.app_categories import router as app_categories_router
+from .routes.app_config import router as app_config_router
 from .routes.app_logs import router as app_logs_router
 from .routes.apps import router as apps_router
+from .routes.assets import assets_v1_router
 from .routes.assets import router as assets_router
 from .routes.conversation_shares import router as conversation_shares_router
 from .routes.draft_run import router as draft_run_router
@@ -14,6 +17,8 @@ from .routes.end_users import router as end_users_router
 from .routes.health import router as health_router
 from .routes.human_intervention import router as human_intervention_router
 from .routes.human_intervention import v1_router as human_intervention_v1_router
+from .routes.mcp_market_configs import router as mcp_market_configs_router
+from .routes.mcp_markets import router as mcp_markets_router
 from .routes.messages import router as messages_router
 from .routes.messages import v1_router as messages_v1_router
 from .routes.metrics import router as metrics_router
@@ -22,16 +27,22 @@ from .routes.prompt_optimizer import router as prompt_optimizer_router
 from .routes.public_share import router as public_share_router
 from .routes.release_shares import router as release_shares_router
 from .routes.skills import router as skills_router
+from .routes.storage_share import router as storage_share_router
 from .routes.tools import router as tools_router
-
-from ..plugins import get_registered_routers
+from .routes.workflow_triggers import router as workflow_triggers_router
 
 internal_v1_router = APIRouter(prefix="/internal/v1")
 internal_v1_router.include_router(health_router)
 # `/apps/assets/*` must be registered before `apps_router`, otherwise
 # `/apps/{app_id}` matches "assets" first and the catalog endpoints 404/422.
 internal_v1_router.include_router(assets_router)
+# `/v1/assets/*` alias: separate prefix (`/assets`), so it cannot be swallowed
+# by `/apps/{app_id}` regardless of order — kept adjacent for readability.
+internal_v1_router.include_router(assets_v1_router)
 internal_v1_router.include_router(app_categories_router)
+# The `/v1` config pair keeps its own path (`/{app_id}/app-config`) so the
+# console's `GET /apps/{id}/config` handler stays untouched by the v1 dispatch.
+internal_v1_router.include_router(app_config_router)
 internal_v1_router.include_router(apps_router)
 internal_v1_router.include_router(annotations_router)
 internal_v1_router.include_router(annotations_v1_router)
@@ -41,6 +52,8 @@ internal_v1_router.include_router(draft_run_router)
 internal_v1_router.include_router(end_users_router)
 internal_v1_router.include_router(human_intervention_router)
 internal_v1_router.include_router(human_intervention_v1_router)
+internal_v1_router.include_router(mcp_market_configs_router)
+internal_v1_router.include_router(mcp_markets_router)
 internal_v1_router.include_router(messages_router)
 internal_v1_router.include_router(messages_v1_router)
 internal_v1_router.include_router(metrics_router)
@@ -49,7 +62,9 @@ internal_v1_router.include_router(prompt_optimizer_router)
 internal_v1_router.include_router(public_share_router)
 internal_v1_router.include_router(release_shares_router)
 internal_v1_router.include_router(skills_router)
+internal_v1_router.include_router(storage_share_router)
 internal_v1_router.include_router(tools_router)
+internal_v1_router.include_router(workflow_triggers_router)
 
 # Routers already attached by `mount_registered_routers` (idempotency guard).
 # APIRouter is not hashable, so remember identity rather than the object.

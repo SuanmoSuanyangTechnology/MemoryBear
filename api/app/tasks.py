@@ -110,6 +110,7 @@ from app.models import App, AppRelease, Document, File, Knowledge, User, Workspa
 from app.models.end_user_model import EndUser
 from app.models.file_model import FILE_ROLE_SOURCE
 from app.repositories.end_user_repository import (
+    EndUserRepository,
     count_inactive_end_users_by_workspace,
     get_all_active_workspaces,
     get_recently_active_end_user_ids_page,
@@ -3573,6 +3574,12 @@ def do_layer2_reflection(self, end_user_id: str | None = None, config_id: str = 
         from app.services.memory_reflection_service import WorkspaceAppService
         from app.core.memory.memory_service import MemoryService
 
+        from app.core.memory.storage_services.reflection_engine.deterministic.metadata_migration import (
+            read_metadata_baseline,
+        )
+        if read_metadata_baseline(end_user_id) is None:
+            return {"status": "skipped", "reason": "inactive_or_missing_info"}
+
         # 步骤1 执行前再判一次是否真的要反思：
         #   任务从 scan 派发到这里可能排队了一段时间，期间该用户可能已被别的
         #   反思任务处理过（reflection_time 已更新），这里复判避免重复反思。
@@ -3597,6 +3604,9 @@ def do_layer2_reflection(self, end_user_id: str | None = None, config_id: str = 
             if not await asyncio.to_thread(write_lock.acquire):
                 logger.warning(f"反思高频do 获取写锁超时，跳过 user={end_user_id}")
                 return {"status": "lock_timeout"}
+        else:
+            logger.warning("反思高频do 用户写锁不可用，跳过 user=%s", end_user_id)
+            return {"status": "lock_unavailable"}
         try:
             # 步骤2.5 double-check：拿到写锁后再复查一次是否仍需反思。
             #   并发下（concurrency>1 或多 worker 副本）另一个 do 可能在我们抢锁
@@ -3623,7 +3633,11 @@ def do_layer2_reflection(self, end_user_id: str | None = None, config_id: str = 
                 end_user_id=end_user_id,
                 workspace_id=workspace_id,
             )
-            r = await memory_service.run_reflection_layer2()
+            from app.core.memory.storage_services.reflection_engine.deterministic.metadata_migration import (
+                metadata_reflection_lock,
+            )
+            with metadata_reflection_lock(write_lock):
+                r = await memory_service.run_reflection_layer2()
 
             completion = rr.completion_of_layer2(r)
             progressed = rr.progressed_layer2(r)
@@ -7460,7 +7474,7 @@ def flush_conversation_task(self) -> None:
     )
 
 
-@celery_app.task(name="app.tasks.scan_workflow_schedule_triggers", queue="periodic_tasks", time_limit=50,
+@celery_app.task(name="app.tasks.scan_workflow_schedule_triggers", queue="workflow_trigger_tasks", time_limit=50,
                  soft_time_limit=45)
 def scan_workflow_schedule_triggers():
     """扫描并派发已发布工作流中的定时触发器。"""
@@ -7709,7 +7723,7 @@ def generate_scene_summary(
         close_reason=close_reason,
     )
     started_at = time.monotonic()
-    stage = "generate_summary"
+    stage = "check_end_user"
     loop = set_asyncio_event_loop()
 
     async def _run():
@@ -7721,7 +7735,15 @@ def generate_scene_summary(
             await storage_client.close()
 
     try:
-        result = loop.run_until_complete(_run())
+        with get_db_context() as db:
+            active_user_ids = EndUserRepository(db).filter_existing_ids(
+                [uuid.UUID(end_user_id)]
+            )
+        if active_user_ids:
+            stage = "generate_summary"
+            result = loop.run_until_complete(_run())
+        else:
+            result = {"status": "skipped", "reason": "inactive_or_missing_end_user"}
         if result.get("community_dispatch_required"):
             stage = "dispatch_scene_community"
             community_task = run_scene_community_incremental.apply_async(
@@ -7769,13 +7791,17 @@ def generate_scene_summary(
     time_limit=1800,
     soft_time_limit=1700,
 )
-def run_scene_community_incremental(self, end_user_id: str):
-    """Process exactly one complete SceneCommunity batch for an end user."""
+def run_scene_community_incremental(self, end_user_id: str, trigger: str = "threshold"):
+    """Process one SceneCommunity batch for the current end-user owner."""
+    if trigger not in ("threshold", "scheduled"):
+        raise ValueError("invalid SceneCommunity trigger")
+
     from app.core.memory.scene.scene_community_service import (
         SceneCommunityIncrementalService,
     )
     from app.core.memory.storage.custom import SceneStorage
     from app.core.memory.storage.provider.neo4j.client import Neo4jClient
+    from app.services.memory_engine_display_service import MemoryEngineDisplayService
 
     started_at = time.monotonic()
     stage = "acquire_lock"
@@ -7784,10 +7810,23 @@ def run_scene_community_incremental(self, end_user_id: str):
 
     async def _run():
         nonlocal stage
-        stage = "load_config"
+        stage = "check_end_user"
         with get_db_context() as db:
+            workspace_id = db.execute(
+                select(EndUser.workspace_id).where(
+                    EndUser.id == uuid.UUID(end_user_id),
+                    EndUser.is_active.is_(True),
+                )
+            ).scalar_one_or_none()
+            if workspace_id is None:
+                return {
+                    "status": "skipped",
+                    "reason": "inactive_or_missing_end_user",
+                    "dispatch_next": False,
+                }
+            stage = "load_config"
             config_service = MemoryConfigService(db)
-            current_config_id = config_service.get_config_id_by_end_user(end_user_id)
+            current_config_id = config_service.get_workspace_active_config_id(workspace_id)
             memory_config = config_service.load_memory_config(current_config_id)
 
         stage = "connect_neo4j"
@@ -7798,15 +7837,11 @@ def run_scene_community_incremental(self, end_user_id: str):
             result = await SceneCommunityIncrementalService(
                 writer=writer,
                 memory_config=memory_config,
-            ).run(end_user_id)
+            ).run(end_user_id, trigger=trigger)
             result["config_id"] = str(current_config_id)
-            result["batch_trigger_count_snapshot"] = int(
-                memory_config.batch_trigger_count
-            )
-            result["candidate_community_limit_snapshot"] = int(
-                memory_config.candidate_community_limit
-            )
-            result["compare_all_same_category_communities_snapshot"] = bool(
+            result["batch_trigger_count_snapshot"] = memory_config.batch_trigger_count
+            result["candidate_community_limit_snapshot"] = memory_config.candidate_community_limit
+            result["compare_all_same_category_communities_snapshot"] = (
                 memory_config.compare_all_same_category_communities
             )
             return result
@@ -7820,37 +7855,47 @@ def run_scene_community_incremental(self, end_user_id: str):
             expire=1800,
         )
         result = loop.run_until_complete(_run())
-        if result.get("status") == "success":
-            # 展示写入：best effort，在取得成功结果后、派发下一批之前执行；
-            # _persist_events 内部已兜底 PG 异常，此处 try/except 为第二层隔离，
-            # 失败不触发 Celery 自动重试、不改变任务成功结果。
+        if result["status"] == "success":
+            stage = "display_event"
             try:
-                from app.services.memory_engine_display_service import (
-                    MemoryEngineDisplayService,
-                )
-
                 loop.run_until_complete(
                     MemoryEngineDisplayService.save_scene_reconstruction_event(
                         end_user_id=end_user_id,
                         result=result,
                     )
                 )
+            except SoftTimeLimitExceeded:
+                raise
             except Exception:
                 logger.exception(
-                    "[EngineDisplay] Scene reconstruction event write failed"
+                    "[SceneCommunity] display event failed: user=%s trigger=%s",
+                    end_user_id, trigger,
                 )
-        if result.get("dispatch_next"):
+        if result["dispatch_next"]:
             stage = "dispatch_next"
-            next_task = run_scene_community_incremental.apply_async(
-                kwargs={"end_user_id": end_user_id}
-            )
-            result["next_task_id"] = next_task.id
+            try:
+                next_task = run_scene_community_incremental.apply_async(
+                    kwargs={"end_user_id": end_user_id},
+                    retry=True,
+                )
+            except SoftTimeLimitExceeded:
+                raise
+            except Exception:
+                result["next_dispatch_failed"] = True
+                logger.exception(
+                    "[SceneCommunity] continuation dispatch failed: user=%s trigger=%s",
+                    end_user_id, trigger,
+                )
+            else:
+                result["next_task_id"] = next_task.id
         logger.info(
-            "[SceneCommunity] incremental task completed: user=%s status=%s "
+            "[SceneCommunity] incremental task completed: user=%s trigger=%s status=%s reason=%s "
             "processed=%s communities=%s remaining=%s config=%s "
             "dispatch_next=%s elapsed_ms=%s",
             end_user_id,
-            result.get("status"),
+            trigger,
+            result["status"],
+            result.get("reason"),
             result.get("processed"),
             result.get("community_count"),
             result.get("remaining_inactive_count", result.get("inactive_count")),
@@ -7861,9 +7906,10 @@ def run_scene_community_incremental(self, end_user_id: str):
         return result
     except Exception as exc:
         logger.error(
-            "[SceneCommunity] incremental task failed: user=%s stage=%s "
+            "[SceneCommunity] incremental task failed: user=%s trigger=%s stage=%s "
             "error_type=%s retry=%s elapsed_ms=%s",
             end_user_id,
+            trigger,
             stage,
             type(exc).__name__,
             getattr(self.request, "retries", 0),
@@ -7874,6 +7920,100 @@ def run_scene_community_incremental(self, end_user_id: str):
         if write_lock is not None:
             write_lock.release()
         _shutdown_loop_gracefully(loop)
+
+
+@celery_app.task(
+    name="app.tasks.scan_scene_community_pending",
+    soft_time_limit=270,
+    time_limit=300,
+)
+def scan_scene_community_pending():
+    """Dispatch one scheduled batch per pending user, in user-ID pages."""
+    from app.core.memory.storage.custom import SceneStorage
+    from app.core.memory.storage.provider.neo4j.client import Neo4jClient
+
+    lock = RedisFairLock(
+        key="scene_community:pending_scan_lock",
+        redis_client=get_thread_safe_sync_redis(),
+        expire=300,
+        timeout=0,
+    )
+    stats = dict(pages=0, candidates=0, skipped=0, dispatched=0, dispatch_failed=0)
+    if not lock.acquire():
+        logger.info("[SceneCommunity] scheduled scan skipped: reason=lock_held")
+        return {**stats, "skipped_due_to_lock": True}
+
+    async def _scan():
+        client = await Neo4jClient.create()
+        try:
+            storage = SceneStorage(client)
+            cursor = ""
+            while True:
+                lock.ensure_valid()
+                user_ids = await storage.list_pending_user_ids(cursor)
+                if not user_ids:
+                    break
+                stats["pages"] += 1
+                stats["candidates"] += len(user_ids)
+                user_uuids = {}
+                for end_user_id in user_ids:
+                    try:
+                        user_uuids[end_user_id] = uuid.UUID(end_user_id)
+                    except ValueError:
+                        stats["skipped"] += 1
+                        logger.warning(
+                            "[SceneCommunity] invalid end-user ID in pending scan: user=%s",
+                            end_user_id,
+                        )
+                with get_db_context() as db:
+                    active_user_ids = EndUserRepository(db).filter_existing_ids(
+                        list(user_uuids.values())
+                    )
+                for end_user_id, user_uuid in user_uuids.items():
+                    if str(user_uuid) not in active_user_ids:
+                        stats["skipped"] += 1
+                        continue
+                    lock.ensure_valid()
+                    try:
+                        run_scene_community_incremental.apply_async(
+                            kwargs={"end_user_id": end_user_id, "trigger": "scheduled"},
+                        )
+                    except SoftTimeLimitExceeded:
+                        raise
+                    except Exception:
+                        stats["dispatch_failed"] += 1
+                        logger.exception(
+                            "[SceneCommunity] scheduled dispatch failed: user=%s",
+                            end_user_id,
+                        )
+                    else:
+                        stats["dispatched"] += 1
+                cursor = user_ids[-1]
+        finally:
+            await client.close()
+
+    scan_error: BaseException | None = None
+    try:
+        loop = set_asyncio_event_loop()
+        try:
+            loop.run_until_complete(_scan())
+        finally:
+            _shutdown_loop_gracefully(loop)
+    except BaseException as exc:
+        scan_error = exc
+        raise
+    finally:
+        lock.release()
+        if scan_error is None:
+            logger.info("[SceneCommunity] scheduled scan completed: %s", stats)
+        else:
+            logger.warning(
+                "[SceneCommunity] scheduled scan aborted: "
+                "error_type=%s stats=%s",
+                type(scan_error).__name__,
+                stats,
+            )
+    return {**stats, "skipped_due_to_lock": False}
 
 
 @celery_app.task(name="app.tasks.scan_scene_summary_idle")
@@ -8045,34 +8185,6 @@ def scan_scene_summary_idle(
             except Exception as exc:
                 logger.warning("[SceneSummary] idle scanner lock release failed: %s", exc)
 
-
-@celery_app.task(
-    name="app.tasks.consume_model_gateway_alerts",
-    bind=False,
-    ignore_result=False,
-    max_retries=0,
-    acks_late=False,
-    time_limit=60,
-    soft_time_limit=50,
-)
-def consume_model_gateway_alerts_task() -> dict[str, Any]:
-    """定时任务：消费部署域用量流（model:usage:<DB_NAME>）做网关健康告警评估（B9）。
-
-    服务侧（model-service）的调用终态只进 stream，本任务用独立消费组
-    `model-usage-alerts` 读该 stream 喂给宿主企业告警插件；beat 周期由
-    settings.MODEL_USAGE_ALERT_INTERVAL_SECONDS（默认 30s）驱动。
-    社区版无 premium 插件时插件层直接跳过（不建组不读流）；Redis 层异常不抛，
-    下轮重试（事件已 ACK 的不重放，属尽力而为 + 新鲜度优先口径）。
-    """
-    from app.core.alert_metric_bridge import consume_model_gateway_alerts
-
-    try:
-        return consume_model_gateway_alerts()
-    except Exception as exc:
-        logger.warning(
-            f"consume_model_gateway_alerts 本轮失败（下轮重试）: {exc}", exc_info=True
-        )
-        return {"status": "RETRY_LATER", "error": str(exc)}
 
 @celery_app.task(
     name="app.tasks.run_reembed_job",

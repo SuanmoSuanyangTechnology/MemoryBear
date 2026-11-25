@@ -582,6 +582,13 @@ class Settings:
     REDIS_DB_CELERY_BROKER: int = int(os.getenv("REDIS_DB_CELERY_BROKER", "3"))
     REDIS_DB_CELERY_BACKEND: int = int(os.getenv("REDIS_DB_CELERY_BACKEND", "4"))
 
+    # P1-W7 handover: application-service owns the workflow schedule scan once its
+    # worker/beat are deployed. Set false to drop the monolith beat entry (the
+    # task itself stays registered so an in-flight monolith worker can drain).
+    ENABLE_MONOLITH_WORKFLOW_SCAN: bool = (
+        os.getenv("ENABLE_MONOLITH_WORKFLOW_SCAN", "true").lower() == "true"
+    )
+
     # 通知中心配置
     NOTIFICATION_REDIS_DB: int = int(os.getenv("NOTIFICATION_REDIS_DB", "8"))
     NOTIFICATION_SCAN_INTERVAL_SECONDS: int = int(os.getenv("NOTIFICATION_SCAN_INTERVAL_SECONDS", "60"))
@@ -679,6 +686,14 @@ class Settings:
     REFLECT_LAYER2_INACTIVE_HOURS: int = TypeAdapter(
         Annotated[int, Field(ge=1, description="Layer 2 inactivity filter in hours, must be >= 1")]
     ).validate_python(int(os.getenv("REFLECT_LAYER2_INACTIVE_HOURS", "36")))
+    # 与 memory-jobs 共用迁移开关；上线前必须先发布所有消费者的双列读取。
+    METADATA_MIGRATION_ENABLED: bool = os.getenv(
+        "JOBS_METADATA_MIGRATION_ENABLED", "false"
+    ).lower() in ("true", "1", "yes")
+    METADATA_MIGRATION_TIMEOUT_SECONDS: int = TypeAdapter(
+        Annotated[int, Field(ge=1)]
+    ).validate_python(int(os.getenv("METADATA_MIGRATION_TIMEOUT_SECONDS", "60")))
+
     # Layer2 反思整轮总时间预算（秒）：高频 run() 与低频 _run_dedup_full_scan 共用。
     # 应用层动态预算熔断的上限；500 = Celery soft_time_limit 540 留 40s 框架余量。
     LAYER2_REFLECTION_BUDGET_SECONDS: int = TypeAdapter(

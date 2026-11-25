@@ -153,7 +153,16 @@ class AppLogService:
         input_message_id = uuid.uuid5(execution.id, "input")
         output_message_id = uuid.uuid5(execution.id, "output")
         input_content = _format_log_json(execution.input_data)
-        output_content = execution.error_message or _extract_execution_output(execution.output_data)
+        if execution.status == "failed":
+            # content shows the user-facing msg; error_message keeps diagnostics.
+            failure_output = (
+                execution.output_data if isinstance(execution.output_data, dict) else {}
+            )
+            output_content = failure_output.get("msg") or execution.error_message or ""
+        else:
+            output_content = (
+                execution.error_message or _extract_execution_output(execution.output_data)
+            )
         node_executions = _build_nodes_from_output_data(execution.output_data)
 
         messages = [
@@ -576,8 +585,12 @@ class AppLogService:
                 if logical_outputs:
                     meta["outputs"] = logical_outputs
             else:
-                # failed 状态：优先用 error_message，不要 dump output_data
-                output_content = execution.error_message or ""
+                # failed: content shows the user-facing msg (diagnostics stay in
+                # meta.error); never dump output_data.
+                failure_output = (
+                    execution.output_data if isinstance(execution.output_data, dict) else {}
+                )
+                output_content = failure_output.get("msg") or execution.error_message or ""
                 meta = {"error": execution.error_message, "error_node_id": execution.error_node_id}
 
             assistant_msg = AppLogMessage(

@@ -142,7 +142,9 @@ async def get_messages(
 
 
 @router.get("/{end_user_id}/detail", response_model=ApiResponse)
+@memory_profile_proxy(query_fields=("end_user_id", "conversation_id"), timeout_seconds=940.0)
 async def get_conversation_detail(
+        request: Request,
         conversation_id: uuid.UUID,
         end_user_id: str,
         current_user: CurrentUserSnapshot = Depends(get_current_user_async),

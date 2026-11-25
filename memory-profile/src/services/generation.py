@@ -15,10 +15,11 @@ from task_bridge import (
     TaskResultUnavailableError,
     TaskTimeoutError,
 )
-from task_bridge.mem_router import TaskName
+from task_bridge.mem_router import QueueName, TaskName, TaskPriority
 
 from src.common.errors import BizCode, LocalizedProfileError
 from src.common.redis_cache import CACHE_MISS, get_json, set_json
+from src.infrastructure.metadata_migration import MetadataMigrationCircuitBreaker
 from src.repositories.generation import (
     GenerationGraphRepository,
     MemoryGenerationRepository,
@@ -56,6 +57,10 @@ class GenerationService:
             runtime.postgres, runtime.model_service
         )
         self.task_bridge = runtime.task_bridge
+        self._metadata_breaker = MetadataMigrationCircuitBreaker(
+            runtime.redis.client
+        )
+        self.metadata_migration_enabled = runtime.settings.metadata_migration_enabled
         self.interest_cache_expire = runtime.settings.interest_cache_expire_seconds
 
     async def interest_distribution(
@@ -204,13 +209,7 @@ class GenerationService:
 
         workspace_row = await self.workspace.row(workspace_id)
         eligibility = validate_workspace_row(workspace_row)
-        if not eligibility.valid:
-            if eligibility.reason == REASON_UNSUPPORTED_STORAGE_TYPE:
-                raise LocalizedProfileError(
-                    BizCode.INVALID_PARAMETER,
-                    "analytics.generate.unsupported_storage_type",
-                    detail=f"unsupported storage_type: {eligibility.storage_type or 'unknown'}",
-                )
+        if not eligibility.valid and eligibility.reason != REASON_UNSUPPORTED_STORAGE_TYPE:
             raise LocalizedProfileError(
                 BizCode.INVALID_PARAMETER,
                 "analytics.generate.workspace_unavailable",
@@ -218,10 +217,66 @@ class GenerationService:
             )
 
         if end_user_id:
+            # 先校验归属，仅单用户入口额外投递；不等待迁移，不与缓存任务串行。
+            await self.end_user.require_in_workspace(
+                end_user_id=end_user_id, workspace_id=workspace_id
+            )
+            if self.metadata_migration_enabled:
+                await self._submit_metadata_migration_if_model_available(
+                    end_user_id=end_user_id,
+                    workspace_id=workspace_id,
+                    language=language,
+                    workspace_row=workspace_row,
+                )
+        # metadata 迁移只依赖 PG 和 LLM；图缓存的存储类型限制在迁移投递后检查。
+        if eligibility.reason == REASON_UNSUPPORTED_STORAGE_TYPE:
+            raise LocalizedProfileError(
+                BizCode.INVALID_PARAMETER,
+                "analytics.generate.unsupported_storage_type",
+                detail=f"unsupported storage_type: {eligibility.storage_type or 'unknown'}",
+            )
+        if end_user_id:
             return await self._generate_cache_via_worker(
                 end_user_id, workspace_id, language
             )
         return await self._generate_cache_batch_via_worker(workspace_id, language)
+
+    async def _submit_metadata_migration_if_model_available(
+        self,
+        *,
+        end_user_id: str,
+        workspace_id: UUID,
+        language: str,
+        workspace_row: dict[str, Any],
+    ) -> None:
+        try:
+            probe = await self.model_config.probe_chat_model_for_workspace(workspace_row)
+            if probe.kind != "valid":
+                logger.warning(
+                    "metadata migration skipped: workspace model unavailable "
+                    "workspace=%s user=%s kind=%s detail=%s",
+                    workspace_id,
+                    end_user_id,
+                    probe.kind,
+                    probe.detail,
+                )
+                return
+            await self._metadata_breaker.clear(workspace_id)
+            await self.task_bridge.submit(
+                TaskName.METADATA_MIGRATION_DO,
+                kwargs={
+                    "end_user_id": end_user_id,
+                    "workspace_id": str(workspace_id),
+                    "language": language,
+                },
+                queue=QueueName.METADATA_MIGRATION.value,
+                priority=TaskPriority.BACKGROUND,
+            )
+        except Exception:
+            logger.warning(
+                "用户迁移派发前模型检查失败，下轮定时任务重试 user=%s workspace=%s",
+                end_user_id, workspace_id, exc_info=True,
+            )
 
     async def _generate_cache_via_worker(
         self,

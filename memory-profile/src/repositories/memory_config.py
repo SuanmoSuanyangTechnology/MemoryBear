@@ -198,6 +198,34 @@ class MemoryConfigReadRepository:
     def __init__(self, postgres: PostgresManager) -> None:
         self.postgres = postgres
 
+    async def get_reflection_trial(
+        self, config_id: UUID | int, workspace_id: UUID, tenant_id: UUID
+    ) -> dict[str, Any] | None:
+        """Trial-only legacy integer compatibility, scoped before returning data.
+
+        Other config endpoints continue to accept UUIDs only. The preview uses
+        the workspace's literal LLM slot, not the active config or preset.
+        """
+        identifier = (
+            MemoryConfigRow.config_id == config_id
+            if isinstance(config_id, UUID)
+            else MemoryConfigRow.config_id_old == config_id
+        )
+        statement = (
+            select(*REFLECTION_COLUMNS, Workspace.llm)
+            .join(Workspace, Workspace.id == MemoryConfigRow.workspace_id)
+            .where(
+                identifier,
+                MemoryConfigRow.workspace_id == workspace_id,
+                Workspace.tenant_id == tenant_id,
+                Workspace.is_active.is_(True),
+            )
+            .limit(1)
+        )
+        async with self.postgres.session() as session:
+            row = (await session.execute(statement)).mappings().one_or_none()
+        return dict(row) if row is not None else None
+
     async def get_with_workspace(self, config_id: UUID) -> dict[str, Any] | None:
         """One configuration joined with its workspace's tenant and model slots.
 

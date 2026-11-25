@@ -33,6 +33,12 @@ class JobsRuntime:
         self.settings = settings or get_settings()
         self.postgres = PostgresManager(self.settings)
         self.redis = RedisManager(self.settings)
+        #: Read-only view of the Celery result backend (its own Redis logical
+        #: database). The dispatch-admission sweep reads result metadata from
+        #: here; it is not a dependency of this service's health.
+        self.result_backend_redis = RedisManager(
+            self.settings, url=self.settings.resolved_celery_result_backend
+        )
         self.elasticsearch = ElasticsearchManager(self.settings)
         self.neo4j = Neo4jManager(self.settings)
         #: 仅生成类任务使用；纯读/写任务不会触碰它，所以不参与依赖探测。
@@ -98,6 +104,7 @@ class JobsRuntime:
 
         self.postgres.reset_after_fork()
         self.redis.reset_after_fork()
+        self.result_backend_redis.reset_after_fork()
         self.elasticsearch.reset_after_fork()
         self.neo4j.reset_after_fork()
         self.model_service.reset_after_fork()
@@ -107,6 +114,7 @@ class JobsRuntime:
         for name, manager in (
             ("postgres", self.postgres),
             ("redis", self.redis),
+            ("result_backend_redis", self.result_backend_redis),
             ("elasticsearch", self.elasticsearch),
             ("neo4j", self.neo4j),
             ("model_service", self.model_service),

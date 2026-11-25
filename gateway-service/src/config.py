@@ -222,5 +222,29 @@ class Settings:
     def gateway_stream_idle_timeout_s(self) -> float:
         return float(os.getenv("GATEWAY_STREAM_IDLE_TIMEOUT_S", "300"))
 
+    # ---- Enterprise middlewares (CORS at the edge, License before auth) ----
+    @property
+    def enterprise_middlewares_enabled(self) -> bool:
+        return os.getenv(
+            "GATEWAY_ENTERPRISE_MIDDLEWARES", "true").lower() == "true"
+
+    @property
+    def cors_static_origins(self) -> tuple[str, ...]:
+        raw = [os.getenv("WEB_URL", "").strip()]
+        raw.extend(o.strip() for o in os.getenv("CORS_ORIGINS", "").split(","))
+        seen: dict[str, None] = {}
+        for origin in raw:
+            if origin:
+                seen.setdefault(origin, None)
+        return tuple(seen)
+
+    @property
+    def cors_snapshot_key(self) -> str:
+        return os.getenv("CORS_SNAPSHOT_KEY", "cors:origins")
+
+    @property
+    def cors_cache_ttl_s(self) -> float:
+        return float(os.getenv("CORS_CACHE_TTL_S", "60"))
+
 
 settings = Settings()

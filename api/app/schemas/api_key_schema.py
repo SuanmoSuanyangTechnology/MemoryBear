@@ -44,7 +44,7 @@ class ApiKeyCreate(BaseModel):
         """验证权限范围格式"""
         if v is None:
             return []
-        valid_scopes = ["app", "rag", "memory"]
+        valid_scopes = ["app", "rag", "memory", "app_mgmt", "asset"]
         for scope in v:
             if scope not in valid_scopes:
                 raise ValueError(f"无效范围: {scope}")
@@ -105,7 +105,7 @@ class ApiKeyUpdate(BaseModel):
         """验证权限范围格式"""
         if v is None:
             return v
-        valid_scopes = ["app", "rag", "memory"]
+        valid_scopes = ["app", "rag", "memory", "app_mgmt", "asset"]
         for scope in v:
             if scope not in valid_scopes:
                 raise ValueError(f"无效范围: {scope}")

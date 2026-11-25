@@ -9,6 +9,7 @@ from .db import DatabaseManager
 from .infrastructure import RedisManager
 from .infrastructure.upstream import MonolithUpstream
 from .protocols.market_gateway import DisabledMarketGateway, MarketGateway
+from .services.readiness import ReadinessMonitor
 
 
 class ProcessRuntime:
@@ -18,6 +19,7 @@ class ProcessRuntime:
         self.settings = settings
         self.database = DatabaseManager(settings)
         self.redis = RedisManager(settings)
+        self.readiness = ReadinessMonitor(settings)
         self.upstream = MonolithUpstream.from_settings(settings)
         self.market_gateway: MarketGateway = DisabledMarketGateway()
 

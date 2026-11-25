@@ -20,6 +20,11 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from error_core.codes import coerce_code, http_status_for
+from error_core.diagnostics import format_diagnostics
+from error_core.envelope import now_ms
+from error_core.messages import user_message
+
 from ..utils.datetime_utils import to_iso_z, utcnow_naive
 from ..workflow.node_cache import sanitize_json_text
 from ..agent.agent_middleware import AgentMiddleware
@@ -27,13 +32,15 @@ from ..agent.langchain_agent import DEFAULT_AGENT_ROLE_PROMPT, LangChainAgent
 from ..config import current_settings
 from ..errors import BizCode
 from ..errors import BusinessException
+from ..errors import get_current_locale
+from ..trace import get_trace_id
 from ..llm_error_handler import classify_multimodal_exception
 from ..model_clients.embedding import RedBearEmbeddings
 from ..usage_context import bind_usage
 from ..integrations.knowledge.context_factory import build_app_knowledge_context
 from ..integrations.knowledge.contracts import KnowledgeRetrievalSource
 from ..integrations.knowledge.runtime import get_knowledge_retriever
-from ..integrations.model.errors import ModelInvokeCancelledError
+from ..integrations.model.errors import ModelInvokeCancelledError, ModelInvokeFailedError
 from ..schemas.chunk_schema import RetrieveType
 from ..schemas.knowledge_retrieval_schema import KnowledgeRetrievalRequest
 from ..db import get_async_db_context
@@ -766,49 +773,6 @@ class AgentRunService:
             await db.refresh(new_msg)
             return _snapshot_message(new_msg)
 
-    async def _create_tts_file_metadata_async(
-            self,
-            *,
-            file_id: uuid.UUID,
-            tenant_id: Optional[uuid.UUID],
-            workspace_id: Optional[uuid.UUID],
-            file_key: str,
-            file_name: str,
-            file_ext: str,
-            content_type: str,
-    ) -> None:
-        async with get_async_db_context() as db:
-            db.add(
-                FileMetadata(
-                    id=file_id,
-                    tenant_id=tenant_id,
-                    workspace_id=workspace_id,
-                    file_key=file_key,
-                    file_name=file_name,
-                    file_ext=file_ext,
-                    file_size=0,
-                    content_type=content_type,
-                    status="pending",
-                )
-            )
-            await db.commit()
-
-    async def _update_tts_file_metadata_async(
-            self,
-            *,
-            file_id: uuid.UUID,
-            status: str,
-            file_size: Optional[int] = None,
-    ) -> None:
-        async with get_async_db_context() as db:
-            record = await db.get(FileMetadata, file_id)
-            if not record:
-                return
-            record.status = status
-            if file_size is not None:
-                record.file_size = file_size
-            await db.commit()
-
     async def _add_message_async(
             self,
             *,
@@ -982,8 +946,20 @@ class AgentRunService:
 
         return str(error)
 
-    def _build_compact_error(self, error: Exception, *, debug_id: Optional[str] = None) -> Dict[str, Any]:
-        """Build a compact but sufficient structured error payload."""
+    def _build_compact_error(
+            self,
+            error: Exception,
+            *,
+            debug_id: Optional[str] = None,
+            fallback_code: BizCode = BizCode.INTERNAL_ERROR,
+    ) -> Dict[str, Any]:
+        """Build a compact structured error payload.
+
+        Legacy fields (message/type/debug_id/code/...) are preserved while the
+        unified error-core fields are added: ``msg`` is the localized
+        user-facing copy, ``error`` is the diagnostic, and ``retryable``
+        decides whether a retry makes sense.
+        """
         compact_error: Dict[str, Any] = {
             "message": self._extract_exception_message(error),
             "type": type(error).__name__,
@@ -1013,11 +989,93 @@ class AgentRunService:
                 if cause_message:
                     compact_error["message"] = cause_message
                 apply_exception_fields(compact_error, error.cause)
+            self._apply_unified_error_fields(
+                compact_error, error, detail=error.message, fallback_code=fallback_code
+            )
             return compact_error
 
         apply_exception_fields(compact_error, error)
+        self._apply_unified_error_fields(
+            compact_error, error, detail=compact_error["message"], fallback_code=fallback_code
+        )
 
         return compact_error
+
+    def _apply_unified_error_fields(
+            self,
+            compact_error: Dict[str, Any],
+            error: Exception,
+            *,
+            detail: str,
+            fallback_code: BizCode,
+    ) -> None:
+        """Write the unified contract fields; legacy keys stay untouched.
+
+        ``code`` is normalized to a numeric BusinessCode so a failure payload
+        can never carry OK (0) or a provider-side string code.
+        """
+        locale = get_current_locale()
+        if isinstance(error, ModelInvokeFailedError):
+            numeric = coerce_code(error.biz_code)
+            if numeric in (None, BizCode.OK.value):
+                numeric = fallback_code.value
+            msg = getattr(error, "user_msg", None) or user_message(numeric, locale) or str(error)
+            detail = getattr(error, "detail", "") or detail
+            retryable = bool(error.retryable)
+        elif isinstance(error, BusinessException):
+            numeric = coerce_code(error.code)
+            if numeric in (None, BizCode.OK.value):
+                numeric = fallback_code.value
+            msg = user_message(numeric, locale) or error.message
+            retryable = (
+                http_status_for(numeric) >= 500
+                or numeric == BizCode.RATE_LIMITED.value
+            )
+        else:
+            numeric = fallback_code.value
+            msg = user_message(numeric, locale) or compact_error["message"]
+            retryable = (
+                http_status_for(numeric) >= 500
+                or numeric == BizCode.RATE_LIMITED.value
+            )
+        compact_error["code"] = numeric
+        compact_error["msg"] = msg
+        compact_error["error"] = format_diagnostics(
+            trace_id=get_trace_id() or None, detail=detail
+        )
+        compact_error["retryable"] = retryable
+
+    @staticmethod
+    def _compare_error_fields(error: Any) -> Dict[str, Any]:
+        """Flatten a per-model error into unified SSE error-frame fields.
+
+        ``msg`` is user-facing (localized catalog text); ``error`` carries the
+        diagnostic (never rendered); ``message`` is the deprecated alias.
+        """
+        locale = get_current_locale()
+        if isinstance(error, dict):
+            numeric = coerce_code(error.get("code"))
+            if numeric in (None, BizCode.OK.value):
+                numeric = BizCode.INTERNAL_ERROR.value
+            msg = (
+                error.get("msg")
+                or error.get("message")
+                or user_message(numeric, locale)
+            )
+            detail = str(error.get("error") or "")
+            retryable = bool(error.get("retryable", False))
+        else:
+            numeric = BizCode.INTERNAL_ERROR.value
+            msg = user_message(numeric, locale) or "服务内部错误，请稍后重试"
+            detail = str(error or "")
+            retryable = False
+        return {
+            "code": numeric,
+            "msg": msg,
+            "error": detail,
+            "message": detail,
+            "retryable": retryable,
+        }
 
     def _build_model_error_event_data(
             self,
@@ -1035,8 +1093,9 @@ class AgentRunService:
             "model_config_id": model_config_id,
             "label": label,
             "conversation_id": conversation_id,
-            "error": error,
-            "timestamp": timestamp if timestamp is not None else time.time()
+            **self._compare_error_fields(error),
+            "timestamp": timestamp if timestamp is not None else time.time(),
+            "time": now_ms(),
         }
 
     def _build_model_end_event_data(
@@ -1070,10 +1129,11 @@ class AgentRunService:
             "suggested_questions": suggested_questions or [],
             "status": status,
             "message_id": message_id,
-            "timestamp": time.time()
+            "timestamp": time.time(),
+            "time": now_ms(),
         }
-        if error is not None:
-            data["error"] = error
+        if status == "failed" or error is not None:
+            data.update(self._compare_error_fields(error))
         return data
 
     async def _check_annotation_match(self, app_id: uuid.UUID, message: str,
@@ -2975,7 +3035,14 @@ class AgentRunService:
             debug_id = self._build_debug_id()
             public_error = classify_multimodal_exception(e, debug_id=debug_id)
             if public_error is not None:
-                compact_error = public_error
+                compact_error = {
+                    **public_error,
+                    "msg": public_error["message"],
+                    "error": format_diagnostics(
+                        trace_id=get_trace_id() or None,
+                        detail=f"{type(e).__name__}: {e}",
+                    ),
+                }
                 logger.error(
                     "流式 Agent 多模态输入失败（已安全处理）",
                     extra={
@@ -3616,14 +3683,20 @@ class AgentRunService:
             tenant_id: Optional[uuid.UUID] = None,
             workspace_id: Optional[uuid.UUID] = None,
     ) -> Optional[str]:
-        """Register file metadata and return audio_url first; stream the audio content to storage in the background."""
+        """Register a pending record and return audio_url first; stream the audio content to storage in the background."""
         tts_config = features_config.get("text_to_speech", {})
         if not isinstance(tts_config, dict) or not tts_config.get("enabled"):
             return None
         if not text or not text.strip():
             return None
+        if tenant_id is None:
+            raise BusinessException(
+                "tenant context is required to register the TTS output",
+                BizCode.BAD_REQUEST,
+            )
 
-        from .file_storage_service import FileStorageService, generate_file_key
+        from ..integrations.file_service import get_file_service_client
+        from .file_storage_service import FileStorageService
 
         provider = api_key_config.get("provider", "openai")
         api_key = api_key_config.get("api_key")
@@ -3635,24 +3708,30 @@ class AgentRunService:
             isinstance(api_base, str) and "dashscope.aliyuncs.com" in api_base
         )
 
-        file_id = uuid.uuid4()
-        file_key = generate_file_key(tenant_id, workspace_id, file_id, file_ext)
-
-        # Write pending-status metadata first and return the URL immediately
-        await self._create_tts_file_metadata_async(
-            file_id=file_id,
-            tenant_id=tenant_id,
-            workspace_id=workspace_id,
-            file_key=file_key,
-            file_name=f"tts_{file_id}{file_ext}",
-            file_ext=file_ext,
-            content_type=content_type,
-        )
+        file_client = get_file_service_client()
+        try:
+            pending = await file_client.create_pending(
+                tenant_id=tenant_id,
+                workspace_id=workspace_id,
+                actor_id=None,
+                file_name=f"tts_{uuid.uuid4()}{file_ext}",
+                file_ext=file_ext,
+                content_type=content_type,
+            )
+        except BusinessException as e:
+            # TTS is optional: the file service is an independent failure domain,
+            # so a bookkeeping failure must not break the chat turn (same skip
+            # semantics as multi_agent_orchestrator TTS setup).
+            logger.warning(f"TTS 初始化失败（已跳过）: {e}")
+            return None
+        file_id = uuid.UUID(pending.file_id)
+        file_ext = pending.file_ext or file_ext
+        file_key = pending.file_key
 
         server_url = current_settings().file_local_server_url
-        audio_url = f"{server_url}/storage/permanent/{file_id}"
+        audio_url = f"{server_url}/storage/permanent/{pending.file_id}"
 
-        # Background task: stream-generate and write to storage, then update the status
+        # Background task: stream-generate and write to storage, then mark the record completed
         async def _stream_to_storage():
             try:
                 storage_service = FileStorageService()
@@ -3680,18 +3759,25 @@ class AgentRunService:
                     content_type=content_type,
                 )
 
-                await self._update_tts_file_metadata_async(
-                    file_id=file_id,
-                    status="completed",
-                    file_size=total_size,
+                await file_client.complete(
+                    tenant_id=tenant_id,
+                    workspace_id=workspace_id,
+                    actor_id=None,
+                    file_id=pending.file_id,
+                    size=total_size,
                 )
                 logger.debug(f"TTS 流式写入完成，provider={provider}, file_key={file_key}")
             except Exception as e:
                 logger.warning(f"TTS 流式写入失败: {e}")
-                await self._update_tts_file_metadata_async(
-                    file_id=file_id,
-                    status="failed",
-                )
+                try:
+                    await file_client.fail(
+                        tenant_id=tenant_id,
+                        workspace_id=workspace_id,
+                        actor_id=None,
+                        file_id=pending.file_id,
+                    )
+                except Exception as fail_exc:
+                    logger.warning(f"TTS 文件状态更新失败: {fail_exc}")
 
         asyncio.create_task(_stream_to_storage())
         return audio_url
@@ -3713,8 +3799,14 @@ class AgentRunService:
         tts_config = features_config.get("text_to_speech", {})
         if not isinstance(tts_config, dict) or not tts_config.get("enabled"):
             return None, None
+        if tenant_id is None:
+            raise BusinessException(
+                "tenant context is required to register the TTS output",
+                BizCode.BAD_REQUEST,
+            )
 
-        from .file_storage_service import FileStorageService, generate_file_key
+        from ..integrations.file_service import get_file_service_client
+        from .file_storage_service import FileStorageService
 
         provider = api_key_config.get("provider", "openai")
         api_key = api_key_config.get("api_key")
@@ -3726,21 +3818,28 @@ class AgentRunService:
             isinstance(api_base, str) and "dashscope.aliyuncs.com" in api_base
         )
 
-        file_id = uuid.uuid4()
-        file_key = generate_file_key(tenant_id, workspace_id, file_id, file_ext)
-
-        await self._create_tts_file_metadata_async(
-            file_id=file_id,
-            tenant_id=tenant_id,
-            workspace_id=workspace_id,
-            file_key=file_key,
-            file_name=f"tts_{file_id}{file_ext}",
-            file_ext=file_ext,
-            content_type=content_type,
-        )
+        file_client = get_file_service_client()
+        try:
+            pending = await file_client.create_pending(
+                tenant_id=tenant_id,
+                workspace_id=workspace_id,
+                actor_id=None,
+                file_name=f"tts_{uuid.uuid4()}{file_ext}",
+                file_ext=file_ext,
+                content_type=content_type,
+            )
+        except BusinessException as e:
+            # TTS is optional: the file service is an independent failure domain,
+            # so a bookkeeping failure must not break the chat turn (same skip
+            # semantics as multi_agent_orchestrator TTS setup).
+            logger.warning(f"TTS 初始化失败（已跳过）: {e}")
+            return None, None
+        file_id = uuid.UUID(pending.file_id)
+        file_ext = pending.file_ext or file_ext
+        file_key = pending.file_key
 
         server_url = current_settings().file_local_server_url
-        audio_url = f"{server_url}/storage/permanent/{file_id}"
+        audio_url = f"{server_url}/storage/permanent/{pending.file_id}"
 
         async def _run():
             try:
@@ -3767,18 +3866,25 @@ class AgentRunService:
                     stream=audio_stream,
                     content_type=content_type,
                 )
-                await self._update_tts_file_metadata_async(
-                    file_id=file_id,
-                    status="completed",
-                    file_size=total_size,
+                await file_client.complete(
+                    tenant_id=tenant_id,
+                    workspace_id=workspace_id,
+                    actor_id=None,
+                    file_id=pending.file_id,
+                    size=total_size,
                 )
                 logger.debug(f"TTS 流式合成完成，provider={provider}, file_key={file_key}")
             except Exception as e:
                 logger.warning(f"TTS 流式合成失败: {e}")
-                await self._update_tts_file_metadata_async(
-                    file_id=file_id,
-                    status="failed",
-                )
+                try:
+                    await file_client.fail(
+                        tenant_id=tenant_id,
+                        workspace_id=workspace_id,
+                        actor_id=None,
+                        file_id=pending.file_id,
+                    )
+                except Exception as fail_exc:
+                    logger.warning(f"TTS 文件状态更新失败: {fail_exc}")
 
         task = asyncio.create_task(_run())
         return audio_url, task
@@ -4553,11 +4659,10 @@ class AgentRunService:
 
             except TimeoutError:
                 logger.warning(f"模型运行超时: {model_label}")
-                compact_error = {
-                    "message": f"执行超时（{timeout}秒）",
-                    "type": "TimeoutError",
-                    "debug_id": self._build_debug_id(),
-                }
+                compact_error = self._build_compact_error(
+                    TimeoutError(f"执行超时（{timeout}秒）"),
+                    fallback_code=BizCode.LLM_ERROR,
+                )
                 result = {
                     "model_config_id": model_info["model_config_id"],
                     "model_name": model_info["model_config"].name,
@@ -4783,7 +4888,7 @@ class AgentRunService:
                         logger.exception("Failed to enqueue compare model save for %s", r.get("label"))
 
         # Send the compare completion event (format modeled on run_compare's return)
-        yield self._format_sse_event("compare_end", {
+        compare_end_data: Dict[str, Any] = {
             "conversation_id": conversation_id,
             "results": results_summary,  # contains full results
             "total_elapsed_time": sum(r.get("elapsed_time", 0) for r in results),
@@ -4791,8 +4896,26 @@ class AgentRunService:
             "failed_count": len(failed),
             "fastest_model": fastest["label"] if fastest else None,
             "cheapest_model": cheapest["label"] if cheapest else None,
-            "timestamp": time.time()
-        })
+            "status": "completed" if successful else "failed",
+            "timestamp": time.time(),
+            "time": now_ms(),
+        }
+        if failed and not successful:
+            # When every model failed, mirror the unified error fields so
+            # clients can treat compare_end like any other error frame.
+            first_error = failed[0].get("error")
+            error_fields = first_error if isinstance(first_error, dict) else {}
+            numeric = coerce_code(error_fields.get("code"))
+            if numeric in (None, BizCode.OK.value):
+                numeric = BizCode.INTERNAL_ERROR.value
+            compare_end_data.update({
+                "code": numeric,
+                "msg": error_fields.get("msg") or error_fields.get("message")
+                or user_message(numeric, get_current_locale()),
+                "error": error_fields.get("error") or str(error_fields.get("message") or ""),
+                "retryable": bool(error_fields.get("retryable", False)),
+            })
+        yield self._format_sse_event("compare_end", compare_end_data)
 
         logger.info(
             "多模型对比流式完成",

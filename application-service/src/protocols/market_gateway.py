@@ -146,6 +146,38 @@ class MarketGateway(Protocol):
         actor_id: str,
     ) -> None: ...
 
+    # Sync spellings of the file faces. The enterprise submission and install
+    # services call them directly (the transport is a blocking httpx client);
+    # the async names above stay the protocol face used by core callers.
+    def fetch_bundle(
+        self,
+        *,
+        tenant_id: str,
+        resource_type: str,
+        resource_id: str,
+        version: str,
+        context: InstallContext = "top_level",
+    ) -> dict[str, Any]: ...
+
+    def upload_market_file(
+        self,
+        *,
+        tenant_id: str,
+        actor_id: str,
+        content: bytes,
+        filename: str = "file",
+    ) -> dict[str, Any]: ...
+
+    def fetch_bundle_files(
+        self,
+        *,
+        tenant_id: str,
+        resource_type: str,
+        resource_id: str,
+        version: str,
+        context: InstallContext = "top_level",
+    ) -> bytes: ...
+
 
 def _disabled() -> None:
     raise ExternalCatalogError(
@@ -190,5 +222,37 @@ class DisabledMarketGateway:
         local_resource_id: str,
         tenant_id: str,
         actor_id: str,
+    ):
+        _disabled()
+
+    def fetch_bundle(
+        self,
+        *,
+        tenant_id: str,
+        resource_type: str,
+        resource_id: str,
+        version: str,
+        context: InstallContext = "top_level",
+    ):
+        _disabled()
+
+    def upload_market_file(
+        self,
+        *,
+        tenant_id: str,
+        actor_id: str,
+        content: bytes,
+        filename: str = "file",
+    ):
+        _disabled()
+
+    def fetch_bundle_files(
+        self,
+        *,
+        tenant_id: str,
+        resource_type: str,
+        resource_id: str,
+        version: str,
+        context: InstallContext = "top_level",
     ):
         _disabled()

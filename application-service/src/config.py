@@ -191,6 +191,22 @@ class AppServiceSettings(BaseSettings):
     # their own events; set explicitly only when those deployments share a
     # database name as well.
     model_usage_stream: str = Field(default="", validation_alias="MODEL_USAGE_STREAM")
+    # Celery broker/result storage. Empty URLs fall back to Redis DB 3 (broker)
+    # and DB 4 (backend) - the same databases the monolith uses, so both sides
+    # of the handover share one broker. CELERY_BROKER_URL /
+    # CELERY_RESULT_BACKEND accept full URLs (e.g. amqp://...) as overrides.
+    # Never use BROKER_URL / RESULT_BACKEND / CELERY_BROKER / CELERY_BACKEND:
+    # those names are hijacked by the Celery CLI.
+    celery_broker_url: str = Field(default="", validation_alias="CELERY_BROKER_URL")
+    celery_result_backend: str = Field(
+        default="", validation_alias="CELERY_RESULT_BACKEND"
+    )
+    celery_broker_db: int = Field(
+        default=3, ge=0, validation_alias="REDIS_DB_CELERY_BROKER"
+    )
+    celery_result_db: int = Field(
+        default=4, ge=0, validation_alias="REDIS_DB_CELERY_BACKEND"
+    )
 
     # Application service environment variables
     application_service_host: str = Field(
@@ -241,9 +257,14 @@ class AppServiceSettings(BaseSettings):
         validation_alias="APPLICATION_SERVICE_REDIS_POOL_SIZE",
     )
     application_service_health_probe_timeout_seconds: float = Field(
-        default=3.0,
+        default=1.0,
         gt=0,
         validation_alias="APPLICATION_SERVICE_HEALTH_PROBE_TIMEOUT_SECONDS",
+    )
+    application_service_chat_db_acquire_timeout_seconds: float = Field(
+        default=3.0,
+        gt=0,
+        validation_alias="APPLICATION_SERVICE_CHAT_DB_ACQUIRE_TIMEOUT_SECONDS",
     )
     # Key namespace of this service's own Redis entries (the instance is shared
     # with the monolith's Celery broker and cache during the coexistence period).
@@ -354,6 +375,17 @@ class AppServiceSettings(BaseSettings):
         default=1048576,
         gt=0,
         validation_alias="MARKET_OPERATOR_IMPORT_CONTENT_MAX_TOTAL_BYTES",
+    )
+    # Independent file service (core/file-service) internal API. An empty base
+    # URL or service token fails the upload paths closed at call time; the
+    # dependency is runtime-only, so startup is not gated on it.
+    file_service_base_url: str = Field(
+        default="",
+        validation_alias="FILE_SERVICE_BASE_URL",
+    )
+    file_service_internal_token: SecretStr = Field(
+        default=SecretStr(""),
+        validation_alias="FILE_SERVICE_INTERNAL_TOKEN",
     )
     # Operator MCP availability probes (interface doc §8.8): loopback, link-local,
     # metadata and unspecified targets are always rejected; private ranges are
@@ -779,6 +811,18 @@ class AppServiceSettings(BaseSettings):
     @property
     def redis_url(self) -> str:
         return self.redis_url_for_db(self.redis_db)
+
+    @property
+    def celery_broker(self) -> str:
+        return self.celery_broker_url.strip() or self.redis_url_for_db(
+            self.celery_broker_db
+        )
+
+    @property
+    def celery_result_backend_url(self) -> str:
+        return self.celery_result_backend.strip() or self.redis_url_for_db(
+            self.celery_result_db
+        )
 
     def _deployment_scoped_name(self, explicit: str, base: str, env_name: str) -> str:
         """Resolve a deployment-scoped Redis name from an override or DB_NAME."""

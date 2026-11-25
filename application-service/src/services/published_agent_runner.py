@@ -295,7 +295,10 @@ class PublishedAgentRunner:
                     ):
                         continue
                     if event["type"] == "error":
-                        error = event["data"].get("error")
+                        # Unified error frames carry the user-facing text in msg;
+                        # error is diagnostics. Legacy frames fall back to error.
+                        data = event["data"] if isinstance(event["data"], dict) else {}
+                        error = data.get("msg") or data.get("error")
                         if isinstance(error, dict):
                             error = error.get("message") or json.dumps(error, ensure_ascii=False)
                         raise BusinessException(str(error or "引用 Agent 执行失败"), BizCode.INTERNAL_ERROR)

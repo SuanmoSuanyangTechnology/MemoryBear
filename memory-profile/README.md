@@ -7,8 +7,8 @@ Independent, internal-only service hosting Memory domain modules. Routes are com
 - Read modules keep HTTP adaptation in `modules`, business reads in `services`, SQL in `repositories`, and response fields/enums in `schemas`. Strict reads reuse `EndUserService.require_in_workspace`; SQL composes the shared predicates in `repositories/end_user.py`. Combined display reads check the user once before loading each source. Cached implicit profile sections remain extensible JSON; display records and perceptual envelopes use explicit models. Preference date comparisons use UTC for both numeric and ISO timestamps, and engine presentation is checked against the API's current ten event types in both languages.
 - This service accesses shared PostgreSQL tables through mappings declared in `src/models/references/`, plus Neo4j, Redis, and Elasticsearch. It does not import `api` or `app` code.
 - Reads are the default: the repositories listed in `scripts/check_import_boundaries.py` are `select`-only, and the AST check enforces it. It is a per-repository convention, not a connection-level read-only setting.
-- Writes live in repositories. `memory_config_mutation.py` owns configuration changes; `memory_storage.py` owns memory deletion, audit and Outbox writes plus user state/count updates. Cached text generation remains delegated to memory-jobs.
-- LLM and embedding calls go to the model service over its invoke face, using a `model_configs` row and tenant. Dedicated classifier/pruning endpoints in the extraction engine and the Scene continuity BERT probe use their configured URLs and API keys directly. Credentials are never logged or echoed in error bodies.
+- Writes live in repositories. `src/repositories/memory_config_mutation.py` owns memory-config changes; `src/repositories/memory_storage.py` owns memory deletion, audit and Outbox writes plus user state/count updates. Cached text generation remains delegated to memory-jobs.
+- LLM and embedding calls go to the model service over its invoke face, which resolves credentials, channels, and failover from a `model_configs` row and its tenant. Dedicated classifier/pruning endpoints in the extraction engine, Scene continuity and emotion reply classifiers use their configured URLs and credentials directly. Credentials are never logged or echoed in error bodies.
 - PostgreSQL, Neo4j, Redis, Elasticsearch, and the model-service client each have a dedicated lifecycle manager under `src/infrastructure/`; `src/runtime.py` only composes, probes, and closes them. The model service is not part of readiness: only generation endpoints need it.
 - `src/common/redis_cache.py` provides shared JSON helpers, zset JSON reads, exact/prefix/pattern invalidation, and the async `@redis_cache` cache-aside decorator. It reuses the existing `ProfileRuntime.redis` provider and does not add cache state to runtime.
 - `src/services/` holds the cross-module services other modules call; their repositories live under `src/repositories/`. `EndUserService` owns the end-user rules: is this end user addressable from the caller's workspace? It exposes `exists_in_workspace()` for a strict one-lookup membership answer (no merge branch, no payload columns), `resolve_in_workspace()` for the merge-aware identity used by profile, summary and graph endpoints, and `active_end_user_ids()` for the batch target set; both require the user and the workspace to be active and collapse malformed/foreign/missing ids to `False`/`None`. `ModelConfigService` owns model resolution for every workspace slot (`llm`, `embedding`, `rerank`, `vision`, `audio`, `video`): workspace → active `memory_config` → preset/slot column → `model_configs` tenant/active check, with typed calls (`chat_model_for_workspace`, `embed_texts_for_workspace`, `rerank_for_workspace`) and `WorkspaceModelMemo` making the LLM a once-per-request lookup shared by every user in a batch. `WorkspaceService` owns the one workspace row (`row()`): identity, active/storage flags and all six model columns, so validation and model resolution read it once per request. Profile, interest distribution, graph and cache generation all go through these services, so neither the workspace boundary nor the model choice can drift between endpoints. The boundary predicates and the narrow-read template live in `src/repositories/end_user.py` (`active_user_in_workspace`, `active_users_in_workspace`, `scoped_end_user_select`, `active_workspace_exists`); the access repository, the profile reads and the generation writes all compose them instead of repeating the conditions.
@@ -147,6 +147,13 @@ reachable routes and their parameter contract are mirrored in
 `src/external_api_contract.json`. This README does not duplicate that list.
 
 Required direct-mode headers are `x-tenant-id`, `x-workspace-id`, `x-source`, and the acting id — whose header the face decides: `ex_api` carries the key that authenticated as `x-api-key-id`, and every other face carries the user as `x-user-id`. Both terminators follow that rule (the Gateway when it terminates an API key, the API's own proxy on its `/v1` route), so an `ex_api` request resolves to one principal whichever hop terminated it, and the acting id is never a key id on one path and a creator's user id on another. The request log records which of the two it got, as `actor_kind` (`apikey` or `actor`), so a key id is never read as an actor. `X-Trace-Id` is optional; all identity IDs must be UUIDs. In gateway mode the actor, tenant, workspace, and authenticated face come from verified token claims (the claim keeps its own `api_key` / absent spelling and is mapped onto `ex_api` / `in_api`); conflicting request headers are ignored.
+
+Emotion reply uses the trusted API proxy channel. Route its public face through
+the API to verify the API key type, workspace binding, and tenant context.
+With `MEMORY_ENTERPRISE_BASE_URL` and `INTERNAL_ISSUER_PRIVATE_KEY` configured,
+memory-profile sends the emotion code to memory-enterprise after BERT classification.
+The identity ACL must allow the memory-profile issuer to call
+`GET /internal/v1/ontology/default-emotion-policies/*` on `mem-enterprise`.
 
 The legacy response envelope is exactly:
 
@@ -369,8 +376,11 @@ Quota limits are owned by this service: the community free plan comes from
 `QUOTA_PRE_USER_MEMORY_WRITE_QPS_LIMIT` (same names as the API). When
 `MEMORY_ENTERPRISE_BASE_URL` points at the closed-source `memory-enterprise`
 service, the effective plan and resource-pack grants are queried over HTTP with
-`X-Internal-Token: MEMORY_ENTERPRISE_TOKEN`; an unconfigured or unreachable
-service falls back to the free plan.
+a service-to-service internal JWT (`iss=memory-profile`,
+`aud=MEMORY_ENTERPRISE_AUDIENCE`) signed by the shared
+`INTERNAL_ISSUER_PRIVATE_KEY`; the target verifies it through identity's JWKS
+and its caller ACL. An unconfigured or unreachable service falls back to the
+free plan.
 
 This service must use the same Redis logical DB as the API (the shared
 deployment uses `REDIS_DB=3`) so keys written by API workers stay visible.
@@ -404,6 +414,30 @@ and `locales/en/memory.json` catalogs. API forwarding failures and API-key
 prechecks use the API's existing `app.i18n` translation service. Business codes,
 HTTP statuses, data payloads and technical exception details retain their
 existing behavior; an intentionally empty cached-profile error stays empty.
+
+## Reflection configuration preview
+
+`GET /api/memory/reflection/run?config_id=...` forwards to
+`GET /internal/v1/memory/reflection/run`. This management endpoint is not added
+to the API-key contract. The API retains authentication and waits up to 600
+seconds for the preview; there is no local fallback or memory-jobs task.
+
+`modules/reflection` adapts HTTP, and `services/memory_config_trial/reflection.py`
+owns the preview. It uses packaged sample data and prompts, calls model-service
+through `ProfileChatModel`, and never reads or writes live memory in Neo4j.
+The read repository scopes configuration access to the active workspace and its
+tenant. This endpoint alone retains legacy integer `config_id_old` compatibility;
+the existing memory-config endpoints remain UUID-only.
+
+Model selection retains the literal `workspace.llm` value, even when previewing
+an inactive configuration. It does not use `reflection_model_id`, the active
+config pointer, or a model preset. Missing, inaccessible or disabled models
+produce HTTP 500; the legacy code's documented default-model fallback was not
+implemented by its invoke client. Detection/resolution failures retain the
+legacy HTTP 200 envelope with `data.success=false`; missing or out-of-scope
+configurations return HTTP 404. English output now retains `baseline`, nullable
+assessment results can be translated safely, and failure duration uses one
+monotonic clock.
 
 ## Scene community graph
 

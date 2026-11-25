@@ -17,13 +17,22 @@ from src.models.references.memory_reembed_model import (
     MemoryReembedJobUserRow,
 )
 from src.models.references.conversation_model import Conversation
-from src.models.references.memory_statistics_model import ForgetAudit, MemoryMessage, MemoryPerceptual, ShortTermMemory
 from src.models.references.implicit_emotions_storage_model import ImplicitEmotionsStorage
+from src.models.references.memory_statistics_model import (
+    DialogueEmotionRaw,
+    ForgetAudit,
+    MemoryIncrement,
+    MemoryMessage,
+    MemoryPerceptual,
+    ShortTermMemory,
+)
 from src.models.references.ontology_scene_model import OntologySceneRow
 from src.models.references.workspace_model import Workspace
 
 __all__ = [
     "Conversation",
+    "DialogueEmotionRaw",
+    "MemoryIncrement",
     "EndUser",
     "EndUserInfo",
     "MemoryConfigRow",

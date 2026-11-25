@@ -1,6 +1,6 @@
 """FAQ 导入任务与持久进度；载荷不注册为知识库文件。"""
 
-from sqlalchemy import BigInteger, CheckConstraint, Column, DateTime, String, Text
+from sqlalchemy import BigInteger, CheckConstraint, Column, DateTime, Index, String, Text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 
 from ...db import KnowledgeBase
@@ -40,5 +40,8 @@ class WikiFAQImportJob(WikiScope, KnowledgeBase):
         CheckConstraint(
             "total_count > 0 AND processed_count >= 0 AND processed_count <= total_count",
             name="ck_faq_import_counts",
+        ),
+        Index(
+            "ix_wiki_faq_import_job_scope_status", "kb_id", "tenant_id", "workspace_id", "status"
         ),
     )

@@ -156,15 +156,27 @@ async def delete_share(
     share_id: uuid.UUID,
     principal: Principal,
 ) -> None:
-    share = await get_share(db, share_id, principal)
-    if share is None:
-        raise _not_found("KB_KNOWLEDGE_SHARE_NOT_FOUND")
-    await knowledge_repository.delete_knowledge_by_id_async(db, share.target_kb_id)
-    await share_repository.delete_knowledgeshare_by_id_in_source_workspace_async(
-        db,
-        share_id,
-        principal.workspace_id,
-    )
+    try:
+        share = await get_share(db, share_id, principal)
+        if share is None:
+            raise _not_found("KB_KNOWLEDGE_SHARE_NOT_FOUND")
+
+        target_kb_id = share.target_kb_id
+        await knowledge_repository.lock_share_source_async(db, share.source_kb_id)
+        deleted = await share_repository.delete_knowledgeshare_by_id_in_source_workspace_async(
+            db,
+            share.id,
+            principal.workspace_id,
+            commit=False,
+        )
+        if not deleted:
+            raise _not_found("KB_KNOWLEDGE_SHARE_NOT_FOUND")
+
+        # The target deletion commits both deletes together.
+        await knowledge_repository.delete_knowledge_by_id_async(db, target_kb_id)
+    except Exception:
+        await db.rollback()
+        raise
 
 
 async def create_or_reuse_share(

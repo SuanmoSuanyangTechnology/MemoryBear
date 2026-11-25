@@ -14,12 +14,15 @@ from __future__ import annotations
 import threading
 from typing import TYPE_CHECKING, Any
 
-from src.composition.registry import MODULES
+from src.composition.registry import get_modules
 from src.composition.shared import build_shared_dependencies
 from src.runtime import JobsRuntime, get_runtime
 
 if TYPE_CHECKING:
+    from src.composition.admission import AdmissionWiring
     from src.composition.interest import InterestWiring
+    from src.composition.metadata_migration import MetadataMigrationWiring
+    from src.composition.outbox import OutboxWiring
     from src.composition.profile_cache import ProfileCacheWiring
 
 
@@ -30,11 +33,14 @@ class Container:
         # Supplied by the registry at runtime; annotated so callers stay typed.
         profile_cache: ProfileCacheWiring
         interest: InterestWiring
+        admission: AdmissionWiring
+        outbox: OutboxWiring
+        metadata_migration: MetadataMigrationWiring
 
     def __init__(self, runtime: JobsRuntime) -> None:
         shared = build_shared_dependencies(runtime)
         self._facades: dict[str, Any] = {
-            module.name: module.build(runtime, shared) for module in MODULES
+            module.name: module.build(runtime, shared) for module in get_modules()
         }
         for name, facade in self._facades.items():
             setattr(self, name, facade)

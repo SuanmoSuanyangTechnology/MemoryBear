@@ -21,9 +21,17 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
+from src.composition.admission import build_admission_wiring
+from src.composition.emotion import build_emotion_wiring
+from src.composition.forgetting import build_forgetting_wiring
 from src.composition.interest import build_interest_wiring
+from src.composition.metadata_migration import build_metadata_migration_wiring
+from src.composition.outbox import build_outbox_wiring
 from src.composition.profile_cache import build_profile_cache_wiring
+from src.composition.rag_profile import build_rag_profile_wiring
 from src.composition.shared import SharedDependencies
+from src.composition.working_memory import build_working_memory_wiring
+from src.extensions import extension_domains, load_extensions
 from src.runtime import JobsRuntime
 
 
@@ -37,6 +45,26 @@ class DomainModule:
 
 
 MODULES: tuple[DomainModule, ...] = (
+    DomainModule(name="rag_profile", build=build_rag_profile_wiring),
+    DomainModule(name="emotion", build=build_emotion_wiring),
+    DomainModule(name="forgetting", build=build_forgetting_wiring),
+    DomainModule(name="working_memory", build=build_working_memory_wiring),
     DomainModule(name="profile_cache", build=build_profile_cache_wiring),
+    DomainModule(name="metadata_migration", build=build_metadata_migration_wiring),
     DomainModule(name="interest", build=build_interest_wiring),
+    DomainModule(name="admission", build=build_admission_wiring),
+    DomainModule(name="outbox", build=build_outbox_wiring),
 )
+
+
+def get_modules() -> tuple[DomainModule, ...]:
+    """The open-build domains followed by every configured extension domain.
+
+    Resolved when the container is built, not at import, so an extension module
+    may import the host composition root without re-entering this module.
+    """
+
+    return MODULES + tuple(
+        DomainModule(name=domain.name, build=domain.build)
+        for domain in extension_domains(load_extensions())
+    )

@@ -60,10 +60,10 @@ class EndUserInfo(ReadOnlyBase):
 
     id = Column(UUID(as_uuid=True), primary_key=True)
     end_user_id = Column(UUID(as_uuid=True), nullable=False)
-    #: Display columns the migrated ``GET /end_user/info`` returns and
-    #: ``POST /end_user/info/update`` updates; ``meta_data`` stays JSONB.
+    #: Display columns mirrored from the API-owned end_user_info table.
     other_name = Column(String, nullable=False)
     aliases = Column(ARRAY(String), nullable=True)
     meta_data = Column(JSONB, nullable=True)
+    meta_data_new = Column(JSONB, nullable=True)
     created_at = Column(DateTime, nullable=True)
     updated_at = Column(DateTime, nullable=True)

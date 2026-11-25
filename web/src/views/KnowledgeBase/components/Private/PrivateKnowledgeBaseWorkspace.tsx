@@ -190,6 +190,8 @@ const PrivateKnowledgeBaseWorkspace: FC<PrivateKnowledgeBaseWorkspaceProps> = ({
     setMode(nextMode);
   };
 
+  const resolvedFileContent = typeof fileContent === 'function' ? fileContent(openWikiPage) : fileContent;
+
   return (
     <Flex vertical className="rb:h-full rb:min-w-0 rb:overflow-hidden rb:rounded-xl rb:bg-white">
       <PrivateKnowledgeBaseHeader

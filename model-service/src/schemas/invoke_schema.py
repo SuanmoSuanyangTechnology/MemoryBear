@@ -214,8 +214,8 @@ class EmbeddingParams(BaseModel):
 
     - 文本模式（``input``）：纯文本批，旧口径零改动。
     - 结构化模式（``contents`` + ``purpose``）：文本/图片内容块；服务侧按模型能力选路
-      （qwen3-vl 走包内 EmbeddingRequest 单向量融合、volcano 多模态宽入）；维度固定
-      2048（包 contract），``dimensions`` 一律拒止（服务侧入参期）。
+      （qwen3-vl 与火山方舟融合内容块，Bedrock Nova 接收单个内容块）。
+      qwen3-vl 返回 2048 维，其余使用模型默认维度。服务端暂不接受 ``dimensions``。
     """
 
     model_config = ConfigDict(extra="forbid")
