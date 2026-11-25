@@ -353,7 +353,6 @@ async def _bulk_persist_messages(
 
     rows: list[dict[str, Any]] = []
     row_conv: dict[uuid_module.UUID, uuid_module.UUID] = {}
-    conv_titles: dict[uuid_module.UUID, str | None] = {}
 
     def _add_row(row: dict[str, Any], conv_id: uuid_module.UUID) -> None:
         rows.append(row)
@@ -395,7 +394,6 @@ async def _bulk_persist_messages(
                 status="failed", parent_message_id=user_msg_id if log_only else None,
                 created_at=args.get("finished_at"), is_current=not log_only,
             ), conv_id)
-            conv_titles[conv_id] = None
             continue
 
         # --- save_messages ---
@@ -480,11 +478,6 @@ async def _bulk_persist_messages(
                       status=args.get("assistant_status", "completed"),
                       parent_message_id=user_msg_id), conv_id)
 
-        conv_titles[conv_id] = (
-            user_content[:50] + ("..." if len(user_content) > 50 else "")
-            if user_content else None
-        )
-
     # --- dedupe rows within the batch (same task enqueued twice, or success +
     # failed tasks sharing one message pair) ---
     seen_ids: set[uuid_module.UUID] = set()
@@ -521,8 +514,18 @@ async def _bulk_persist_messages(
 
     # --- atomic UPDATE per conversation, counting only actually inserted rows ---
     actual_deltas: dict[uuid_module.UUID, int] = defaultdict(int)
-    for mid in inserted_ids:
-        actual_deltas[row_conv[mid]] += 1
+    conv_titles: dict[uuid_module.UUID, str] = {}
+    # Match the log's message ordering when multiple rows share a timestamp.
+    for row in sorted(unique_rows, key=lambda row: (row["created_at"], str(row["id"]))):
+        mid = _to_uuid(row["id"])
+        if mid not in inserted_ids:
+            continue
+        conv_id = row_conv[mid]
+        actual_deltas[conv_id] += 1
+        if row["role"] == "user" and conv_id not in conv_titles:
+            content = row["content"].strip()
+            if content:
+                conv_titles[conv_id] = content[:50] + ("..." if len(content) > 50 else "")
 
     for conv_id, delta in actual_deltas.items():
         if delta <= 0:
@@ -532,7 +535,12 @@ async def _bulk_persist_messages(
         }
         if conv_titles.get(conv_id):
             values["title"] = sa_case(
-                (Conversation.message_count <= 1, conv_titles[conv_id]),
+                (
+                    (Conversation.message_count <= 1)
+                    | Conversation.title.is_(None)
+                    | Conversation.title.in_(("", "New Conversation")),
+                    conv_titles[conv_id],
+                ),
                 else_=Conversation.title,
             )
         await db.execute(

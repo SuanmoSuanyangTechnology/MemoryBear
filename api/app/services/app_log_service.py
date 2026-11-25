@@ -4,7 +4,7 @@ import json
 import datetime as dt
 from typing import Optional, Tuple, Dict, Any
 
-from sqlalchemy import select
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 from app.core.utils.datetime_utils import utcnow_naive, to_timestamp_ms, parse_iso_to_utc_naive
@@ -48,11 +48,69 @@ def _public_resolved_kind(kind: str | None) -> str | None:
 class AppLogService:
     """应用日志服务"""
 
+    _WF_VISIBLE_STATUSES = ("completed", "failed", "waiting_human", "timeout", "cancelled")
+
     def __init__(self, db: Session):
         self.db = db
         self.conversation_repository = ConversationRepository(db)
         self.message_repository = MessageRepository(db)
         self.workflow_execution_repository = WorkflowExecutionRepository(db)
+
+    def build_conversation_summaries(
+        self, conversations: list[Conversation], app_type: str,
+    ) -> list[AppLogConversation]:
+        """Use the first visible user input for log titles, including historical rows."""
+        if not conversations:
+            return []
+
+        first_message = (
+            select(Message.content)
+            .where(
+                Message.conversation_id == Conversation.id,
+                Message.role == "user",
+                Message.is_deleted.is_not(True),
+                or_(
+                    Message.is_current.is_not(False),
+                    Message.meta_data["log_only"].as_string() == "true",
+                ),
+                Message.content.op("~")("[^[:space:]]"),
+            )
+            .order_by(Message.created_at.asc().nulls_last(), Message.id)
+            .limit(1)
+            .scalar_subquery()
+        )
+        title_source = first_message
+        if app_type in (AppType.WORKFLOW, AppType.PURE_WORKFLOW):
+            # Workflow logs can show inputs from executions before messages are persisted.
+            workflow_input = func.coalesce(*(
+                func.nullif(WorkflowExecution.input_data[key].as_string(), "")
+                for key in ("message", "text", "content", "output", "result", "answer")
+            ))
+            first_input = (
+                select(workflow_input)
+                .where(
+                    WorkflowExecution.conversation_id == Conversation.id,
+                    WorkflowExecution.status.in_(self._WF_VISIBLE_STATUSES),
+                    workflow_input.op("~")("[^[:space:]]"),
+                )
+                .order_by(WorkflowExecution.started_at, WorkflowExecution.id)
+                .limit(1)
+                .scalar_subquery()
+            )
+            title_source = func.coalesce(first_input, first_message)
+
+        ids = [conversation.id for conversation in conversations]
+        inputs = dict(self.db.execute(
+            select(Conversation.id, title_source).where(Conversation.id.in_(ids))
+        ).all())
+        items = []
+        for conversation in conversations:
+            item = AppLogConversation.model_validate(conversation)
+            content = (inputs.get(conversation.id) or "").strip()
+            if content:
+                item.title = content[:50] + ("..." if len(content) > 50 else "")
+            items.append(item)
+        return items
 
     def list_conversations(
         self,
@@ -396,7 +454,7 @@ class AppLogService:
             select(WorkflowExecution)
             .where(
                 WorkflowExecution.conversation_id == conversation_id,
-                WorkflowExecution.status.in_(["completed", "failed", "waiting_human", "timeout", "cancelled"])
+                WorkflowExecution.status.in_(self._WF_VISIBLE_STATUSES)
             )
             .order_by(WorkflowExecution.started_at.asc())
         )
