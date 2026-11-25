@@ -10,7 +10,7 @@ Column defaults mirror the API model. ORM reads return the stored values.
 
 from __future__ import annotations
 
-from sqlalchemy import JSON, Boolean, Column, DateTime, FetchedValue, Float, Integer, String, Text
+from sqlalchemy import Boolean, Column, DateTime, FetchedValue, Float, Integer, String, Text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 
 from src.models.base import ReadOnlyBase
@@ -136,7 +136,7 @@ class MemoryConfigRow(ReadOnlyBase):
     temporal_chain_rebuild_limit = Column(Integer, nullable=False, default=200)
 
     scene_label_vocabulary = Column(
-        JSON(none_as_null=True), nullable=True, server_default=FetchedValue()
+        JSONB(none_as_null=True), nullable=True, server_default=FetchedValue()
     )
 
     created_at = Column(DateTime, nullable=True)

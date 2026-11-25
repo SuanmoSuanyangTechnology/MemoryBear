@@ -4595,6 +4595,12 @@
                 ],
                 "default": null,
                 "required": true
+              },
+              "scene_label_vocabulary": {
+                "annotation": "list[str]",
+                "constraints": [],
+                "default": null,
+                "required": true
               }
             },
             "required": true
@@ -5953,6 +5959,12 @@
               ],
               "default": null,
               "required": true
+            },
+            "scene_label_vocabulary": {
+              "annotation": "list[str]",
+              "constraints": [],
+              "default": null,
+              "required": true
             }
           },
           "in": "body",
@@ -6052,6 +6064,12 @@
                   "Ge(ge=50)",
                   "Le(le=1000)"
                 ],
+                "default": null,
+                "required": true
+              },
+              "scene_label_vocabulary": {
+                "annotation": "list[str]",
+                "constraints": [],
                 "default": null,
                 "required": true
               }

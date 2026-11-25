@@ -1,6 +1,6 @@
 import datetime
 
-from sqlalchemy import JSON, Boolean, CheckConstraint, Column, DateTime, Float, Integer, String, Text, text
+from sqlalchemy import Boolean, CheckConstraint, Column, DateTime, Float, Integer, String, Text, text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 
 from app.db import Base
@@ -248,10 +248,10 @@ class MemoryConfig(Base):
     )
 
     scene_label_vocabulary = Column(
-        JSON(none_as_null=True),
+        JSONB(none_as_null=True),
         nullable=True,
         server_default=text(
-            """'["工作与职业","学习与技能","健康与照护","财务与资产","居住与日常事务","人际与亲密关系","休闲与个人体验","其他"]'::json"""
+            """'["工作与职业","学习与技能","健康与照护","财务与资产","居住与日常事务","人际与亲密关系","休闲与个人体验","其他"]'::jsonb"""
         ),
         comment="场景标签受控词表",
     )

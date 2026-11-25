@@ -92,7 +92,7 @@ class MemoryConfigMutationRepository:
                 MemoryConfigRow.config_id == config_id,
                 MemoryConfigRow.workspace_id == workspace_id,
             )
-            .values(**values)
+            .values(**values, updated_at=utcnow_naive())
             .returning(*SPATIOTEMPORAL_ANCHOR_COLUMNS)
         )
         async with self.postgres.session() as session:

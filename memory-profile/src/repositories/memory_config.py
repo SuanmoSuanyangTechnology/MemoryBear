@@ -91,6 +91,7 @@ SPATIOTEMPORAL_ANCHOR_COLUMNS = (
         "temporal_chain_enabled",
         "temporal_chain_interval_minutes",
         "temporal_chain_rebuild_limit",
+        "scene_label_vocabulary",
     ),
 )
 EXTRACTED_COLUMNS = _columns(
