@@ -4489,6 +4489,139 @@
         "status_code": 200
       }
     },
+    "GET /internal/v1/memory_config/read_config_spatiotemporal_anchor": {
+      "endpoint": "read_config_spatiotemporal_anchor",
+      "parameters": {
+        "query:config_id": {
+          "annotation": "uuid.UUID",
+          "constraints": [],
+          "default": null,
+          "in": "query",
+          "required": true
+        }
+      },
+      "response": {
+        "declared": [],
+        "fields": {
+          "code": {
+            "annotation": "int",
+            "constraints": [],
+            "default": 0,
+            "required": false
+          },
+          "data": {
+            "annotation": "src.schemas.spatiotemporal_anchor_config.SpatiotemporalAnchorData",
+            "constraints": [],
+            "default": null,
+            "fields": {
+              "config_id": {
+                "annotation": "uuid.UUID",
+                "constraints": [],
+                "default": null,
+                "required": true
+              },
+              "is_default": {
+                "annotation": "bool",
+                "constraints": [],
+                "default": null,
+                "required": true
+              },
+              "scene_merge_window_minutes": {
+                "annotation": "int",
+                "constraints": [
+                  "Strict(strict=True)",
+                  "Ge(ge=30)",
+                  "Le(le=1440)"
+                ],
+                "default": null,
+                "required": true
+              },
+              "spatiotemporal_auto_extract": {
+                "annotation": "bool",
+                "constraints": [
+                  "Strict(strict=True)"
+                ],
+                "default": null,
+                "required": true
+              },
+              "spatiotemporal_enabled": {
+                "annotation": "bool",
+                "constraints": [
+                  "Strict(strict=True)"
+                ],
+                "default": null,
+                "required": true
+              },
+              "scene_location_normalize_enabled": {
+                "annotation": "bool",
+                "constraints": [
+                  "Strict(strict=True)"
+                ],
+                "default": null,
+                "required": true
+              },
+              "geo_coordinate_enabled": {
+                "annotation": "bool",
+                "constraints": [
+                  "Strict(strict=True)"
+                ],
+                "default": null,
+                "required": true
+              },
+              "temporal_chain_enabled": {
+                "annotation": "bool",
+                "constraints": [
+                  "Strict(strict=True)"
+                ],
+                "default": null,
+                "required": true
+              },
+              "temporal_chain_interval_minutes": {
+                "annotation": "int",
+                "constraints": [
+                  "Strict(strict=True)",
+                  "Ge(ge=15)",
+                  "Le(le=1440)"
+                ],
+                "default": null,
+                "required": true
+              },
+              "temporal_chain_rebuild_limit": {
+                "annotation": "int",
+                "constraints": [
+                  "Strict(strict=True)",
+                  "Ge(ge=50)",
+                  "Le(le=1000)"
+                ],
+                "default": null,
+                "required": true
+              }
+            },
+            "required": true
+          },
+          "error": {
+            "annotation": "str",
+            "constraints": [],
+            "default": "",
+            "required": false
+          },
+          "msg": {
+            "annotation": "str",
+            "constraints": [],
+            "default": "OK",
+            "required": false
+          },
+          "time": {
+            "annotation": "int",
+            "constraints": [],
+            "default": "<factory:now_ms#5bec5d10ddf5>",
+            "required": false
+          }
+        },
+        "model": "src.common.responses.ApiResponse[SpatiotemporalAnchorData]",
+        "status_code": 200
+      }
+    },
     "GET /internal/v1/memory_config/read_config_personality_anchor": {
       "endpoint": "read_config_personality_anchor",
       "parameters": {
@@ -5731,6 +5864,220 @@
           }
         },
         "model": "src.common.responses.ApiResponse[ConfigCreateResult]",
+        "status_code": 200
+      }
+    },
+    "POST /internal/v1/memory_config/update_config_spatiotemporal_anchor": {
+      "endpoint": "update_config_spatiotemporal_anchor",
+      "parameters": {
+        "body:body": {
+          "annotation": "src.schemas.spatiotemporal_anchor_config.SpatiotemporalAnchorUpdate",
+          "config": {
+            "extra": "forbid"
+          },
+          "constraints": [],
+          "default": null,
+          "fields": {
+            "config_id": {
+              "annotation": "uuid.UUID",
+              "constraints": [],
+              "default": null,
+              "required": true
+            },
+            "scene_merge_window_minutes": {
+              "annotation": "int",
+              "constraints": [
+                "Strict(strict=True)",
+                "Ge(ge=30)",
+                "Le(le=1440)"
+              ],
+              "default": null,
+              "required": true
+            },
+            "spatiotemporal_auto_extract": {
+              "annotation": "bool",
+              "constraints": [
+                "Strict(strict=True)"
+              ],
+              "default": null,
+              "required": true
+            },
+            "spatiotemporal_enabled": {
+              "annotation": "bool",
+              "constraints": [
+                "Strict(strict=True)"
+              ],
+              "default": null,
+              "required": true
+            },
+            "scene_location_normalize_enabled": {
+              "annotation": "bool",
+              "constraints": [
+                "Strict(strict=True)"
+              ],
+              "default": null,
+              "required": true
+            },
+            "geo_coordinate_enabled": {
+              "annotation": "bool",
+              "constraints": [
+                "Strict(strict=True)"
+              ],
+              "default": null,
+              "required": true
+            },
+            "temporal_chain_enabled": {
+              "annotation": "bool",
+              "constraints": [
+                "Strict(strict=True)"
+              ],
+              "default": null,
+              "required": true
+            },
+            "temporal_chain_interval_minutes": {
+              "annotation": "int",
+              "constraints": [
+                "Strict(strict=True)",
+                "Ge(ge=15)",
+                "Le(le=1440)"
+              ],
+              "default": null,
+              "required": true
+            },
+            "temporal_chain_rebuild_limit": {
+              "annotation": "int",
+              "constraints": [
+                "Strict(strict=True)",
+                "Ge(ge=50)",
+                "Le(le=1000)"
+              ],
+              "default": null,
+              "required": true
+            }
+          },
+          "in": "body",
+          "required": true
+        }
+      },
+      "response": {
+        "declared": [],
+        "fields": {
+          "code": {
+            "annotation": "int",
+            "constraints": [],
+            "default": 0,
+            "required": false
+          },
+          "data": {
+            "annotation": "src.schemas.spatiotemporal_anchor_config.SpatiotemporalAnchorData",
+            "constraints": [],
+            "default": null,
+            "fields": {
+              "config_id": {
+                "annotation": "uuid.UUID",
+                "constraints": [],
+                "default": null,
+                "required": true
+              },
+              "is_default": {
+                "annotation": "bool",
+                "constraints": [],
+                "default": null,
+                "required": true
+              },
+              "scene_merge_window_minutes": {
+                "annotation": "int",
+                "constraints": [
+                  "Strict(strict=True)",
+                  "Ge(ge=30)",
+                  "Le(le=1440)"
+                ],
+                "default": null,
+                "required": true
+              },
+              "spatiotemporal_auto_extract": {
+                "annotation": "bool",
+                "constraints": [
+                  "Strict(strict=True)"
+                ],
+                "default": null,
+                "required": true
+              },
+              "spatiotemporal_enabled": {
+                "annotation": "bool",
+                "constraints": [
+                  "Strict(strict=True)"
+                ],
+                "default": null,
+                "required": true
+              },
+              "scene_location_normalize_enabled": {
+                "annotation": "bool",
+                "constraints": [
+                  "Strict(strict=True)"
+                ],
+                "default": null,
+                "required": true
+              },
+              "geo_coordinate_enabled": {
+                "annotation": "bool",
+                "constraints": [
+                  "Strict(strict=True)"
+                ],
+                "default": null,
+                "required": true
+              },
+              "temporal_chain_enabled": {
+                "annotation": "bool",
+                "constraints": [
+                  "Strict(strict=True)"
+                ],
+                "default": null,
+                "required": true
+              },
+              "temporal_chain_interval_minutes": {
+                "annotation": "int",
+                "constraints": [
+                  "Strict(strict=True)",
+                  "Ge(ge=15)",
+                  "Le(le=1440)"
+                ],
+                "default": null,
+                "required": true
+              },
+              "temporal_chain_rebuild_limit": {
+                "annotation": "int",
+                "constraints": [
+                  "Strict(strict=True)",
+                  "Ge(ge=50)",
+                  "Le(le=1000)"
+                ],
+                "default": null,
+                "required": true
+              }
+            },
+            "required": true
+          },
+          "error": {
+            "annotation": "str",
+            "constraints": [],
+            "default": "",
+            "required": false
+          },
+          "msg": {
+            "annotation": "str",
+            "constraints": [],
+            "default": "OK",
+            "required": false
+          },
+          "time": {
+            "annotation": "int",
+            "constraints": [],
+            "default": "<factory:now_ms#5bec5d10ddf5>",
+            "required": false
+          }
+        },
+        "model": "src.common.responses.ApiResponse[SpatiotemporalAnchorData]",
         "status_code": 200
       }
     },

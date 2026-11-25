@@ -1,6 +1,6 @@
 import datetime
 
-from sqlalchemy import Boolean, CheckConstraint, Column, DateTime, Float, Integer, String, Text, text
+from sqlalchemy import JSON, Boolean, CheckConstraint, Column, DateTime, Float, Integer, String, Text, text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 
 from app.db import Base
@@ -18,6 +18,18 @@ class MemoryConfig(Base):
         CheckConstraint(
             "char_length(personality_anchor_base_principles) <= 4000",
             name="ck_memory_config_personality_anchor_principles",
+        ),
+        CheckConstraint(
+            "scene_merge_window_minutes BETWEEN 30 AND 1440",
+            name="ck_memory_config_scene_merge_window",
+        ),
+        CheckConstraint(
+            "temporal_chain_interval_minutes BETWEEN 15 AND 1440",
+            name="ck_memory_config_temporal_chain_interval",
+        ),
+        CheckConstraint(
+            "temporal_chain_rebuild_limit BETWEEN 50 AND 1000",
+            name="ck_memory_config_temporal_chain_rebuild_limit",
         ),
     )
 
@@ -200,6 +212,42 @@ class MemoryConfig(Base):
         default="", server_default="",
         comment="人格基础身份与原则，最多4000字符，允许为空字符串",
     )
+
+    # 时空维度记忆锚定配置
+    spatiotemporal_enabled = Column(
+        Boolean, nullable=False, default=True, server_default=text("true"),
+        comment="是否启用时空锚定",
+    )
+    spatiotemporal_auto_extract = Column(
+        Boolean, nullable=False, default=True, server_default=text("true"),
+        comment="是否自动提取时空信息",
+    )
+    scene_merge_window_minutes = Column(
+        Integer, nullable=False, default=120, server_default="120",
+        comment="锚点归并时间窗（分钟）",
+    )
+    scene_location_normalize_enabled = Column(
+        Boolean, nullable=False, default=True, server_default=text("true"),
+        comment="是否归一化地点名称",
+    )
+    geo_coordinate_enabled = Column(
+        Boolean, nullable=False, default=False, server_default=text("false"),
+        comment="是否使用经纬度归并",
+    )
+    temporal_chain_enabled = Column(
+        Boolean, nullable=False, default=True, server_default=text("true"),
+        comment="是否维护时序链",
+    )
+    temporal_chain_interval_minutes = Column(
+        Integer, nullable=False, default=60, server_default="60",
+        comment="时序链重建周期（分钟）",
+    )
+    temporal_chain_rebuild_limit = Column(
+        Integer, nullable=False, default=200, server_default="200",
+        comment="单次重建锚点数上限",
+    )
+
+    scene_label_vocabulary = Column(JSON(none_as_null=True), nullable=True, comment="场景标签受控词表")
 
     # 时间戳
     created_at = Column(DateTime, default=utcnow_naive, comment="创建时间")

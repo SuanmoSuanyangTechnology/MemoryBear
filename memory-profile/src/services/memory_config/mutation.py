@@ -14,6 +14,7 @@ from memory_contracts.preferences import (
 )
 from sqlalchemy.exc import IntegrityError
 
+from src.common.observability.context import get_trace_id
 from src.common.redis_cache import invalidate_cache
 from src.infrastructure.postgres import PostgresManager
 from src.repositories.memory_config import (
@@ -46,6 +47,10 @@ from src.schemas.memory_config_requests import (
     ReflectionUpdateBody,
     SceneCommunityUpdateBody,
     SceneUpdateBody,
+)
+from src.schemas.spatiotemporal_anchor_config import (
+    SpatiotemporalAnchorData,
+    SpatiotemporalAnchorUpdate,
 )
 from src.services.memory_config.errors import (
     ConfigNotFoundError,
@@ -165,6 +170,27 @@ class MemoryConfigMutationService:
         return ConfigCreateResult(affected=1, config_id=str(config_id))
 
     # ── Updates ──────────────────────────────────────────────────────────
+
+    async def update_spatiotemporal_anchor(
+        self, body: SpatiotemporalAnchorUpdate, workspace_id: UUID
+    ) -> SpatiotemporalAnchorData:
+        config_id = body.config_id
+        row = await self.mutations.update_spatiotemporal_anchor(
+            config_id, workspace_id, body.model_dump(exclude={"config_id"})
+        )
+        if row is None:
+            raise ConfigNotFoundError(str(config_id))
+        try:
+            await invalidate_cache(prefix=f"memory_config:{config_id}")
+        except Exception:
+            logger.exception(
+                "Spatiotemporal anchor configuration saved but cache invalidation failed: "
+                "config_id=%s workspace_id=%s trace_id=%s",
+                config_id,
+                workspace_id,
+                get_trace_id(),
+            )
+        return SpatiotemporalAnchorData.model_validate(row)
 
     async def update_personality(
         self, config_id: UUID, workspace_id: UUID, values: dict[str, Any]

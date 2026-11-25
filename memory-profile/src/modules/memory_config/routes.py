@@ -60,6 +60,10 @@ from src.schemas.scene_community import (
     CommunityPreviewResult,
 )
 from src.schemas.scene_demo import SceneSplitDemoResponse
+from src.schemas.spatiotemporal_anchor_config import (
+    SpatiotemporalAnchorData,
+    SpatiotemporalAnchorUpdate,
+)
 
 router = APIRouter(prefix="/memory_config", tags=["Memory Config"])
 community_router = APIRouter(prefix="/memory/configs/community", tags=["Memory Config"])
@@ -80,6 +84,19 @@ async def list_simple_scenes(
     context: Context,
 ) -> ApiResponse[list[SimpleSceneData]] | JSONResponse:
     return await _handler(request).list_simple_scenes(context, request)
+
+
+@router.get(
+    "/read_config_spatiotemporal_anchor",
+    response_model=ApiResponse[SpatiotemporalAnchorData],
+)
+@external_api
+async def read_config_spatiotemporal_anchor(
+    request: Request,
+    context: Context,
+    config_id: Annotated[UUID, Query()],
+) -> ApiResponse[SpatiotemporalAnchorData] | JSONResponse:
+    return await _handler(request).read_spatiotemporal_anchor(context, config_id, request)
 
 
 @router.get(
@@ -192,6 +209,19 @@ async def read_config_prediction(
 
 
 # ── Writes ───────────────────────────────────────────────────────────────────
+
+
+@router.post(
+    "/update_config_spatiotemporal_anchor",
+    response_model=ApiResponse[SpatiotemporalAnchorData],
+)
+@external_api
+async def update_config_spatiotemporal_anchor(
+    request: Request,
+    context: Context,
+    body: SpatiotemporalAnchorUpdate,
+) -> ApiResponse[SpatiotemporalAnchorData] | JSONResponse:
+    return await _handler(request).update_spatiotemporal_anchor(context, body, request)
 
 
 @router.post(

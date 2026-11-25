@@ -12,7 +12,7 @@ always holds the same value the API would have written.
 
 from __future__ import annotations
 
-from sqlalchemy import Boolean, Column, DateTime, Float, Integer, String, Text
+from sqlalchemy import JSON, Boolean, Column, DateTime, Float, Integer, String, Text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 
 from src.models.base import ReadOnlyBase
@@ -126,6 +126,18 @@ class MemoryConfigRow(ReadOnlyBase):
     personality_anchor_read_preferences = Column(Boolean, nullable=False, default=False)
     personality_anchor_sync_cycle = Column(String(16), nullable=False, default="daily")
     personality_anchor_base_principles = Column(Text, nullable=False, default="")
+
+    # Spatiotemporal anchor engine
+    spatiotemporal_enabled = Column(Boolean, nullable=False, default=True)
+    spatiotemporal_auto_extract = Column(Boolean, nullable=False, default=True)
+    scene_merge_window_minutes = Column(Integer, nullable=False, default=120)
+    scene_location_normalize_enabled = Column(Boolean, nullable=False, default=True)
+    geo_coordinate_enabled = Column(Boolean, nullable=False, default=False)
+    temporal_chain_enabled = Column(Boolean, nullable=False, default=True)
+    temporal_chain_interval_minutes = Column(Integer, nullable=False, default=60)
+    temporal_chain_rebuild_limit = Column(Integer, nullable=False, default=200)
+
+    scene_label_vocabulary = Column(JSON(none_as_null=True), nullable=True)
 
     created_at = Column(DateTime, nullable=True)
     updated_at = Column(DateTime, nullable=True)

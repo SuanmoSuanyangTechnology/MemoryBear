@@ -10,11 +10,12 @@ from __future__ import annotations
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 
 from src.common.timing import utcnow_naive
 from src.infrastructure.postgres import PostgresManager
 from src.models.references import MemoryConfigRow, Workspace
+from src.repositories.memory_config import SPATIOTEMPORAL_ANCHOR_COLUMNS
 
 
 class MemoryConfigMutationRepository:
@@ -77,6 +78,30 @@ class MemoryConfigMutationRepository:
                 setattr(row, field, value)
             await session.commit()
             return True
+
+    async def update_spatiotemporal_anchor(
+        self,
+        config_id: UUID,
+        workspace_id: UUID,
+        values: dict[str, Any],
+    ) -> dict[str, Any] | None:
+        """Lock the owned row via UPDATE and return this transaction's snapshot."""
+        statement = (
+            update(MemoryConfigRow)
+            .where(
+                MemoryConfigRow.config_id == config_id,
+                MemoryConfigRow.workspace_id == workspace_id,
+            )
+            .values(**values)
+            .returning(*SPATIOTEMPORAL_ANCHOR_COLUMNS)
+        )
+        async with self.postgres.session() as session:
+            row = (await session.execute(statement)).mappings().one_or_none()
+            if row is None:
+                return None
+            snapshot = dict(row)
+            await session.commit()
+            return snapshot
 
     async def delete_owned(self, config_id: UUID, workspace_id: UUID) -> bool:
         async with self.postgres.session() as session:

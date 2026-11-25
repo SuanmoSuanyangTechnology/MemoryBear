@@ -39,6 +39,7 @@ from app.schemas.memory_api_schema import PredictionConfigUpdateRequest
 from app.schemas.memory_preference_config_schema import PreferenceConfigUpdate
 from app.schemas.personality_anchor_config_schema import PersonalityAnchorConfigUpdate
 from app.schemas.response_schema import ApiResponse
+from app.schemas.spatiotemporal_anchor_config_schema import SpatiotemporalAnchorUpdate
 from app.schemas.scene_memory_schema import SceneConfig, SceneConfigUpdate, SceneSplitDemoRequest
 from app.schemas.scene_community_schema import (
     CommunityPreviewRequest,
@@ -70,6 +71,26 @@ community_preview_router = APIRouter(
     prefix="/memory/configs/community",
     tags=["Memory Config"],
 )
+
+
+@router.get("/read_config_spatiotemporal_anchor", response_model=ApiResponse)
+@memory_profile_proxy(query_fields=("config_id",), preserve_status=True)
+async def read_spatiotemporal_anchor_config(
+    request: Request,
+    config_id: UUID,
+    current_user: CurrentUserSnapshot = Depends(get_current_user_async),
+):
+    """Read the selected workspace configuration through memory-profile."""
+
+
+@router.post("/update_config_spatiotemporal_anchor", response_model=ApiResponse)
+@memory_profile_proxy(raw_body=True, preserve_status=True)
+async def update_spatiotemporal_anchor_config(
+    request: Request,
+    payload: SpatiotemporalAnchorUpdate,
+    current_user: CurrentUserSnapshot = Depends(get_current_user_async),
+):
+    """Replace the selected workspace configuration through memory-profile."""
 
 
 @router.get("/read_config_personality_anchor", response_model=ApiResponse)
