@@ -5,14 +5,12 @@ memory-config module can read every persisted field with the same names and
 types the monolith uses; it deliberately declares no foreign keys or
 relationships, and it is never a migration metadata target.
 
-Column defaults mirror the API model. ORM reads never apply a database default;
-the columns that carry one are ``NOT NULL`` in the database, so a selected row
-always holds the same value the API would have written.
+Column defaults mirror the API model. ORM reads return the stored values.
 """
 
 from __future__ import annotations
 
-from sqlalchemy import JSON, Boolean, Column, DateTime, Float, Integer, String, Text
+from sqlalchemy import JSON, Boolean, Column, DateTime, FetchedValue, Float, Integer, String, Text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 
 from src.models.base import ReadOnlyBase
@@ -137,7 +135,9 @@ class MemoryConfigRow(ReadOnlyBase):
     temporal_chain_interval_minutes = Column(Integer, nullable=False, default=60)
     temporal_chain_rebuild_limit = Column(Integer, nullable=False, default=200)
 
-    scene_label_vocabulary = Column(JSON(none_as_null=True), nullable=True)
+    scene_label_vocabulary = Column(
+        JSON(none_as_null=True), nullable=True, server_default=FetchedValue()
+    )
 
     created_at = Column(DateTime, nullable=True)
     updated_at = Column(DateTime, nullable=True)

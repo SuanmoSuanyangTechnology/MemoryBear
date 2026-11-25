@@ -247,7 +247,14 @@ class MemoryConfig(Base):
         comment="单次重建锚点数上限",
     )
 
-    scene_label_vocabulary = Column(JSON(none_as_null=True), nullable=True, comment="场景标签受控词表")
+    scene_label_vocabulary = Column(
+        JSON(none_as_null=True),
+        nullable=True,
+        server_default=text(
+            """'["工作与职业","学习与技能","健康与照护","财务与资产","居住与日常事务","人际与亲密关系","休闲与个人体验","其他"]'::json"""
+        ),
+        comment="场景标签受控词表",
+    )
 
     # 时间戳
     created_at = Column(DateTime, default=utcnow_naive, comment="创建时间")
