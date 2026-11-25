@@ -173,12 +173,18 @@ class WorkspaceHandler:
         principal: MemoryPrincipal,
         request: Request,
         payload: WorkspaceReembedJobCreate,
+        *,
+        idempotency_key: str | None = None,
     ) -> ApiResponse[Any] | JSONResponse:
         """Register a job for a model change and publish the API driver.
 
         The caller is the workspace service: it has already switched
         ``workspaces.embedding``. The row is committed here first; a broker
         failure leaves ``task_id`` null and the reconciler re-dispatches.
+
+        ``Idempotency-Key`` (optional) makes a retried call replay the first
+        response instead of registering a second job; without it the service
+        derives a short-lived key from the request body.
         """
 
         try:
@@ -190,6 +196,7 @@ class WorkspaceHandler:
                 new_embedding_config_id=payload.new_embedding_config_id,
                 old_model_name=payload.old_model_name,
                 new_model_name=payload.new_model_name,
+                idempotency_key=idempotency_key,
             )
         except ReembedWorkspaceNotFoundError:
             return http_error_response(

@@ -18,7 +18,7 @@ from __future__ import annotations
 from typing import Annotated, Any
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query, Request
+from fastapi import APIRouter, Depends, Header, Query, Request
 from fastapi.responses import JSONResponse
 
 from src.common.responses import ApiResponse
@@ -122,6 +122,13 @@ async def create_workspace_reembed_job(
     request: Request,
     context: Context,
     body: WorkspaceReembedJobCreate,
+    idempotency_key: Annotated[
+        str | None,
+        Header(
+            alias="Idempotency-Key",
+            description="可选幂等键（8-128 字符）：重试时回放首次登记结果",
+        ),
+    ] = None,
 ) -> ApiResponse[Any] | JSONResponse:
     """Register a job for a model switch and publish the API re-embed driver.
 
@@ -130,9 +137,16 @@ async def create_workspace_reembed_job(
     is written here and ``app.tasks.run_reembed_job`` is published to the API
     worker. One active job per workspace; the target config must already be the
     workspace's current embedding model (otherwise 409).
+
+    ``Idempotency-Key`` is optional but recommended: a retried registration with
+    the same key replays the first response instead of registering a second job
+    for the same model change. Without the header a short-lived key is derived
+    from the body, which still covers transport-level retries.
     """
 
-    return await _handler(request).create_reembed_job(context, request, body)
+    return await _handler(request).create_reembed_job(
+        context, request, body, idempotency_key=idempotency_key
+    )
 
 
 # ── Re-embed retry (profile-owned) ───────────────────────────────────────────
