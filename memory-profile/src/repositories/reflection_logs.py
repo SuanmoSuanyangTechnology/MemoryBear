@@ -7,7 +7,7 @@ from sqlalchemy import RowMapping, func, select
 
 from src.infrastructure.postgres import PostgresManager
 from src.models.references.end_user_model import EndUser
-from src.models.references.reflection_log_model import MemoryReflectionLog
+from src.models.references.memory_reflection_log_model import MemoryReflectionLog
 from src.models.references.workspace_model import Workspace
 
 _LIST_COLUMNS = (
