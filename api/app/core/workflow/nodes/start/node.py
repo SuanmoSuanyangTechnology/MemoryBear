@@ -8,6 +8,8 @@ import json
 import logging
 from typing import Any
 
+from app.core.error_codes import BizCode
+from app.core.exceptions import BusinessException
 from app.core.workflow.engine.state_manager import WorkflowState
 from app.core.workflow.engine.variable_pool import VariablePool
 from app.core.workflow.nodes.base_node import BaseNode
@@ -170,9 +172,10 @@ class StartNode(BaseNode):
                                 )
 
             elif var_def.required and var_def.default is None:
-                raise ValueError(
-                    f"缺少必需的输入变量: {var_name}"
-                    + (f" ({var_def.description})" if var_def.description else "")
+                raise BusinessException(
+                    f"Missing required workflow input: {var_name}",
+                    BizCode.MISSING_PARAMETER,
+                    context={"field": var_name},
                 )
 
             else:

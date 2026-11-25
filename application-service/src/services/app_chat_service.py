@@ -2040,35 +2040,54 @@ class AppChatService:
                 "elapsed_time": time.time() - start_time,
             }
 
-        # 2. Create the orchestrator
-        orchestrator = await MultiAgentOrchestrator.create(self.db, config)
+        orchestrator = None
+        try:
+            orchestrator = await MultiAgentOrchestrator.create(self.db, config)
+            opening_statement, opening_suggested_questions = await self._resolve_cluster_opening(
+                orchestrator, conversation_id, variables
+            )
+            result = await orchestrator.execute(
+                message=message,
+                conversation_id=conversation_id,
+                user_id=user_id,
+                variables=variables,
+                use_llm_routing=True,
+                web_search=web_search,
+                memory=memory,
+                storage_type=storage_type,
+                user_rag_memory_id=user_rag_memory_id,
+                message_id=message_id,
+                thinking=thinking,
+                opening_statement=opening_statement,
+                files=files or None,
+                user_message_id=user_message_id,
+            )
+        except ModelInvokeCancelledError:
+            raise
+        except Exception as exc:
+            try:
+                from .batch_persist_queue import persist_failed_chat_turn
 
-        # New-conversation opening statement (queries only when
-        # features.opening_statement is on; legacy clusters have empty features,
-        # zero cost)
-        opening_statement, opening_suggested_questions = await self._resolve_cluster_opening(
-            orchestrator, conversation_id, variables
-        )
-
-        # 3. Execute the task
-        result = await orchestrator.execute(
-            message=message,
-            conversation_id=conversation_id,
-            user_id=user_id,
-            variables=variables,
-            use_llm_routing=True,  # LLM routing enabled by default
-            web_search=web_search,  # web search switch
-            memory=memory,  # memory switch
-            # S5: these two arguments used to be dropped on the non-streaming
-            # entry (collaboration mode therefore lost storage/memory context)
-            storage_type=storage_type,
-            user_rag_memory_id=user_rag_memory_id,
-            message_id=message_id,
-            thinking=thinking,
-            opening_statement=opening_statement,
-            files=files or None,  # attachments (absent/empty = previous behavior)
-            user_message_id=user_message_id,  # emotion cache key (features.emotion_reply only)
-        )
+                trace_id = get_trace_id()
+                error = error_payload(exc, locale=get_current_locale(), trace_id=trace_id)
+                await self._release_db_connection()
+                await persist_failed_chat_turn(
+                    conversation_id=conversation_id,
+                    user_message_id=user_message_id,
+                    message_id=message_id,
+                    message=message,
+                    error_code=error["code"],
+                    error_message=error["msg"],
+                    trace_id=trace_id,
+                    started_at=parse_timestamp_to_utc_naive(start_time),
+                    execution_id=getattr(orchestrator, "current_execution_id", None),
+                )
+            except Exception:
+                logger.exception(
+                    "Failed to persist non-streaming cluster turn",
+                    extra={"conversation_id": str(conversation_id), "message_id": str(message_id)},
+                )
+            raise
 
         elapsed_time = time.time() - start_time
 

@@ -7223,7 +7223,7 @@ class WorkflowService:
                     # too, otherwise the app log cannot show per-node execution
                     # details of the failed run.
                     output_data=result,
-                    error_message=result.get("error"),
+                    error_message=error_msg,
                     error_node_id=result.get("error_node"),
                 )
                 execution_record = await self._get_execution_async(execution.execution_id)
