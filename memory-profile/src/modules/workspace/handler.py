@@ -1,0 +1,258 @@
+"""Transport adaptation for the migrated workspace memory-policy endpoints.
+
+Three groups share this handler:
+
+* the temporary-identity retention policy (GET/PUT) — the API controller's ``msg``
+  comes from its own i18n catalog, so the profile routes resolve the same keys
+  against the caller's forwarded language; the PUT keeps the host's
+  ``exclude_unset`` payload (``retention_days`` only);
+* the re-embed status reads (the two job-detail routes and the two per-user
+  lists) — the host returns the plain ``ApiResponse`` envelope, so the payload
+  shapes are described by ``src.schemas.workspace_api``;
+* the four manual-retry routes — the retry logic itself now runs here, in
+  ``ReembedRetryService``; only the downstream re-embed workers are still
+  published to the API worker.
+
+Errors keep the host's shape: an unknown ``status`` filter is the API's
+``BusinessException(INVALID_PARAMETER)`` (HTTP status from the shared error-core
+table, same code and message), and a missing/foreign job is the host's
+``HTTPException(404, "reembed job not found")`` (same envelope and detail).
+"""
+
+from __future__ import annotations
+
+import logging
+from typing import Any
+from uuid import UUID
+
+from error_core.codes import http_status_for
+from error_core.messages import user_message
+from fastapi import Request
+from fastapi.responses import JSONResponse
+
+from src.common.errors import BizCode
+from src.common.responses import (
+    ApiResponse,
+    error_response,
+    failure,
+    http_error_response,
+    success,
+)
+from src.i18n import get_request_language, translate_request
+from src.middleware.auth import MemoryPrincipal
+from src.runtime import ProfileRuntime
+from src.schemas.workspace_api import (
+    WorkspaceRetentionPolicyUpdate,
+)
+from src.services.reembed_retry import (
+    ReembedRetryConflictError,
+    ReembedRetryService,
+)
+from src.services.reembed_status import (
+    InvalidReembedStatusError,
+    ReembedJobNotFoundError,
+    ReembedStatusService,
+)
+from src.services.workspace_retention import WorkspaceRetentionService
+
+logger = logging.getLogger(__name__)
+
+#: Host controller message keys; the profile locale catalog mirrors their text.
+RETENTION_RETRIEVED_KEY = "workspace.retention_policy.retrieved"
+RETENTION_UPDATED_KEY = "workspace.retention_policy.updated"
+#: Host literal message for "list current" when no job is visible.
+NO_CURRENT_JOB_MSG = "no re-embed job"
+#: Host ``HTTPException`` detail for a missing (or foreign) job.
+REEMBED_JOB_NOT_FOUND_DETAIL = "reembed job not found"
+
+
+def _ok_message(request: Request) -> str:
+    """The host's default success message (``success(data=...)`` without ``msg``)."""
+
+    return user_message(BizCode.OK, get_request_language(request)) or "成功"
+
+
+class WorkspaceHandler:
+    def __init__(self, runtime: ProfileRuntime) -> None:
+        self.runtime = runtime
+        self.retention = WorkspaceRetentionService(runtime.postgres)
+        self.reembed = ReembedStatusService(runtime.postgres)
+        self.retry = ReembedRetryService(runtime)
+
+    # ------------------------------------------------------- retention policy
+
+    async def get_retention_policy(
+        self, principal: MemoryPrincipal, request: Request
+    ) -> ApiResponse[Any] | JSONResponse:
+        data = await self.retention.policy(principal.workspace_id)
+        return success(
+            data=data, msg=translate_request(request, RETENTION_RETRIEVED_KEY)
+        )
+
+    async def update_retention_policy(
+        self,
+        principal: MemoryPrincipal,
+        payload: WorkspaceRetentionPolicyUpdate,
+        request: Request,
+    ) -> ApiResponse[Any] | JSONResponse:
+        data = await self.retention.update(
+            principal.workspace_id, payload.retention_days
+        )
+        return success(
+            data=data, msg=translate_request(request, RETENTION_UPDATED_KEY)
+        )
+
+    # ---------------------------------------------------- re-embed end users
+
+    async def current_end_users(
+        self,
+        principal: MemoryPrincipal,
+        request: Request,
+        *,
+        status: str | None,
+        page: int,
+        pagesize: int,
+    ) -> ApiResponse[Any] | JSONResponse:
+        try:
+            data = await self.reembed.current_end_users(
+                principal.workspace_id,
+                status=status,
+                page=page,
+                pagesize=pagesize,
+            )
+        except InvalidReembedStatusError as exc:
+            return _invalid_status(request, exc)
+        # The host's "no current job" branch overrides the default success text;
+        # a job that exists always has an id, so a null id is that branch.
+        msg = (
+            NO_CURRENT_JOB_MSG
+            if data["job_id"] is None
+            else _ok_message(request)
+        )
+        return success(data=data, msg=msg)
+
+    async def job_end_users(
+        self,
+        principal: MemoryPrincipal,
+        request: Request,
+        *,
+        job_id: UUID,
+        status: str | None,
+        page: int,
+        pagesize: int,
+    ) -> ApiResponse[Any] | JSONResponse:
+        try:
+            data = await self.reembed.job_end_users(
+                principal.workspace_id,
+                job_id,
+                status=status,
+                page=page,
+                pagesize=pagesize,
+            )
+        except InvalidReembedStatusError as exc:
+            return _invalid_status(request, exc)
+        except ReembedJobNotFoundError:
+            return http_error_response(
+                request,
+                404,
+                REEMBED_JOB_NOT_FOUND_DETAIL,
+                code=int(BizCode.NOT_FOUND),
+            )
+        return success(data=data, msg=_ok_message(request))
+
+    # --------------------------------------------------- re-embed job detail
+
+    async def current_job_detail(
+        self, principal: MemoryPrincipal, request: Request
+    ) -> ApiResponse[Any] | JSONResponse:
+        """``GET /workspace_reembed/current``; no job is a 200 with ``data: {}``."""
+
+        data = await self.reembed.current_job_detail(principal.workspace_id)
+        if data is None:
+            return success(data={}, msg=NO_CURRENT_JOB_MSG)
+        return success(data=data, msg=_ok_message(request))
+
+    async def job_detail(
+        self, principal: MemoryPrincipal, request: Request, *, job_id: UUID
+    ) -> ApiResponse[Any] | JSONResponse:
+        """``GET /workspace_reembed/{job_id}`` (terminal jobs stay addressable)."""
+
+        try:
+            data = await self.reembed.job_detail(principal.workspace_id, job_id)
+        except ReembedJobNotFoundError:
+            return http_error_response(
+                request,
+                404,
+                REEMBED_JOB_NOT_FOUND_DETAIL,
+                code=int(BizCode.NOT_FOUND),
+            )
+        return success(data=data, msg=_ok_message(request))
+
+    # --------------------------------------------------- re-embed retry routes
+
+    async def reembed_retry(
+        self,
+        principal: MemoryPrincipal,
+        request: Request,
+        *,
+        mode: str,
+        job_id: UUID | None = None,
+        end_user_id: str | None = None,
+    ) -> ApiResponse[Any] | JSONResponse:
+        """Run one of the four manual-retry variants in this process.
+
+        The DB transaction, Redis claim clearing and downstream dispatch are now
+        the profile's (the API will be retired); only the re-embed workers are
+        still published to the API worker.
+        """
+
+        try:
+            result = await self.retry.retry(
+                mode=mode,
+                workspace_id=principal.workspace_id,
+                job_id=job_id,
+                end_user_id=end_user_id,
+            )
+        except ReembedJobNotFoundError:
+            return http_error_response(
+                request,
+                404,
+                REEMBED_JOB_NOT_FOUND_DETAIL,
+                code=int(BizCode.NOT_FOUND),
+            )
+        except ReembedRetryConflictError as exc:
+            return _state_conflict(request, exc)
+        except Exception as exc:
+            logger.exception("reembed retry failed")
+            return http_error_response(request, 500, str(exc))
+        return success(data=result.data, msg=result.message or _ok_message(request))
+
+
+
+
+def _invalid_status(
+    request: Request, exc: InvalidReembedStatusError
+) -> JSONResponse:
+    """The host's ``BusinessException(INVALID_PARAMETER)`` envelope for a bad filter."""
+
+    language = get_request_language(request)
+    code = int(BizCode.INVALID_PARAMETER)
+    return error_response(
+        request,
+        http_status_for(code),
+        failure(code, user_message(code, language) or str(exc), str(exc)),
+    )
+
+
+def _state_conflict(
+    request: Request, exc: ReembedRetryConflictError
+) -> JSONResponse:
+    """The host's ``BusinessException(STATE_CONFLICT)`` envelope (HTTP 409)."""
+
+    language = get_request_language(request)
+    code = int(BizCode.STATE_CONFLICT)
+    return error_response(
+        request,
+        http_status_for(code),
+        failure(code, user_message(code, language) or str(exc), str(exc)),
+    )

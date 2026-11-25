@@ -168,24 +168,6 @@ class ProfileSettings(BaseSettings):
     interest_cache_expire_seconds: int = Field(
         24 * 60 * 60, validation_alias="PROFILE_INTEREST_CACHE_EXPIRE_SECONDS"
     )
-    # Option A（写入下沉过渡期）：写网关任务由 api worker 执行，profile 只投递并等待。
-    # : 留空时沿用 CELERY_* 派生值；生产需指向 api 的 broker / result backend。
-    write_gateway_broker_url: str | None = Field(
-        None,
-        validation_alias=AliasChoices("WRITE_GATEWAY_BROKER_URL", "CELERY_BROKER_URL"),
-    )
-    write_gateway_result_backend: str | None = Field(
-        None,
-        validation_alias=AliasChoices(
-            "WRITE_GATEWAY_RESULT_BACKEND", "CELERY_RESULT_BACKEND"
-        ),
-    )
-    write_gateway_queue: str = Field(
-        "memory_tasks", validation_alias="WRITE_GATEWAY_QUEUE"
-    )
-    write_gateway_wait_seconds: float = Field(
-        120.0, validation_alias="WRITE_GATEWAY_WAIT_SECONDS"
-    )
     migration_database_url: str | None = Field(
         None,
         validation_alias="PROFILE_MIGRATION_DATABASE_URL",
