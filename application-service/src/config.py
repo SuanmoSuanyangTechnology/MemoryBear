@@ -652,6 +652,8 @@ class AppServiceSettings(BaseSettings):
         default=SecretStr("a_default_secret_key_that_is_long_and_random"),
         validation_alias="SECRET_KEY",
     )
+    # A non-default absolute value is the local storage root (share it between
+    # services); the default keeps the legacy cwd-relative storage/files root.
     file_path: str = Field(default="/files", validation_alias="FILE_PATH")
     storage_type: str = Field(default="local", validation_alias="STORAGE_TYPE")
     minio_endpoint_url: str = Field(default="", validation_alias="MINIO_ENDPOINT_URL")

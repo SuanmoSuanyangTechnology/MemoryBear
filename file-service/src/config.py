@@ -26,7 +26,9 @@ class Settings(BaseSettings):
     file_info_allow_private_networks: bool = False  # info-by-url SSRF 例外开关
     secret_key: SecretStr = SecretStr("")         # 与老单体同值，签名 URL
     storage_type: str = "local"
-    file_path: str = "/files"                     # 与 application-service 一致：storage/files
+    # A non-default absolute value is the local storage root (share it between
+    # services); the default keeps the legacy cwd-relative storage/files root.
+    file_path: str = "/files"
     minio_endpoint_url: str = ""
     minio_access_key_id: str = ""
     minio_secret_access_key: SecretStr = SecretStr("")
