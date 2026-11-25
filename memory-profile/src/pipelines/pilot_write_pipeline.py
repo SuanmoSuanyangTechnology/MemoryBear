@@ -10,7 +10,6 @@ Dependency direction: Service -> Pipeline -> extraction steps.
 
 from __future__ import annotations
 
-import logging
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
@@ -30,9 +29,6 @@ from src.storage_services.extraction_engine.steps.graph_build_step import (
 
 if TYPE_CHECKING:
     from src.schemas.memory_config import MemoryConfig
-
-logger = logging.getLogger(__name__)
-
 
 @dataclass
 class PilotWriteResult:

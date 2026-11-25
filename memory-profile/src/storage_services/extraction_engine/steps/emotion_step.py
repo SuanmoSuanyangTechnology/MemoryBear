@@ -7,7 +7,6 @@ paradigm.  Registered via ``@SidecarStepFactory.register`` so the orchestrator
 picks it up automatically when ``emotion_enabled`` is ``True``.
 """
 
-import logging
 from typing import Any
 
 from src.schemas.emotion_models import EmotionExtraction
@@ -16,9 +15,6 @@ from src.common.prompt.prompt_utils import render_emotion_extraction_prompt
 from src.storage_services.extraction_engine.steps.base import ExtractionStep, StepContext
 from src.storage_services.extraction_engine.sidecar_factory import SidecarStepFactory, SidecarTiming  # noqa: F401
 from src.storage_services.extraction_engine.steps.schema import EmotionStepInput, EmotionStepOutput
-
-logger = logging.getLogger(__name__)
-
 
 # [DEPRECATED v0.5.2] Statement LLM 情绪提取已废弃，改为继承快写 BERT 情绪（见 emotion_inheritance），暂时保留代码不删除
 # @SidecarStepFactory.register("emotion_enabled", SidecarTiming.AFTER_STATEMENT)

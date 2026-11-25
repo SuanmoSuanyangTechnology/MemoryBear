@@ -1,4 +1,3 @@
-import logging
 import os
 from typing import Any, List
 
@@ -16,10 +15,6 @@ from chonkie import (
 
 from src.schemas.config_models import ChunkerConfig
 from src.schemas.message_models import DialogData, Chunk
-
-# Initialize logger
-logger = logging.getLogger(__name__)
-
 
 class ChunkerClient:
     def __init__(self, chunker_config: ChunkerConfig, llm_client=None):

@@ -22,12 +22,6 @@ ListApiResponse = ApiResponse[list[Any]]
 AggregateApiResponse = ApiResponse[ImplicitProfile]
 
 
-api_logger = logging.getLogger(__name__)
-
-
-
-
-
 class ImplicitMemoryHandler:
     def __init__(
         self,

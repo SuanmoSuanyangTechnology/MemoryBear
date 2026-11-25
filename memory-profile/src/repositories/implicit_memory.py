@@ -1,4 +1,4 @@
-"""Read cached implicit memory profiles."""
+"""Read-only PostgreSQL repository for implicit memory profiles."""
 
 from __future__ import annotations
 
@@ -12,8 +12,6 @@ from src.infrastructure.postgres import PostgresManager
 from src.models.references import EndUser
 from src.models.references.implicit_emotions_storage_model import ImplicitEmotionsStorage
 from src.repositories.end_user import owned_user_select
-
-
 
 
 class ImplicitMemoryRepository:
