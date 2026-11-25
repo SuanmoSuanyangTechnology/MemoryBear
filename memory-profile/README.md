@@ -7,7 +7,7 @@ Independent, internal-only service hosting Memory domain modules. Routes are com
 - Read modules keep HTTP adaptation in `modules`, business reads in `services`, SQL in `repositories`, and response fields/enums in `schemas`. Strict reads reuse `EndUserService.require_in_workspace`; SQL composes the shared predicates in `repositories/end_user.py`. Combined display reads check the user once before loading each source. Cached implicit profile sections remain extensible JSON; display records and perceptual envelopes use explicit models. Preference date comparisons use UTC for both numeric and ISO timestamps, and engine presentation is checked against the API's current ten event types in both languages.
 - This service accesses shared PostgreSQL tables through mappings declared in `src/models/references/`, plus Neo4j, Redis, and Elasticsearch. It does not import `api` or `app` code.
 - Reads are the default: the repositories listed in `scripts/check_import_boundaries.py` are `select`-only, and the AST check enforces it. It is a per-repository convention, not a connection-level read-only setting.
-- Writes live in repositories. `memory_config_mutation.py` owns configuration changes; `memory_storage.py` owns memory deletion, audit and Outbox writes plus user state/count updates; `implicit_memory.py` persists generated profiles. Cached text generation remains delegated to memory-jobs.
+- Writes live in repositories. `memory_config_mutation.py` owns configuration changes; `memory_storage.py` owns memory deletion, audit and Outbox writes plus user state/count updates. Cached text generation remains delegated to memory-jobs.
 - LLM and embedding calls go to the model service over its invoke face, using a `model_configs` row and tenant. Dedicated classifier/pruning endpoints in the extraction engine and the Scene continuity BERT probe use their configured URLs and API keys directly. Credentials are never logged or echoed in error bodies.
 - PostgreSQL, Neo4j, Redis, Elasticsearch, and the model-service client each have a dedicated lifecycle manager under `src/infrastructure/`; `src/runtime.py` only composes, probes, and closes them. The model service is not part of readiness: only generation endpoints need it.
 - `src/common/redis_cache.py` provides shared JSON helpers, zset JSON reads, exact/prefix/pattern invalidation, and the async `@redis_cache` cache-aside decorator. It reuses the existing `ProfileRuntime.redis` provider and does not add cache state to runtime.
@@ -232,9 +232,9 @@ Generation is a later, explicitly scoped extension over the read service:
   `memory_storage_outbox_events`, `INSERT` on `memory_forget_log`, Neo4j write
   access and Elasticsearch delete-by-query access to `rag_memory_current`.
   Keep the existing API Outbox consumer running to synchronize graph deletions.
-- Implicit profile generation needs `SELECT/INSERT/UPDATE` on
-  `implicit_emotions_storage`. It preserves the existing PostgreSQL cache
-  behavior without introducing a TTL or schema migration.
+- Implicit profile generation (`POST /api/memory/implicit-memory/generate_profile`)
+  remains in the API and is not forwarded to memory-profile. This service retains
+  cached implicit profile reads only; it does not generate or persist profiles.
 - Trial extraction runs independently under `src/storage_services/extraction_engine`, with
   the API-compatible configured output directory. Configure
   classifier/pruning settings and attachment storage as in `.env.example`.
@@ -250,7 +250,7 @@ Generation is a later, explicitly scoped extension over the read service:
   live in `src/common/datetime_utils.py`. The chunker client lives in
   `src/common/llm_tools/chunker_client.py`; prompt rendering lives under `src/common/prompt/`.
   Prompt templates live in
-  `src/prompt/extraction_engine/` and `src/prompt/implicit_memory/`; business
+  `src/prompt/extraction_engine/`; business
   orchestration is `MemoryStorageService._run_pilot_extraction`, with no
   `runner.py` or extraction subpackage under `modules/memory_storage`.
   Statement classification remains in its original extraction step; pruning HTTP
@@ -284,7 +284,7 @@ Generation is a later, explicitly scoped extension over the read service:
 
 The task branch is `codex/memory-storage-migration`, based on `origin/develop`
 at `8590dd13f`. Its memory-read
-core, routes and shared-table columns are retained alongside the eight migrated
+core, routes and shared-table columns are retained alongside the seven migrated
 interfaces. SSE forwarding reuses the API's existing
 `app/integrations/profile/stream.py` and `client.stream`; this migration no longer
 extends `client.py` or `proxy.py` for streaming.
@@ -313,7 +313,7 @@ src/entry.py
   -> src/infrastructure/               # 客户端与 producer；task_bridge.py 只投递任务，不注册任务
 ```
 
-`src/modules/__init__.py` composes every domain router into the single router `src/app.py` mounts, so a new module is registered there and nowhere else. `src/modules/` is transport only: routes bind HTTP parameters, handlers translate transport contracts and response envelopes, and the module's `schemas.py` describes only the HTTP interface's input/output (request/response shapes) — no business logic and no data access. Use-case orchestration and pure logic/constants live in `src/services/`; data access lives in `src/repositories/`; response value objects (DTOs) live in `src/schemas/`. Repositories depend on shared infrastructure managers, and the workspace-boundary predicates live in `src/repositories/end_user.py`. Task-based cache generation remains in memory-jobs; the extraction engine, its prompts and implicit profile analyzers execute locally for the migrated interfaces. The full layering contract and its automated enforcement are documented in `docs/architecture.md`.
+`src/modules/__init__.py` composes every domain router into the single router `src/app.py` mounts, so a new module is registered there and nowhere else. `src/modules/` is transport only: routes bind HTTP parameters, handlers translate transport contracts and response envelopes, and the module's `schemas.py` describes only the HTTP interface's input/output (request/response shapes) — no business logic and no data access. Use-case orchestration and pure logic/constants live in `src/services/`; data access lives in `src/repositories/`; response value objects (DTOs) live in `src/schemas/`. Repositories depend on shared infrastructure managers, and the workspace-boundary predicates live in `src/repositories/end_user.py`. Task-based cache generation remains in memory-jobs; the extraction engine, and its prompts execute locally for the migrated interfaces. The full layering contract and its automated enforcement are documented in `docs/architecture.md`.
 
 API-owned PostgreSQL tables are mapped under `src/models/references/` with a separate `ReadOnlyBase.metadata`, no foreign keys, and no relationships. Profile-owned tables belong under `src/models/owned/`, inherit `ProfileBase`, and are the only tables exposed to Alembic. PostgreSQL read repositories use SQLAlchemy ORM/select expressions only; native `text()` SQL and ORM write methods are rejected by the boundary script. The runtime pool explicitly uses rollback-on-return and invalidates any asyncpg connection still in a transaction at checkin or checkout; Alembic uses a separate short-lived migration engine without pooling.
 

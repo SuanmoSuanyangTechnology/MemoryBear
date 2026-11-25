@@ -151,14 +151,7 @@ ban-relative-imports = "all"
 "src/schemas/memory_config.py" = ["B904", "F811", "UP037"]
 "src/schemas/memory_storage.py" = ["UP042"]
 "src/services/extract_pruning_client.py" = ["E501"]
-"src/services/implicit_memory/analyzers/dimension_analyzer.py" = ["I001", "UP045"]
-"src/services/implicit_memory/analyzers/habit_analyzer.py" = ["I001", "UP045"]
-"src/services/implicit_memory/analyzers/interest_analyzer.py" = ["I001", "UP045"]
-"src/services/implicit_memory/analyzers/preference_analyzer.py" = ["I001", "UP045"]
-"src/services/implicit_memory/habit_detector.py" = ["I001", "UP045"]
-"src/services/implicit_memory/llm_client.py" = ["E501", "I001", "UP045"]
-"src/services/implicit_memory/prompts.py" = ["E501", "UP006", "UP035"]
-"src/services/implicit_memory/service.py" = ["B904", "E501", "I001", "UP006", "UP035", "UP045"]
+"src/services/implicit_memory.py" = ["B904", "E501", "I001", "UP006", "UP035", "UP045"]
 "src/services/memory_config/service.py" = ["B904", "E501", "F401", "I001", "UP007", "UP045"]
 "src/services/memory_storage.py" = [
     "ASYNC230", "ASYNC240", "B904", "B905", "E501", "E711", "F401", "F811", "I001", "UP006", "UP015", "UP035", "UP045",

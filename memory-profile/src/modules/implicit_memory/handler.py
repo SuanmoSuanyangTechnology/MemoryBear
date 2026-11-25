@@ -7,11 +7,11 @@ from datetime import datetime
 from typing import Any, Literal
 
 from src.common.errors import BizCode, LocalizedProfileError, ProfileError
-from src.common.responses import ApiResponse, failure, success
+from src.common.responses import ApiResponse
 from src.middleware.auth import MemoryPrincipal
 from src.runtime import ProfileRuntime
 from src.schemas.implicit_memory import ImplicitProfile, ProfileExists, SnapshotSection
-from src.services.implicit_memory.service import ImplicitMemoryService, implicit_read_error
+from src.services.implicit_memory import ImplicitMemoryService, implicit_read_error
 
 ExistsApiResponse = ApiResponse[ProfileExists]
 ObjectApiResponse = ApiResponse[SnapshotSection]
@@ -22,66 +22,7 @@ AggregateApiResponse = ApiResponse[ImplicitProfile]
 api_logger = logging.getLogger(__name__)
 
 
-def handle_implicit_memory_error(e: Exception, operation: str, user_id: str = None) -> dict:
-    """
-    Centralized error handling for implicit memory operations.
-    
-    Args:
-        e: The exception that occurred
-        operation: Description of the operation that failed
-        user_id: Optional user ID for logging context
-        
-    Returns:
-        Standardized error response
-    """
-    error_context = f"user_id={user_id}" if user_id else "unknown user"
-    
-    if isinstance(e, ValueError):
-        if "user" in str(e).lower() and "not found" in str(e).lower():
-            api_logger.warning(f"Invalid user ID for {operation}: {error_context}")
-            return failure(BizCode.INVALID_USER_ID, "无效的用户ID", str(e))
-        elif "insufficient" in str(e).lower() or "no data" in str(e).lower():
-            api_logger.warning(f"Insufficient data for {operation}: {error_context}")
-            return failure(BizCode.INSUFFICIENT_DATA, "数据不足，无法进行分析", str(e))
-        else:
-            api_logger.warning(f"Invalid parameters for {operation}: {error_context}")
-            return failure(BizCode.INVALID_FILTER_PARAMS, "无效的参数", str(e))
-    
-    elif isinstance(e, KeyError):
-        api_logger.warning(f"Missing required data for {operation}: {error_context}")
-        return failure(BizCode.INSUFFICIENT_DATA, "缺少必要的数据", str(e))
-    
-    elif isinstance(e, (ConnectionError, TimeoutError)):
-        api_logger.error(f"Service unavailable for {operation}: {error_context}")
-        return failure(BizCode.SERVICE_UNAVAILABLE, "服务暂时不可用", str(e))
-    
-    elif "analysis" in str(e).lower() or "llm" in str(e).lower():
-        api_logger.error(f"Analysis failed for {operation}: {error_context}", exc_info=True)
-        return failure(BizCode.ANALYSIS_FAILED, "分析处理失败", str(e))
-    
-    elif "storage" in str(e).lower() or "database" in str(e).lower():
-        api_logger.error(f"Storage error for {operation}: {error_context}", exc_info=True)
-        return failure(BizCode.PROFILE_STORAGE_ERROR, "数据存储失败", str(e))
-    
-    else:
-        api_logger.error(f"Unexpected error for {operation}: {error_context}", exc_info=True)
-        return failure(BizCode.INTERNAL_ERROR, f"{operation}失败", str(e))
 
-def validate_user_id(user_id: str) -> None:
-    """
-    Validate user ID format and constraints.
-    
-    Args:
-        user_id: User ID to validate
-        
-    Raises:
-        ValueError: If user ID is invalid
-    """
-    if not user_id or not user_id.strip():
-        raise ValueError("User ID cannot be empty")
-    
-    if len(user_id.strip()) < 1:
-        raise ValueError("User ID is too short")
 
 
 class ImplicitMemoryHandler:
@@ -216,39 +157,3 @@ class ImplicitMemoryHandler:
             raise
         except Exception as exc:
             raise implicit_read_error(exc, operation_key, include_detail=include_detail) from exc
-
-    async def generate_profile(self, context, payload) -> ApiResponse:
-        end_user_id = payload.end_user_id
-        api_logger.info(f"Generate profile requested for user: {end_user_id}")
-    
-        try:
-            # Validate inputs
-            validate_user_id(end_user_id)
-        
-            # Create service with user-specific config
-            service = self.service
-            await service.initialize_for_user(end_user_id=end_user_id, workspace_id=context.workspace_id)
-        
-            # Generate complete profile (calls LLM for all 4 modules)
-            api_logger.info(f"开始生成完整用户画像: user={end_user_id}")
-            profile_data = await service.generate_complete_profile(user_id=end_user_id)
-        
-            # Save to cache
-            await service.save_profile_cache(
-                end_user_id=end_user_id,
-                profile_data=profile_data,
-                workspace_id=context.workspace_id,
-                expires_hours=168  # 7 days
-            )
-        
-            api_logger.info(f"用户画像生成并缓存成功: user={end_user_id}")
-        
-            # Add metadata
-            profile_data["end_user_id"] = end_user_id
-            profile_data["cached"] = False
-        
-            return success(data=profile_data, msg="用户画像生成成功")
-        
-        except Exception as e:
-            api_logger.error(f"生成用户画像失败: user={end_user_id}, error={str(e)}", exc_info=True)
-            return handle_implicit_memory_error(e, "用户画像生成", end_user_id)
