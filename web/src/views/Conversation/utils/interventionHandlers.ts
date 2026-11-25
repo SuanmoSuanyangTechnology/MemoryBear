@@ -8,6 +8,7 @@ import { type ButtonProps } from 'antd'
 
 import { type SSEMessage } from '@/utils/stream'
 import type { ChatItem, MemoryTraceEvent, MemoryTraceEventData } from '@/components/Chat/types'
+import { syncConversation } from './streamHandlers'
 
 /** After intervention submit succeeds (while streaming), locally mark the matching intervention as resolved */
 export const applyInterventionSubmit = (
@@ -145,6 +146,10 @@ export const createResumeStreamHandler = (deps: ResumeHandlerDeps) => {
       }
       switch (item.event) {
         case 'start':
+          if (curId) {
+            currentConversationId = curId
+            upsertHistory(curId)
+          }
           setChatList(prev => {
             const lastList = [...prev]
             const lastIndex = lastList.length - 1
@@ -194,10 +199,15 @@ export const createResumeStreamHandler = (deps: ResumeHandlerDeps) => {
           break
         case 'error': {
           const errorMsg = msg || error
-          console.log('errorMsg', errorMsg)
           if (errorMsg) {
             updateAssistantMessage('', undefined, undefined, undefined, undefined, errorMsg)
           }
+          syncConversation(
+            curId || currentConversationId || conversationId,
+            conversationId,
+            upsertHistory,
+            setConversationId,
+          )
           setLoading(false)
           break
         }
@@ -415,13 +425,12 @@ export const createResumeStreamHandler = (deps: ResumeHandlerDeps) => {
             updateAssistantMessage(content || '', audio_url, undefined, citations, suggested_questions, errorMsg)
           }
           setLoading(false)
-          const targetConvId = currentConversationId || conversationId
-          if (targetConvId) {
-            upsertHistory(targetConvId)
-          }
-          if (currentConversationId && currentConversationId !== conversationId) {
-            setConversationId(currentConversationId)
-          }
+          syncConversation(
+            currentConversationId || conversationId,
+            conversationId,
+            upsertHistory,
+            setConversationId,
+          )
           break
         }
       }
