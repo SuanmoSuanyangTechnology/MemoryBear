@@ -25,6 +25,7 @@ from src.modules.reflection import router as reflection_router
 from src.modules.short import router as short_router
 from src.modules.value_ranking import router as value_ranking_router
 from src.modules.working_memory import router as working_memory_router
+from src.modules.workspace_retention import router as workspace_retention_router
 from src.modules.write import router as write_router
 
 router = APIRouter(prefix="/internal/v1")
@@ -48,5 +49,6 @@ router.include_router(emotion_analytics_router)
 router.include_router(forgetting_router)
 router.include_router(short_router)
 router.include_router(value_ranking_router)
+router.include_router(workspace_retention_router)
 
 __all__ = ["router"]
