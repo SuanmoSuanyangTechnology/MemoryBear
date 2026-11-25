@@ -16,6 +16,7 @@ from typing import Any
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
+from ..models.agent_execution_model import AgentExecution
 from ..models.app_model import AppType
 from ..models.conversation_model import Conversation, Message
 from ..models.file_metadata_model import FileMetadata
@@ -275,9 +276,10 @@ class AppLogService:
                 conversation_id=conversation_id,
                 page=page,
                 pagesize=pagesize,
+                include_log_only=True,
             )
             node_executions_map = self._get_agent_node_executions(conversation_id, messages)
-            total = self.message_repository.count_messages(conversation_id)
+            total = self.message_repository.count_messages(conversation_id, include_log_only=True)
 
         page_meta = {
             "page": page,
@@ -303,6 +305,48 @@ class AppLogService:
         )
 
         return conversation, messages, node_executions_map, page_meta
+
+    def get_agent_message_times(
+        self, conversation_id: uuid.UUID, messages: list[Message],
+    ) -> dict[uuid.UUID, datetime]:
+        """Use explicitly linked executions to correct log timestamps."""
+        if not messages:
+            return {}
+
+        message_ids = {message.id for message in messages}
+        user_times = {message.id: message.created_at for message in messages if message.role == "user"}
+        original_reply = func.coalesce(Message.version, 1) == 1
+        stmt = (
+            select(
+                Message.id, Message.parent_message_id, original_reply,
+                AgentExecution.started_at, AgentExecution.completed_at,
+            )
+            .join(AgentExecution, AgentExecution.message_id == Message.id)
+            .where(
+                Message.conversation_id == conversation_id,
+                Message.role == "assistant",
+                Message.is_deleted.is_not(True),
+                AgentExecution.conversation_id == conversation_id,
+                AgentExecution.agent_role == "master",
+                AgentExecution.completed_at >= AgentExecution.started_at,
+                or_(
+                    Message.id.in_(message_ids),
+                    Message.parent_message_id.in_(user_times) & original_reply,
+                ),
+            )
+            .order_by(AgentExecution.started_at, AgentExecution.completed_at)
+        )
+        times = {}
+        for reply_id, user_id, is_original, started_at, completed_at in self.db.execute(stmt):
+            if reply_id in message_ids:
+                times.setdefault(reply_id, completed_at)
+            # Also find the original reply when the user and reply are on different pages.
+            # A regenerated reply must not move the timestamp of the original user message.
+            if is_original and user_id in user_times:
+                stored_at = user_times[user_id]
+                if stored_at is None or started_at < stored_at:
+                    times.setdefault(user_id, started_at)
+        return times
 
     def build_pending_intervention_map(
         self,

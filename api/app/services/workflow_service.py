@@ -6955,7 +6955,7 @@ class WorkflowService:
                     # 失败时同样持久化完整结果（含 node_outputs），
                     # 否则应用日志无法展示失败调用的各节点执行明细。
                     output_data=result,
-                    error_message=result.get("error"),
+                    error_message=error_msg,
                     error_node_id=result.get("error_node"),
                 )
                 execution_record = await self._get_execution_async(execution.execution_id)

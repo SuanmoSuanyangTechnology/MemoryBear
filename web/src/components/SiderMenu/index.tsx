@@ -125,6 +125,9 @@ const Menu: FC<{
     if (!isPrivateAvailable) {
       noAuthList.push('brainMemory', 'ontology', 'communityMarket')
     }
+    if (storageType === 'rag') {
+      noAuthList.push('brainMemory')
+    }
 
     if (noAuthList && !noAuthList?.includes('all')) {
       const filterMenus = (list: MenuItem[]): MenuItem[] =>{
@@ -145,7 +148,7 @@ const Menu: FC<{
     }
 
     setMenus(menuList)
-  }, [source, allMenus, user])
+  }, [source, allMenus, user, storageType])
   
   /** Handle menu item click and navigate to path */
   const handleMenuClick: MenuProps['onClick'] = (e) => {
