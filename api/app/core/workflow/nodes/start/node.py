@@ -106,6 +106,7 @@ class StartNode(BaseNode):
             var_name = var_def.name
             var_type = var_def.type
             ui_type = var_def.ui_type
+            default = var_def.default
 
             # 布尔(boolean/checkbox)类型：前端未勾选时提交的是 `false` 而非 `None`，
             # 而 API 调用方可能完全省略该字段，或显式传 `null`。
@@ -113,15 +114,20 @@ class StartNode(BaseNode):
             # （通常为 `False`），而不是当作“缺少必需变量”报错，保持与前端行为一致。
             provided = var_name in input_variables
             value = input_variables.get(var_name) if provided else None
+            if var_def.required and var_type == VariableType.STRING:
+                if isinstance(default, str) and not default.strip():
+                    default = None
+                if value is None or (isinstance(value, str) and not value.strip()):
+                    provided = False
             if var_type == VariableType.BOOLEAN and value is None:
-                value = var_def.default if var_def.default is not None else DEFAULT_VALUE(VariableType.BOOLEAN)
+                value = default if default is not None else DEFAULT_VALUE(VariableType.BOOLEAN)
                 provided = True
 
             # An explicit `null` is valid input but every non-FILE variable type
             # rejects None. Fall back to the default value (same as a missing field)
             # instead of letting the downstream typed variable raise TypeError.
             if provided and value is None and var_type != VariableType.FILE:
-                value = var_def.default if var_def.default is not None else DEFAULT_VALUE(var_type)
+                value = default if default is not None else DEFAULT_VALUE(var_type)
 
             # 检查变量是否存在
             if provided:
@@ -171,7 +177,7 @@ class StartNode(BaseNode):
                                     f"变量 '{var_name}' 中包含不允许的文件类型 '{file_type}'"
                                 )
 
-            elif var_def.required and var_def.default is None:
+            elif var_def.required and default is None:
                 raise BusinessException(
                     f"Missing required workflow input: {var_name}",
                     BizCode.MISSING_PARAMETER,
@@ -179,7 +185,7 @@ class StartNode(BaseNode):
                 )
 
             else:
-                value = var_def.default if var_def.default is not None else DEFAULT_VALUE(var_type)
+                value = default if default is not None else DEFAULT_VALUE(var_type)
 
             processed[var_name] = value
             self.output_var_types[var_name] = var_type
