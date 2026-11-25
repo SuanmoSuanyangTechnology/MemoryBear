@@ -158,11 +158,12 @@ def memory_profile_proxy(
     target_path: str | None = None,
     principal_arg: str = "current_user",
     preserve_status: bool = False,
+    request_headers: tuple[str, ...] = (),
 ):
     """Forward a migrated route to memory-profile for every request.
     The wrapped function defines the route signature, not a local fallback. The API-key
-    routes run their authentication, workspace validation, and merge routing
-    before calling it, so the decorator only replaces the final use-case call.
+    routes run their authentication before calling it. They may also resolve
+    workspace ownership and merges there, or delegate those checks with a raw request.
     Forwarding is path-driven: the handler declares ``request: Request`` and its
     caller path is forwarded, so adding an endpoint needs no entry here, and the
     source is read off that same path. Pass ``source`` to pin it for a caller that
@@ -188,6 +189,7 @@ def memory_profile_proxy(
     body parsed inside the handler keeps its ``exclude_unset`` semantics.
     ``preserve_status`` returns the upstream HTTP status instead of forcing 200,
     for endpoints whose legacy contract distinguishes 4xx/5xx.
+    ``request_headers`` allowlists route-specific headers to send upstream.
 
     ``principal_arg`` names the handler argument carrying the caller when it is
     not ``current_user``; when neither is present the API-key context established
@@ -195,6 +197,7 @@ def memory_profile_proxy(
     """
 
     bounds = dict(upper_bounds or {})
+    forwarded_header_names = {name.lower().encode("ascii") for name in request_headers}
 
     def decorate(handler):
         handler_signature = signature(handler)
@@ -279,6 +282,13 @@ def memory_profile_proxy(
             caller_source = (
                 _caller_source(caller_path) if source is None else source
             )
+            request_options = {}
+            if forwarded_header_names:
+                request_options["request_headers"] = tuple(
+                    (name, value.strip(b" \t"))
+                    for name, value in request.headers.raw
+                    if name.lower() in forwarded_header_names
+                )
             try:
                 result = await get_memory_profile_client().request(
                     method=request.method,
@@ -296,6 +306,7 @@ def memory_profile_proxy(
                     raw_body=raw_body,
                     raw=True,
                     timeout=timeout_seconds,
+                    **request_options,
                 )
                 if isinstance(result, MemoryProfileRawResponse):
                     # The upstream body is already a serialized ApiResponse;
