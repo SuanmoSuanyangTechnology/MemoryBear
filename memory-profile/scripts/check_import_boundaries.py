@@ -38,7 +38,6 @@ MIGRATION_PATHS = (
 OBSOLETE_PATHS = (
     SERVICE_ROOT / "src/api",
     SERVICE_ROOT / "src/main.py",
-    SERVICE_ROOT / "src/domain",
     SERVICE_ROOT / "src/infrastructure/celery.py",
     SERVICE_ROOT / "src/models/owned/base.py",
     SERVICE_ROOT / "src/modules/analytics/repository/cache.py",
