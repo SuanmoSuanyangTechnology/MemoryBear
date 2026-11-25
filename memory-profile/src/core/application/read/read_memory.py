@@ -18,13 +18,13 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections.abc import Callable
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 from src.core.application.read.context import ReadContextFactory
 from src.core.application.read.projection import memory_dumps
 from src.core.application.read.read_pipeline import ReadPipeline
 from src.core.application.text.retrieval_text import process_query
-from src.core.domain.enums import SearchStrategy
+from src.core.domain.enums import SearchStrategy, StorageType
 from src.core.domain.errors import EndUserNotFoundError
 from src.core.domain.models import (
     ReadContext,
@@ -65,6 +65,9 @@ class ReadMemory:
         *,
         language: str | None = None,
         options: ReadOptions | None = None,
+        draft: bool = False,
+        config_id: UUID | None = None,
+        storage_type: StorageType | None = None,
     ) -> ReadOutcome | dict[str, ReadOutcome]:
         resolved_language = language or self._language_default
         options = options or ReadOptions(record_display=True)
@@ -86,7 +89,9 @@ class ReadMemory:
                         principal=principal,
                         end_user_id=end_user_id,
                         language=resolved_language,
-                        draft=False,
+                        draft=draft,
+                        config_id=config_id,
+                        storage_type=storage_type,
                     ),
                 )
             )

@@ -1,11 +1,12 @@
 """Internal memory-read routes.
 
-Three interfaces, one core:
+Four interfaces, one core:
 
 * ``POST /memory/read/sync`` — JSON, API-key reachable (``@external_api``);
 * ``POST /memory/read/internal`` — JSON with retrieval options, API-key
   reachable (``@external_api``);
 * ``POST /memory/read/stream`` — SSE, management face only.
+* ``POST /memory/read/prediction-statements`` — JSON, prediction recall.
 
 All call the same application use cases through ``src.core.composition``; the
 transport layer never touches retrieval, storage or model code.
@@ -15,15 +16,16 @@ from __future__ import annotations
 
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Body, Depends, Request
+from fastapi import APIRouter, Body, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 
 from src.common.external_api import external_api
 from src.common.responses import ApiResponse
-from src.middleware.auth import MemoryPrincipal
+from src.middleware.auth import SOURCE_INTERNAL, MemoryPrincipal
 from src.middleware.identity import require_memory_context
 from src.modules.memory_read.handler import MemoryReadHandler
 from src.modules.memory_read.schemas import (
+    PredictionStatementReadBody,
     ReadInternalBody,
     ReadStreamBody,
     ReadSyncBody,
@@ -66,6 +68,17 @@ async def read_memory_internal(
     body: ReadInternalBody = Body(...),  # noqa: B008
 ) -> SyncResponse:
     return await _handler(request).read_internal(request, context, body)
+
+
+@router.post("/prediction-statements", response_model=SyncResponse)
+async def read_prediction_statements(
+    request: Request,
+    context: Context,
+    body: PredictionStatementReadBody,
+) -> SyncResponse:
+    if context.source != SOURCE_INTERNAL:
+        raise HTTPException(status_code=403, detail="user context is required")
+    return await _handler(request).read_prediction_statements(request, context, body)
 
 
 @router.post(
