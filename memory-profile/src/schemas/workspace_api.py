@@ -38,34 +38,6 @@ class WorkspaceApiResponse(BaseModel):
     time: int = Field(default_factory=now_ms)
 
 
-class WorkspaceRetentionPolicyUpdate(BaseModel):
-    """Body of ``PUT /workspaces/temporary-memory-retention``."""
-
-    retention_days: int | None = Field(
-        default=None,
-        ge=1,
-        le=3650,
-        description="临时身份保留天数，null 表示永不过期",
-    )
-
-
-class WorkspaceRetentionPolicyData(BaseModel):
-    """``data`` of the retention-policy GET/PUT.
-
-    The PUT returns only ``retention_days`` (the host dumps the model with
-    ``exclude_unset=True``), so ``end_user_count`` stays ``None`` there.
-    """
-
-    retention_days: int | None = Field(
-        default=None, ge=1, le=3650, description="临时身份保留天数，null 表示永不过期"
-    )
-    end_user_count: int | None = Field(
-        default=None,
-        ge=0,
-        description="当前工作空间中至少有一条记忆的有效临时 EndUser 数量",
-    )
-
-
 class ReembedEndUserItem(BaseModel):
     """One end user's state inside a re-embed job."""
 

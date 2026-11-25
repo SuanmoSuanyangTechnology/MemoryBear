@@ -1,4 +1,4 @@
-"""Internal routes for the migrated workspace memory-policy endpoints.
+"""Internal routes for the migrated workspace re-embed endpoints.
 
 Paths mirror the monolith exactly (``/workspaces/...``) because the API proxy
 forwards the caller's path unchanged after mapping ``/api`` or ``/v1`` onto
@@ -28,7 +28,6 @@ from src.modules.workspace.handler import WorkspaceHandler
 from src.schemas.workspace_api import (
     WorkspaceApiResponse,
     WorkspaceReembedJobCreate,
-    WorkspaceRetentionPolicyUpdate,
 )
 
 router = APIRouter(prefix="/workspaces", tags=["Workspace"])
@@ -37,32 +36,6 @@ Context = Annotated[MemoryPrincipal, Depends(require_memory_context)]
 
 def _handler(request: Request) -> WorkspaceHandler:
     return WorkspaceHandler(request.app.state.runtime)
-
-
-# ── Temporary-identity retention policy ──────────────────────────────────────
-
-
-@router.get(
-    "/temporary-memory-retention",
-    response_model=WorkspaceApiResponse,
-)
-async def get_workspace_retention_policy(
-    request: Request,
-    context: Context,
-) -> ApiResponse[Any] | JSONResponse:
-    return await _handler(request).get_retention_policy(context, request)
-
-
-@router.put(
-    "/temporary-memory-retention",
-    response_model=WorkspaceApiResponse,
-)
-async def update_workspace_retention_policy(
-    request: Request,
-    context: Context,
-    body: WorkspaceRetentionPolicyUpdate,
-) -> ApiResponse[Any] | JSONResponse:
-    return await _handler(request).update_retention_policy(context, body, request)
 
 
 # ── Re-embed per-user status lists ───────────────────────────────────────────

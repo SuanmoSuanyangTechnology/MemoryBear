@@ -1,14 +1,12 @@
-"""Transport adaptation for the migrated workspace memory-policy endpoints.
+"""Transport adaptation for the migrated workspace re-embed endpoints.
 
 Three groups share this handler:
 
-* the temporary-identity retention policy (GET/PUT) — the API controller's ``msg``
-  comes from its own i18n catalog, so the profile routes resolve the same keys
-  against the caller's forwarded language; the PUT keeps the host's
-  ``exclude_unset`` payload (``retention_days`` only);
 * the re-embed status reads (the two job-detail routes and the two per-user
   lists) — the host returns the plain ``ApiResponse`` envelope, so the payload
   shapes are described by ``src.schemas.workspace_api``;
+* the job-creation route called by the workspace service — it registers the
+  pending job and publishes the driver;
 * the four manual-retry routes — the retry logic itself now runs here, in
   ``ReembedRetryService``; only the downstream re-embed workers are still
   published to the API worker.
@@ -38,12 +36,11 @@ from src.common.responses import (
     http_error_response,
     success,
 )
-from src.i18n import get_request_language, translate_request
+from src.i18n import get_request_language
 from src.middleware.auth import MemoryPrincipal
 from src.runtime import ProfileRuntime
 from src.schemas.workspace_api import (
     WorkspaceReembedJobCreate,
-    WorkspaceRetentionPolicyUpdate,
 )
 from src.services.reembed_jobs import (
     ReembedJobCreateConflictError,
@@ -60,13 +57,9 @@ from src.services.reembed_status import (
     ReembedJobNotFoundError,
     ReembedStatusService,
 )
-from src.services.workspace_retention import WorkspaceRetentionService
 
 logger = logging.getLogger(__name__)
 
-#: Host controller message keys; the profile locale catalog mirrors their text.
-RETENTION_RETRIEVED_KEY = "workspace.retention_policy.retrieved"
-RETENTION_UPDATED_KEY = "workspace.retention_policy.updated"
 #: Host literal message for "list current" when no job is visible.
 NO_CURRENT_JOB_MSG = "no re-embed job"
 #: Host ``HTTPException`` detail for a missing (or foreign) job.
@@ -82,33 +75,9 @@ def _ok_message(request: Request) -> str:
 class WorkspaceHandler:
     def __init__(self, runtime: ProfileRuntime) -> None:
         self.runtime = runtime
-        self.retention = WorkspaceRetentionService(runtime.postgres)
         self.reembed = ReembedStatusService(runtime.postgres)
         self.retry = ReembedRetryService(runtime)
         self.jobs = ReembedJobService(runtime)
-
-    # ------------------------------------------------------- retention policy
-
-    async def get_retention_policy(
-        self, principal: MemoryPrincipal, request: Request
-    ) -> ApiResponse[Any] | JSONResponse:
-        data = await self.retention.policy(principal.workspace_id)
-        return success(
-            data=data, msg=translate_request(request, RETENTION_RETRIEVED_KEY)
-        )
-
-    async def update_retention_policy(
-        self,
-        principal: MemoryPrincipal,
-        payload: WorkspaceRetentionPolicyUpdate,
-        request: Request,
-    ) -> ApiResponse[Any] | JSONResponse:
-        data = await self.retention.update(
-            principal.workspace_id, payload.retention_days
-        )
-        return success(
-            data=data, msg=translate_request(request, RETENTION_UPDATED_KEY)
-        )
 
     # ---------------------------------------------------- re-embed end users
 
