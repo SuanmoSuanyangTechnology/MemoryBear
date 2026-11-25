@@ -241,8 +241,8 @@ class ProfileSettings(BaseSettings):
     redis_port: int = Field(6379, validation_alias="REDIS_PORT")
     redis_password: str | None = Field(None, validation_alias="REDIS_PASSWORD")
     redis_db: int = Field(1, validation_alias="REDIS_DB")
-    #: The API's Celery-result-backend DB; the merge write lock lives there so
-    #: API and memory-jobs writers take the same lock.
+    #: The API's Celery-result-backend DB; shared locks and dashboard throttling
+    #: use this logical database.
     redis_db_celery_backend: int = Field(4, validation_alias="REDIS_DB_CELERY_BACKEND")
     redis_pool_size: int = Field(100, validation_alias="PROFILE_REDIS_POOL_SIZE")
 
