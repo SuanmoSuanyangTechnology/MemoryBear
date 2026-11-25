@@ -4,7 +4,7 @@
  * no confirm button; footer only shows the hint and Cancel.
  */
 import { useState } from 'react';
-import { Button, Dropdown, Flex, Upload } from 'antd';
+import { Button, Dropdown, Flex, Space, Upload } from 'antd';
 import clsx from 'clsx';
 
 import RbDrawer from '@/components/RbDrawer';
@@ -14,6 +14,7 @@ import type { FaqImportStage } from './hooks/useFaqImport';
 import useFaqImportI18n from './hooks/useFaqImportI18n';
 import {
   downloadFaqImportTemplate,
+  isFaqImportReady,
   type FaqImportParseResult,
   type FaqImportTemplateFormat,
 } from './faqImportFile';
@@ -32,11 +33,12 @@ interface FaqImportDrawerProps {
   stage: FaqImportStage;
   parseResult: FaqImportParseResult | null;
   onFile: (file: File) => void;
+  onConfirm: () => void;
   onClose: () => void;
 }
 
 export default function FaqImportDrawer({
-  open, mode, onModeChange, fileName, readId, parsing, stage, parseResult, onFile, onClose,
+  open, mode, onModeChange, fileName, readId, parsing, stage, parseResult, onFile, onConfirm, onClose,
 }: FaqImportDrawerProps) {
   const key = useFaqImportI18n();
   const [dragging, setDragging] = useState(false);
@@ -52,6 +54,10 @@ export default function FaqImportDrawer({
         ? key('footerInvalid')
         : key('footerReady');
 
+  const ready = Boolean(parseResult && isFaqImportReady(parseResult) && stage === 'input' && !parsing);
+  const count = parseResult?.rows.length ?? 0;
+  const confirmLabel = key('confirmButton', { count });
+
   return (
     <RbDrawer
       title={key('title')}
@@ -63,7 +69,14 @@ export default function FaqImportDrawer({
           <span className={clsx('rb:text-[12px]', (hasFailures || parseResult?.error) ? 'rb:text-red-500' : 'rb:text-gray-600')}>
             {footerHint}
           </span>
-          <Button onClick={onClose}>{key('cancel')}</Button>
+          <Space size={12}>
+            <Button onClick={onClose}>{key('cancel')}</Button>
+            {ready &&
+              <Button type="primary" danger={mode === 'replace'} onClick={onConfirm}>
+                {confirmLabel}
+              </Button>
+            }
+          </Space>
         </Flex>
       )}
     >

@@ -8,6 +8,7 @@ adapter instead of a second copy of the chat pipeline.
 
 from __future__ import annotations
 
+import asyncio
 import json
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
@@ -16,13 +17,15 @@ from typing import Any
 from uuid import UUID
 
 from sqlalchemy import select
+from sqlalchemy.exc import TimeoutError as PoolTimeoutError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..db import get_async_db_context
-from ..errors import BizCode, BusinessException, ResourceNotFoundException
+from ..errors import BizCode, BusinessException, ChatDatabaseBusy, ResourceNotFoundException
 from ..models import App, AppRelease, AppType
 from ..repositories import cross_domain_read
 from ..response_utils import success
+from ..runtime import get_process_runtime
 from ..schemas.app_schema import AppChatRequest
 from ..schemas.conversation_schema import ChatResponse
 from ..utils.app_config_utils import (
@@ -131,6 +134,22 @@ async def _get_current_release_async(
     return await db.get(AppRelease, resolved.release_id)
 
 
+async def _acquire_chat_connection(db: AsyncSession) -> None:
+    runtime = get_process_runtime()
+    settings = runtime.settings
+    capacity = (
+        settings.application_service_db_pool_size + settings.application_service_db_max_overflow
+    )
+    if runtime.database.async_pool().checkedout() >= capacity:
+        raise ChatDatabaseBusy
+    # Async sessions acquire lazily. Bound acquisition without interrupting business SQL.
+    try:
+        async with asyncio.timeout(settings.application_service_chat_db_acquire_timeout_seconds):
+            await db.connection()
+    except (TimeoutError, PoolTimeoutError) as exc:
+        raise ChatDatabaseBusy from exc
+
+
 def _check_app_config(release: AppRelease) -> None:
     """The release snapshot must carry usable config (host ``_checkAppConfig``)."""
 
@@ -170,6 +189,7 @@ async def prepare_chat(
             cached_release_id = UUID(app_cache["release_id"])
 
     async with get_async_db_context() as adb:
+        await _acquire_chat_connection(adb)
         if app_stub is not None:
             app = app_stub
         else:
@@ -445,6 +465,7 @@ async def resolve_v1_app_async(
     *,
     api_key_id: str | None,
     workspace_id: UUID | None,
+    fail_fast: bool = False,
 ) -> UUID | None:
     """Async port of the ``/v1`` key-binding gate (same messages and codes)."""
 
@@ -455,11 +476,11 @@ async def resolve_v1_app_async(
     except (ValueError, TypeError) as error:
         raise BusinessException("API Key 无效或已过期", BizCode.API_KEY_INVALID) from error
 
-    binding = (
-        await cross_domain_read.get_api_key_binding_async(db, key_id, workspace_id)
-        if workspace_id is not None
-        else None
-    )
+    if workspace_id is None:
+        raise BusinessException("API Key 无效或已过期", BizCode.API_KEY_INVALID)
+    if fail_fast:
+        await _acquire_chat_connection(db)
+    binding = await cross_domain_read.get_api_key_binding_async(db, key_id, workspace_id)
     if binding is None:
         raise BusinessException("API Key 无效或已过期", BizCode.API_KEY_INVALID)
 
@@ -475,14 +496,14 @@ async def resolve_v1_app_async(
 
 
 async def resolve_app_for_chat(
-    *, api_key_id: str | None, workspace_id: UUID | None
+    *, api_key_id: str | None, workspace_id: UUID | None, fail_fast: bool = False
 ) -> UUID:
     """Resolve the bound app of a chat call on its own async session."""
 
     async with get_async_db_context() as db:
         return require_bound_app_id(
             await resolve_v1_app_async(
-                db, api_key_id=api_key_id, workspace_id=workspace_id
+                db, api_key_id=api_key_id, workspace_id=workspace_id, fail_fast=fail_fast
             )
         )
 

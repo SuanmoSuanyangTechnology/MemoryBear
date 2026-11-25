@@ -25,6 +25,7 @@ from sqlalchemy import (
     text as sa_text,
 )
 from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.exc import DBAPIError
 
 from ..config import current_settings
 from ..db import get_async_db_context
@@ -459,6 +460,7 @@ async def _bulk_persist_messages(
         assistant_content = args.get("content_override") or (
             result.full_content if result else "")
         _add_row(_row(msg_id, conv_id, "assistant", assistant_content, assistant_meta,
+                      status=args.get("assistant_status", "completed"),
                       parent_message_id=user_msg_id), conv_id)
 
         conv_titles[conv_id] = (
@@ -600,14 +602,24 @@ async def _handle_save_node_executions(
     )
     await db.execute(sa_insert(WorkflowNodeExecution).values(items))
 
-    if not current_settings().workflow_node_execution_retention_enabled:
+    settings = current_settings()
+    if not settings.workflow_node_execution_retention_enabled:
         return
-    # Runs after the INSERT above, inside the same batch transaction: if the
-    # write fails we must not lose the previous execution's records either.
-    result = await db.execute(
-        sa_text(NODE_EXECUTION_RETENTION_SQL),
-        {"eid": str(execution_id)},
-    )
+    # Roll back only cleanup if it hits the maintenance time budget.
+    statement_timeout = settings.application_service_db_statement_timeout_ms
+    timeout_ms = min(500, statement_timeout)
+    try:
+        async with db.begin_nested():
+            await db.execute(sa_text(f"SET LOCAL statement_timeout = '{timeout_ms}ms'"))
+            result = await db.execute(
+                sa_text(NODE_EXECUTION_RETENTION_SQL), {"eid": str(execution_id)}
+            )
+            await db.execute(sa_text(f"SET LOCAL statement_timeout = '{statement_timeout}ms'"))
+    except DBAPIError as exc:
+        if getattr(exc.orig, "sqlstate", None) not in {"55P03", "57014"}:
+            raise
+        logger.info("Deferred node execution retention (execution_id=%s)", execution_id)
+        return
     if result.rowcount:
         logger.debug(
             "node execution retention removed %s stale rows (execution_id=%s)",

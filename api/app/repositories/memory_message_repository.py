@@ -1298,7 +1298,7 @@ class MemoryMessageRepository:
             )
             .join(Workspace, EndUser.workspace_id == Workspace.id)
             .join(MemoryConfig, Workspace.memory_config == MemoryConfig.config_id)
-            .where(EndUser.id.in_(valid_ids))
+            .where(EndUser.id.in_(valid_ids), EndUser.is_active.is_(True))
         ).all()
         for row in rows:
             configs[str(row.end_user_id)] = row

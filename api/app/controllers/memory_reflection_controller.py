@@ -29,6 +29,7 @@ from app.core.memory.storage_services.reflection_engine.self_reflexion import (
 from app.core.response_utils import success
 from app.db import get_async_db_context
 from app.dependencies import get_current_user_async, CurrentUserSnapshot
+from app.integrations.profile.proxy import memory_profile_proxy
 from app.repositories.memory_config_repository import MemoryConfigRepository
 from app.repositories.neo4j.neo4j_connector import Neo4jConnector
 from app.services.memory_reflection_service import (
@@ -37,7 +38,7 @@ from app.services.memory_reflection_service import (
 )
 from app.services.model_service import ModelConfigService
 from dotenv import load_dotenv
-from fastapi import APIRouter, Depends, HTTPException, status, Header
+from fastapi import APIRouter, Depends, HTTPException, Request, status, Header
 from sqlalchemy import text
 
 from app.utils.config_utils import resolve_config_id
@@ -343,7 +344,9 @@ async def start_workspace_reflection(
 
 
 @router.get("/reflection/run")
+@memory_profile_proxy(query_fields=("config_id",), preserve_status=True, timeout_seconds=600)
 async def reflection_run(
+        request: Request,
         config_id: UUID | int,
         language_type: str = Header(default=None, alias="X-Language-Type"),
         current_user: CurrentUserSnapshot = Depends(get_current_user_async),

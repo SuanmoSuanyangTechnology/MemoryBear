@@ -16,6 +16,7 @@ from app.models.workspace_model import Workspace
 from app.repositories import knowledge_repository, knowledgeshare_repository
 from app.schemas.knowledge_schema import KnowledgeCreate
 from app.schemas.knowledgeshare_schema import KnowledgeShareCreate, KnowledgeShareRequest
+from app.services import knowledge_service
 
 # Obtain a dedicated logger for business logic
 business_logger = get_business_logger()
@@ -200,23 +201,37 @@ def delete_knowledgeshare_by_id(db: Session, knowledgeshare_id: uuid.UUID, curre
         raise
 
 
-async def delete_knowledgeshare_by_id_async(db: AsyncSession, knowledgeshare_id: uuid.UUID, current_user: User) -> None:
+async def delete_knowledgeshare_by_id_async(db: AsyncSession, knowledgeshare_id: uuid.UUID, current_user: User) -> bool:
     business_logger.info(f"Delete knowledge base sharing (async): knowledgeshare_id={knowledgeshare_id}, operator: {current_user.username}")
 
     try:
-        workspace_id = current_user.current_workspace_id
-        if workspace_id is None:
-            return
-        await knowledgeshare_repository.delete_knowledgeshare_by_id_in_source_workspace_async(
+        share = await get_knowledgeshare_by_id_async(db, knowledgeshare_id, current_user)
+        if share is None:
+            return False
+
+        target_kb_id = share.target_kb_id
+        await knowledge_repository.lock_share_source_async(db, share.source_kb_id)
+        deleted = await knowledgeshare_repository.delete_knowledgeshare_by_id_in_source_workspace_async(
             db=db,
-            knowledgeshare_id=knowledgeshare_id,
-            source_workspace_id=workspace_id,
+            knowledgeshare_id=share.id,
+            source_workspace_id=share.source_workspace_id,
+            commit=False,
+        )
+        if not deleted:
+            await db.rollback()
+            return False
+
+        # The target deletion commits both deletes together.
+        await knowledge_service.delete_knowledge_by_id_async(
+            db, knowledge_id=target_kb_id, current_user=current_user
         )
         business_logger.info(
             f"knowledge base sharing deleted successfully (async): "
             f"knowledgeshare_id={knowledgeshare_id}, operator: {current_user.username}"
         )
+        return True
     except Exception as e:
+        await db.rollback()
         business_logger.error(f"Failed to delete knowledge base sharing (async): knowledgeshare_id={knowledgeshare_id} - {str(e)}")
         raise
 

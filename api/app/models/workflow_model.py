@@ -3,7 +3,9 @@
 """
 
 import uuid
-from sqlalchemy import Column, String, Boolean, DateTime, Integer, BigInteger, Float, ForeignKey, Text, text
+from sqlalchemy import (
+    BigInteger, Boolean, Column, DateTime, Float, ForeignKey, Index, Integer, String, Text, text,
+)
 from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy.orm import relationship
 from app.db import Base
@@ -135,6 +137,17 @@ class WorkflowExecution(Base):
     
     created_at = Column(DateTime, nullable=False, default=utcnow_naive)
     
+    __table_args__ = (
+        Index(
+            "ix_workflow_executions_retention_order",
+            app_id,
+            workflow_config_id,
+            started_at.desc(),
+            created_at.desc(),
+            id.desc(),
+        ),
+    )
+
     # 关系
     workflow_config = relationship("WorkflowConfig", back_populates="executions")
     app = relationship("App")

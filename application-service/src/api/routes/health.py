@@ -2,46 +2,20 @@
 
 from __future__ import annotations
 
-import asyncio
 import time
-from collections.abc import Awaitable, Callable
 
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 
 from ...request_logging import log_request_failure
 from ...runtime import ProcessRuntime
-from ..schemas.health import ComponentHealth, HealthResponse
+from ..schemas.health import HealthResponse
 
 router = APIRouter(prefix="/health", tags=["Health"])
 
 
 def _timestamp_ms() -> int:
     return time.time_ns() // 1_000_000
-
-
-async def _probe_component(
-    probe: Callable[[], Awaitable[bool]],
-    timeout_seconds: float,
-) -> ComponentHealth:
-    started = time.perf_counter_ns()
-    try:
-        async with asyncio.timeout(timeout_seconds):
-            available = await probe()
-        status = "up" if available else "down"
-        error_type = None if available else "Unavailable"
-    except TimeoutError:
-        status = "timeout"
-        error_type = "TimeoutError"
-    except Exception as exc:
-        status = "down"
-        error_type = type(exc).__name__
-    latency_ms = max(0, (time.perf_counter_ns() - started) // 1_000_000)
-    return ComponentHealth(
-        status=status,
-        latency_ms=latency_ms,
-        error_type=error_type,
-    )
 
 
 @router.get("/live", response_model=HealthResponse)
@@ -56,15 +30,12 @@ async def live(request: Request) -> HealthResponse:
 @router.get("/ready", response_model=HealthResponse)
 async def ready(request: Request) -> HealthResponse | JSONResponse:
     runtime: ProcessRuntime = request.app.state.runtime
-    timeout_seconds = runtime.settings.application_service_health_probe_timeout_seconds
-    names = ("database", "redis")
-    probes = (runtime.database.ping, runtime.redis.ping)
-    results = await asyncio.gather(*(_probe_component(probe, timeout_seconds) for probe in probes))
-    components = dict(zip(names, results, strict=True))
-    is_ready = all(component.status == "up" for component in results)
+    readiness = runtime.readiness
+    components = readiness.components
+    is_ready = readiness.is_ready
     response = HealthResponse(
         status="ready" if is_ready else "not_ready",
-        checked_at_ms=_timestamp_ms(),
+        checked_at_ms=readiness.checked_at_ms or _timestamp_ms(),
         trace_id=request.state.trace_id,
         code=None if is_ready else "APP_NOT_READY",
         retryable=None if is_ready else True,

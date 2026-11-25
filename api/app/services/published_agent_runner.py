@@ -261,7 +261,10 @@ class PublishedAgentRunner:
                     if runtime.is_cluster and event["type"] not in ("message", "end", "error"):
                         continue
                     if event["type"] == "error":
-                        error = event["data"].get("error")
+                        # 统一错误帧的 error 是诊断信息（trace_id 等），面向用户的
+                        # 文案在 msg；旧形状帧没有 msg 时回退到 error。
+                        data = event["data"] if isinstance(event["data"], dict) else {}
+                        error = data.get("msg") or data.get("error")
                         if isinstance(error, dict):
                             error = error.get("message") or json.dumps(error, ensure_ascii=False)
                         raise BusinessException(str(error or "引用 Agent 执行失败"), BizCode.INTERNAL_ERROR)

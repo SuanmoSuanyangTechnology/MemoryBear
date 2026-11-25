@@ -220,21 +220,15 @@ async def delete_knowledgeshare(
     api_logger.info(f"Delete knowledge base sharing request: knowledgeshare_id={knowledgeshare_id}, username: {current_user.username}")
 
     try:
-        # 1. Query knowledge base sharing information from the database
-        api_logger.debug(f"Query knowledge base sharing: {knowledgeshare_id}")
-        db_knowledgeshare = await knowledgeshare_service.get_knowledgeshare_by_id_async(db, knowledgeshare_id=knowledgeshare_id, current_user=current_user)
-        if not db_knowledgeshare:
+        deleted = await knowledgeshare_service.delete_knowledgeshare_by_id_async(
+            db, knowledgeshare_id=knowledgeshare_id, current_user=current_user
+        )
+        if not deleted:
             api_logger.warning(f"The knowledge base sharing does not exist or access is denied: knowledgeshare_id={knowledgeshare_id}")
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="The knowledge base sharing does not exist or access is denied"
             )
-        # 2. Deleting shared knowledge base
-        await knowledge_service.delete_knowledge_by_id_async(db, knowledge_id=db_knowledgeshare.target_kb_id ,current_user=current_user)
-        # 3. Delete knowledge base sharing
-        api_logger.debug(f"perform knowledge base sharing delete: (ID: {knowledgeshare_id})")
-
-        await knowledgeshare_service.delete_knowledgeshare_by_id_async(db, knowledgeshare_id=knowledgeshare_id, current_user=current_user)
         api_logger.info(f"The knowledge base sharing has been successfully deleted: (ID: {knowledgeshare_id})")
         return success(msg="The knowledge base sharing has been successfully deleted")
     except Exception as e:

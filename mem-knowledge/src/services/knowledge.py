@@ -680,7 +680,7 @@ async def prepare_knowledge_update(
     )
     if knowledge is None:
         raise _not_found()
-    if {"parent_id", "status"} & update_dict.keys():
+    if {"parent_id", "status", "type"} & update_dict.keys():
         from ..bootstrap import get_settings
 
         await db.run_sync(
@@ -754,7 +754,7 @@ async def apply_knowledge_update(
     )
     if knowledge is None:
         raise _not_found()
-    if {"parent_id", "status"} & plan.update_fields.keys():
+    if {"parent_id", "status", "type"} & plan.update_fields.keys():
         from ..bootstrap import get_settings
 
         await db.run_sync(
