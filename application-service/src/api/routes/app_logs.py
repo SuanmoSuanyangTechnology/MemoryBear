@@ -215,6 +215,7 @@ def get_app_log_detail(
     else:
         # Agent: convert ORM Message objects one by one, extracting files
         msg_list = []
+        message_times = log_service.get_agent_message_times(conversation_id, messages)
 
         # Collect local file ids and resolve them to accessible URLs in one
         # batch (locally persisted files only store upload_file_id).
@@ -271,7 +272,7 @@ def get_app_log_detail(
                 status=m.status,
                 meta_data=response_meta,
                 files=files,
-                created_at=m.created_at,
+                created_at=message_times.get(m.id, m.created_at),
             ))
 
     # Human-intervention info, scoped to the page's workflow executions;

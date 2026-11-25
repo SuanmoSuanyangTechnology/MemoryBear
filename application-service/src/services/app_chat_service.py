@@ -38,6 +38,7 @@ from ..integrations.knowledge.contracts import KnowledgeRetrievalSource
 from ..integrations.model.errors import ModelInvokeCancelledError
 from ..memory.emotion.emotion_resolver import (
     apply_detection as apply_emotion_detection,
+    cancel_detection as cancel_emotion_detection,
 )
 from ..memory.emotion.emotion_resolver import (
     start_detection as start_emotion_detection,
@@ -501,6 +502,40 @@ class AppChatService:
         except Exception as e:
             logger.warning(f"Failed to release DB connection: {e}")
 
+    async def _persist_non_streaming_failure(
+            self,
+            exc: Exception,
+            *,
+            conversation_id: uuid.UUID,
+            user_message_id: uuid.UUID,
+            message_id: uuid.UUID,
+            message: str,
+            start_time: float,
+            execution_id: uuid.UUID | None = None,
+    ) -> None:
+        try:
+            from .batch_persist_queue import persist_failed_chat_turn
+
+            trace_id = get_trace_id()
+            error = error_payload(exc, locale=get_current_locale(), trace_id=trace_id)
+            await self._release_db_connection()
+            await persist_failed_chat_turn(
+                conversation_id=conversation_id,
+                user_message_id=user_message_id,
+                message_id=message_id,
+                message=message,
+                error_code=error["code"],
+                error_message=error["msg"],
+                trace_id=trace_id,
+                started_at=parse_timestamp_to_utc_naive(start_time),
+                execution_id=execution_id,
+            )
+        except Exception:
+            logger.exception(
+                "Failed to persist non-streaming chat turn",
+                extra={"conversation_id": str(conversation_id), "message_id": str(message_id)},
+            )
+
     @staticmethod
     def _append_history_message(
             history: Optional[List[dict]],
@@ -814,23 +849,30 @@ class AppChatService:
         # Resolve model config id
         model_config_id = config.default_model_config_id
         tenant_id = await self._resolve_tenant_id_async(workspace_id)
-        api_key_obj = await ModelApiKeyService.resolve_runtime_api_key_bridge_or_raise_async(
-            self.db,
-            model_config_id,
-            tenant_id=tenant_id,
-        )
-        if not api_key_obj:
-            await ModelConfigService.raise_model_unavailable_bridge_async(
-                self.db, model_config_id, tenant_id=tenant_id
+        try:
+            api_key_obj = await ModelApiKeyService.resolve_runtime_api_key_bridge_or_raise_async(
+                self.db, model_config_id, tenant_id=tenant_id,
             )
-        # Remote mode: the non-decrypted view feeds the invoke seam and
-        # multimodal formatting; credentials on the key object still serve
-        # sandbox / usage consumers.
-        model_view = await ModelConfigService.get_runtime_model_view_bridge_async(
-            self.db,
-            model_config_id,
-            tenant_id=tenant_id,
-        )
+            if not api_key_obj:
+                await ModelConfigService.raise_model_unavailable_bridge_async(
+                    self.db, model_config_id, tenant_id=tenant_id,
+                )
+            # The non-decrypted model view feeds invoke and multimodal formatting.
+            model_view = await ModelConfigService.get_runtime_model_view_bridge_async(
+                self.db, model_config_id, tenant_id=tenant_id,
+            )
+        except BusinessException as exc:
+            cancel_emotion_detection(emotion_detection)
+            if not skip_save:
+                await self._persist_non_streaming_failure(
+                    exc,
+                    conversation_id=conversation_id,
+                    user_message_id=user_message_id,
+                    message_id=message_id,
+                    message=message,
+                    start_time=start_time,
+                )
+            raise
         # Render the system prompt (variable substitution supported)
         system_prompt = config.system_prompt
         if variables:
@@ -2040,35 +2082,41 @@ class AppChatService:
                 "elapsed_time": time.time() - start_time,
             }
 
-        # 2. Create the orchestrator
-        orchestrator = await MultiAgentOrchestrator.create(self.db, config)
-
-        # New-conversation opening statement (queries only when
-        # features.opening_statement is on; legacy clusters have empty features,
-        # zero cost)
-        opening_statement, opening_suggested_questions = await self._resolve_cluster_opening(
-            orchestrator, conversation_id, variables
-        )
-
-        # 3. Execute the task
-        result = await orchestrator.execute(
-            message=message,
-            conversation_id=conversation_id,
-            user_id=user_id,
-            variables=variables,
-            use_llm_routing=True,  # LLM routing enabled by default
-            web_search=web_search,  # web search switch
-            memory=memory,  # memory switch
-            # S5: these two arguments used to be dropped on the non-streaming
-            # entry (collaboration mode therefore lost storage/memory context)
-            storage_type=storage_type,
-            user_rag_memory_id=user_rag_memory_id,
-            message_id=message_id,
-            thinking=thinking,
-            opening_statement=opening_statement,
-            files=files or None,  # attachments (absent/empty = previous behavior)
-            user_message_id=user_message_id,  # emotion cache key (features.emotion_reply only)
-        )
+        orchestrator = None
+        try:
+            orchestrator = await MultiAgentOrchestrator.create(self.db, config)
+            opening_statement, opening_suggested_questions = await self._resolve_cluster_opening(
+                orchestrator, conversation_id, variables
+            )
+            result = await orchestrator.execute(
+                message=message,
+                conversation_id=conversation_id,
+                user_id=user_id,
+                variables=variables,
+                use_llm_routing=True,
+                web_search=web_search,
+                memory=memory,
+                storage_type=storage_type,
+                user_rag_memory_id=user_rag_memory_id,
+                message_id=message_id,
+                thinking=thinking,
+                opening_statement=opening_statement,
+                files=files or None,
+                user_message_id=user_message_id,
+            )
+        except ModelInvokeCancelledError:
+            raise
+        except Exception as exc:
+            await self._persist_non_streaming_failure(
+                exc,
+                conversation_id=conversation_id,
+                user_message_id=user_message_id,
+                message_id=message_id,
+                message=message,
+                start_time=start_time,
+                execution_id=getattr(orchestrator, "current_execution_id", None),
+            )
+            raise
 
         elapsed_time = time.time() - start_time
 

@@ -11,6 +11,7 @@ from error_core.messages import user_message
 from app.core.exceptions import BusinessException
 from app.core.trace import get_trace_id
 from app.i18n.exceptions import get_current_locale
+from app.i18n.service import get_translation_service
 from app.integrations.model.errors import ModelInvokeFailedError
 
 
@@ -44,6 +45,11 @@ def workflow_error_info(
         if code in (None, BizCode.OK.value):
             code = BizCode.INTERNAL_ERROR.value
         msg = user_message(code, locale) or exc.message
+        field = exc.context.get("field")
+        if code == BizCode.MISSING_PARAMETER and isinstance(field, str) and field:
+            msg = get_translation_service().translate(
+                "errors.validation.missing_field", locale, field=field
+            )
         detail = exc.message or code_name(code)
         retryable = http_status_for(code) >= 500
     else:
