@@ -31,7 +31,7 @@ export const readServiceStream = (
   query: TestParams,
   onMessage?: (data: SSEMessage[]) => void,
   onAbort?: (abort: () => void) => void,
-) => handleSSE('/memory/read/stream', query, onMessage, undefined, onAbort)
+) => handleSSE('/memory/read/sync', query, onMessage, undefined, onAbort)
 /****************** Memory Dashboard APIs *******************************/
 // Memory Dashboard - Total memory count
 export const getTotalMemoryCount = () => {

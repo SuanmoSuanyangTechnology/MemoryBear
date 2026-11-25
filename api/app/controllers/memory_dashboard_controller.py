@@ -2,7 +2,7 @@ import asyncio
 import uuid
 from typing import List, Optional
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status
 from kombu import Queue
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -20,7 +20,6 @@ from app.core.utils.datetime_utils import to_timestamp_ms, utcnow_naive
 from app.db import get_db, get_async_db, get_async_db_context
 from app.dependencies import get_current_user, get_current_user_async, CurrentUserSnapshot
 from app.integrations.profile.contracts import MemoryProfileAuthSource
-from app.integrations.profile.proxy import memory_profile_proxy
 from app.models.user_model import User
 from app.schemas.memory_dashboard_schema import EndUserMemoryCountsRequest
 from app.schemas.response_schema import ApiResponse
@@ -121,9 +120,7 @@ async def get_workspace_total_end_users(
 
 
 @router.get("/end_users", response_model=ApiResponse)
-@memory_profile_proxy(query_fields=("workspace_id", "page", "pagesize", "keyword", "label"), upper_bounds={"pagesize": 100})
 async def get_workspace_end_users(
-    request: Request,
     background_tasks: BackgroundTasks,
     workspace_id: Optional[uuid.UUID] = Query(None, description="工作空间ID（可选，默认当前用户工作空间）"),
     keyword: Optional[str] = Query(None, description="搜索关键词（同时模糊匹配 other_name 和 id）"),
@@ -444,9 +441,7 @@ async def get_workspace_memory_list(
     return success(data=memory_list, msg="记忆列表获取成功")
 
 @router.get("/total_memory_count", response_model=ApiResponse)
-@memory_profile_proxy(query_fields=("end_user_id",))
 async def get_workspace_total_memory_count(
-    request: Request,
     end_user_id: Optional[str] = Query(None, description="可选的用户ID"),
     current_user: CurrentUserSnapshot = Depends(get_current_user_async),
 ):
@@ -525,9 +520,7 @@ _RAG_SOURCES = frozenset(
 
 
 @router.get("/rag_content", response_model=ApiResponse)
-@memory_profile_proxy(query_fields=("end_user_id", "page", "pagesize", "start_time", "end_time", "source", "keyword", "order"), upper_bounds={"pagesize": 100})
 async def get_rag_content(
-    request: Request,
     end_user_id: str = Query(..., description="宿主ID"),
     page: int = Query(1, gt=0, description="页码，从1开始"),
     pagesize: int = Query(15, gt=0, le=100, description="每页返回记录数"),
@@ -589,9 +582,7 @@ async def get_rag_content(
 
 
 @router.get("/chunk_summary_tag", response_model=ApiResponse)
-@memory_profile_proxy(query_fields=("end_user_id", "limit", "max_tags"), upper_bounds={"limit": 100, "max_tags": 100})
 async def get_chunk_summary_tag(
-    request: Request,
     end_user_id: str = Query(..., description="宿主ID"),
     limit: int = Query(15, description="返回记录数"),
     max_tags: int = Query(10, description="最大标签数量"),
@@ -623,9 +614,7 @@ async def get_chunk_summary_tag(
 
 
 @router.get("/chunk_insight", response_model=ApiResponse)
-@memory_profile_proxy(query_fields=("end_user_id", "limit"), upper_bounds={"limit": 100})
 async def get_chunk_insight(
-    request: Request,
     end_user_id: str = Query(..., description="宿主ID"),
     limit: int = Query(15, description="返回记录数"),
     db: Session = Depends(get_db),
@@ -664,9 +653,7 @@ class GenerateRagProfileRequest(BaseModel):
 
 
 @router.post("/generate_rag_profile", response_model=ApiResponse)
-@memory_profile_proxy(body_arg="body", body_fields=("end_user_id", "limit", "max_tags"), timeout_seconds=940.0)
 async def generate_rag_profile(
-    request: Request,
     body: GenerateRagProfileRequest,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
@@ -690,9 +677,7 @@ async def generate_rag_profile(
 
 
 @router.get("/dashboard_data", response_model=ApiResponse)
-@memory_profile_proxy(query_fields=("end_user_id", "start_date", "end_date"))
 async def dashboard_data(
-    request: Request,
     end_user_id: Optional[str] = Query(None, description="可选的用户ID"),
     start_date: Optional[int] = Query(None, description="开始时间戳（毫秒）"),
     end_date: Optional[int] = Query(None, description="结束时间戳（毫秒）"),
@@ -869,9 +854,7 @@ async def dashboard_data(
 
 
 @router.post("/end_user_memory_counts", response_model=ApiResponse)
-@memory_profile_proxy(body_arg="payload", body_fields=("end_user_ids",))
 async def get_end_user_memory_counts(
-    request: Request,
     payload: EndUserMemoryCountsRequest,
     current_user: CurrentUserSnapshot = Depends(get_current_user_async),
 ):
@@ -926,9 +909,7 @@ async def get_end_user_memory_counts(
 
 
 @router.get("/memory_increment_daily", response_model=ApiResponse)
-@memory_profile_proxy(query_fields=("start_time", "end_time"))
 async def get_memory_increment_daily(
-    request: Request,
     start_time: int = Query(..., description="起始时间（毫秒 UTC，闭区间）"),
     end_time: int = Query(..., description="结束时间（毫秒 UTC，闭区间）"),
     workspace_id: Optional[uuid.UUID] = Query(

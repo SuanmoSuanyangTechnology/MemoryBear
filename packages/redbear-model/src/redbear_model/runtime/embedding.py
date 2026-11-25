@@ -9,7 +9,6 @@ from typing import Any
 from langchain_core.embeddings import Embeddings
 
 from redbear_model.contracts import (
-    EmbeddingContent,
     EmbeddingPurpose,
     EmbeddingRequest,
     EmbeddingResult,
@@ -20,8 +19,6 @@ from redbear_model.contracts import (
 from redbear_model.errors import UnsupportedModelProviderError
 from redbear_model.providers.bedrock import (
     build_bedrock_params,
-    embed_bedrock_nova,
-    is_bedrock_nova_embedding,
     load_bedrock_embedding_class,
 )
 from redbear_model.providers.dashscope import (
@@ -88,10 +85,7 @@ class RedBearEmbeddings(Embeddings):
             self._client = build_ark_client(config)
         else:
             self._model = self._create_model(config)
-            self._client = (
-                self._model.client if config.provider is ModelProvider.BEDROCK else None
-            )
-            self._owns_provider_client = self._client is not None
+            self._client = None
 
     def _create_model(self, config: ResolvedModelConfig):
         if config.provider in {
@@ -160,7 +154,8 @@ class RedBearEmbeddings(Embeddings):
                 for text in texts
             ]
         if self._is_volcano:
-            return [self.embed_text(text, encoding_format="float") for text in texts]
+            contents = [{"type": "text", "text": text} for text in texts]
+            return self.embed_multimodal(contents, encoding_format="float")
         return self._observe(
             "embed_documents",
             lambda: self._model.embed_documents(texts),
@@ -237,16 +232,6 @@ class RedBearEmbeddings(Embeddings):
     async def aembed_contents(self, request: EmbeddingRequest) -> EmbeddingResult:
         return await asyncio.to_thread(self.embed_contents, request)
 
-    def embed_nova(self, content: EmbeddingContent, purpose: EmbeddingPurpose) -> list[float]:
-        if not is_bedrock_nova_embedding(self._config):
-            raise UnsupportedModelProviderError(self._config.provider.value)
-        return self._observe(
-            "embed_nova",
-            lambda: embed_bedrock_nova(
-                self._model.client, self._config.model_name, content, purpose
-            ),
-        )
-
     def embed_text(self, text: str, **kwargs: Any) -> list[float]:
         if not self._is_volcano:
             return self.embed_query(text)
@@ -276,9 +261,6 @@ class RedBearEmbeddings(Embeddings):
         **kwargs: Any,
     ) -> list[list[float]]:
         if all(isinstance(item, str) for item in items):
-            if self._is_volcano:
-                options = {"encoding_format": "float", **kwargs}
-                return [self.embed_text(str(item), **options) for item in items]
             return self.embed_documents([str(item) for item in items])
         contents = [
             {"type": "text", "text": item} if isinstance(item, str) else item

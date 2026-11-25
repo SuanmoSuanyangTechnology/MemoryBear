@@ -27,7 +27,6 @@ from app.models.user_model import User
 from app.schemas import file_schema, document_schema
 from app.schemas.response_schema import ApiResponse
 from app.services import file_service, document_service
-from app.services.folder_hierarchy import validate_file_hierarchy
 from app.services.knowledge_service import get_knowledge_by_id as get_kb_by_id
 from app.services.file_storage_service import (
     FileStorageService,
@@ -160,10 +159,6 @@ async def create_folder(
     try:
         _require_workspace_knowledge(db, kb_id, current_user)
         _require_parent_folder(db, kb_id, parent_id, current_user)
-        validate_file_hierarchy(
-            db, kb_id, {"parent_id": parent_id, "file_ext": "folder"},
-            settings.KB_FILE_FOLDER_MAX_DEPTH,
-        )
         create_folder_data = file_schema.FileCreate(
             kb_id=kb_id, created_by=current_user.id, parent_id=parent_id,
             file_name=folder_name, file_ext='folder', file_size=0,
@@ -480,10 +475,12 @@ async def update_file(
 
     update_fields = update_data.dict(exclude_unset=True)
     if "parent_id" in update_fields:
-        validate_file_hierarchy(
-            db, db_file.kb_id, update_fields, settings.KB_FILE_FOLDER_MAX_DEPTH, db_file.id,
+        _require_parent_folder(
+            db=db,
+            kb_id=db_file.kb_id,
+            parent_id=update_fields["parent_id"],
+            current_user=current_user,
         )
-        db.refresh(db_file)
 
     for field, value in update_fields.items():
         if hasattr(db_file, field):

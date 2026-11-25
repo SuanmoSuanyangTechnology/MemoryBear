@@ -8,11 +8,11 @@ import { forwardRef, useImperativeHandle, useState } from 'react';
 import { Form, Input, App, Button, Select, InputNumber } from 'antd';
 import { useTranslation } from 'react-i18next';
 
-import type { CustomModelForm, ModelListItem, CustomModelModalRef, CustomModelModalProps } from '../types';
+import type { CustomModelForm, ModelListItem, CustomModelModalRef, CustomModelModalProps, Provider } from '../types';
 import RbModal from '@/components/RbModal'
 import CustomSelect from '@/components/CustomSelect'
 import UploadImages from '@/components/Upload/UploadImages'
-import { updateCustomModel, addCustomModel, modelTypeUrl, modelProviderUrl } from '@/api/models'
+import { updateCustomModel, addCustomModel, modelTypeUrl, getModelProviderList } from '@/api/models'
 import { getFileLink } from '@/api/fileStorage'
 import { validateSquareImage, stringRegExp } from '@/utils/validator'
 import { formatModelType } from '../utils'
@@ -60,7 +60,15 @@ const CustomModelModal = forwardRef<CustomModelModalRef, CustomModelModalProps>(
       form.resetFields();
     }
     setVisible(true);
+    getProviderList()
   };
+  const [providerList, setProviderList] = useState<Provider[]>([])
+  const getProviderList = () => {
+    getModelProviderList()
+      .then(res => {
+        setProviderList((res || []) as Provider[])
+      })
+  }
   /** Update or create custom model */
   const handleUpdate = (data: CustomModelForm) => {
     setLoading(true)
@@ -114,10 +122,7 @@ const CustomModelModal = forwardRef<CustomModelModalRef, CustomModelModalProps>(
       });
   }
   const handleChangeType = (value?: string) => {
-    form.setFieldsValue({
-      input_modalities: value === 'asr' ? ['audio'] : ['text'],
-      provider: undefined,
-    })
+    form.setFieldValue('input_modalities', value === 'asr' ? ['audio'] : ['text'])
   }
 
   /** Expose methods to parent component */
@@ -182,13 +187,10 @@ const CustomModelModal = forwardRef<CustomModelModalRef, CustomModelModalProps>(
           label={t('modelNew.provider')}
           rules={[{ required: true, message: t('common.selectPlaceholder', { title: t('modelNew.provider') }) }]}
         >
-          <CustomSelect
-            url={modelProviderUrl}
-            params={{ model_type: modelType }}
-            hasAll={false}
+          <Select
             disabled={isEdit}
-            format={(items) => items.map((item) => ({ label: String(item.provider).charAt(0).toUpperCase() + String(item.provider).slice(1), value: String(item.provider) }))}
             placeholder={t('common.pleaseSelect')}
+            options={providerList.map((item) => ({ label: String(item.provider).charAt(0).toUpperCase() + String(item.provider).slice(1), value: String(item.provider) }))}
           />
         </Form.Item>
 

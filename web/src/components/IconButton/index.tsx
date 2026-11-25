@@ -17,18 +17,14 @@ interface IconButtonProps {
   className?: string;
   badge?: number;
   hideTooltip?: boolean;
-  disabled?: boolean;
 }
 
-const IconBtn: FC<IconButtonProps> = ({ icon, onClick, className, badge, disabled = false }) => (
+const IconBtn: FC<IconButtonProps> = ({ icon, onClick, className, badge }) => (
   <Flex
     align="center"
     justify="center"
-    className={clsx("rb:relative rb:size-7.5 rb:rounded-lg rb:hover:bg-gray-100 rb:overflow-visible", className, {
-      'rb:opacity-65 rb:cursor-not-allowed': disabled,
-      'rb:cursor-pointer': !disabled
-    })}
-    onClick={disabled ? undefined : onClick}
+    className={clsx("rb:relative rb:size-7.5 rb:cursor-pointer rb:rounded-lg rb:hover:bg-[#F6F6F6] rb:overflow-visible", className)}
+    onClick={onClick}
   >
     {badge !== undefined && badge !== null ? (
       <Badge
@@ -44,16 +40,16 @@ const IconBtn: FC<IconButtonProps> = ({ icon, onClick, className, badge, disable
   </Flex>
 )
 
-const IconButton: FC<IconButtonProps> = ({ title, icon, onClick, className, badge, hideTooltip = false, disabled = false }) => {
+const IconButton: FC<IconButtonProps> = ({ title, icon, onClick, className, badge, hideTooltip = false }) => {
   if (hideTooltip || !title) {
     return (
-      <IconBtn icon={icon} onClick={onClick} className={className} badge={badge} disabled={disabled} />
+      <IconBtn icon={icon} onClick={onClick} className={className} badge={badge} />
     )
   }
   return (
     <Tooltip title={title} trigger="hover">
       <span>
-        <IconBtn icon={icon} onClick={onClick} className={className} badge={badge} disabled={disabled} />
+        <IconBtn icon={icon} onClick={onClick} className={className} badge={badge} />
       </span>
     </Tooltip>
   );

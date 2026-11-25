@@ -114,12 +114,6 @@ class ReflectionPipeline:
 
         执行顺序：子问题 1→2→5→3→6→4（当前只实现子问题 3 和 6）
         """
-        from app.core.memory.storage_services.reflection_engine.deterministic.metadata_migration import (
-            read_metadata_baseline,
-        )
-        if read_metadata_baseline(self.end_user_id) is None:
-            return {"status": "skipped", "reason": "inactive_or_missing_info"}
-
         await self._lazy_init()
 
         if not self._llm_client:

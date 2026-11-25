@@ -107,9 +107,8 @@ const Private: FC = () => {
             }}
           />
         )}
-        fileContent={(openWikiPage) => (
+        fileContent={(
           <PrivateFileWorkspace
-            key={knowledgeBaseId}
             ref={fileWorkspaceRef}
             knowledgeBase={knowledgeBase}
             knowledgeBaseId={knowledgeBaseId}
@@ -123,7 +122,6 @@ const Private: FC = () => {
             onToggleDirectory={onToggleDirectory}
             onRefreshKnowledgeBase={fetchKnowledgeBaseDetail}
             onRefreshDirectory={refreshDirectoryTree}
-            onOpenWikiPage={openWikiPage}
           />
         )}
       />

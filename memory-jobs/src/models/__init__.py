@@ -25,7 +25,3 @@ __all__ = [
     "Workspace",
     "WorkspaceDefaultModelPreset",
 ]
-
-from src.models.conversation_model import Conversation, ConversationDetail, Message
-
-__all__ += ["Conversation", "ConversationDetail", "Message"]

@@ -2,27 +2,27 @@
 终端用户信息仓储层
 """
 import uuid
-from typing import Any, List, Optional
+from typing import Any, Dict, List, Optional
 from uuid import UUID
 
 from sqlalchemy import bindparam, select, text
 from sqlalchemy.dialects.postgresql import UUID as PGUUID
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import Session
-from task_bridge.metadata_migration import metadata_read_expression
-
-from app.core.logging_config import get_logger
-from app.models.end_user_info_model import EndUserInfo
 from app.models.end_user_model import EndUser
 from app.models.workspace_model import Workspace
 from app.plugins import get_plugin
+
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import Session
+
+from app.models.end_user_info_model import EndUserInfo
+from app.core.logging_config import get_logger
 
 logger = get_logger(__name__)
 
 
 def _profile_statement(end_user_ids: list[str]):
     return (
-        select(EndUserInfo.end_user_id, EndUserInfo.meta_data_new.label("meta_data"), Workspace.tenant_id)
+        select(EndUserInfo.end_user_id, EndUserInfo.meta_data, Workspace.tenant_id)
         .join(EndUser, EndUser.id == EndUserInfo.end_user_id)
         .join(Workspace, Workspace.id == EndUser.workspace_id)
         .where(EndUserInfo.end_user_id.in_([UUID(str(value)) for value in end_user_ids]))
@@ -112,8 +112,7 @@ class EndUserInfoRepository:
         """读取用户的 meta_data（同步版本）；记录不存在或字段为空时返回 {}。"""
         from sqlalchemy import select
         result = self.db.execute(
-            select(metadata_read_expression(EndUserInfo.meta_data, EndUserInfo.meta_data_new))
-            .where(EndUserInfo.end_user_id == end_user_id).limit(1)
+            select(EndUserInfo.meta_data).where(EndUserInfo.end_user_id == end_user_id).limit(1)
         )
         meta_data = result.scalars().first()
         return meta_data if isinstance(meta_data, dict) else {}

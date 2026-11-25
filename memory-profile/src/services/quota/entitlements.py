@@ -59,7 +59,7 @@ class QuotaEntitlements:
         base = data.get("plan_quota") if data.get("has_subscription") else free
         overlay = data.get("resource_pack_quota")
         return _merge(
-            base if isinstance(base, dict) and base else free,
+            base if isinstance(base, dict) else free,
             overlay if isinstance(overlay, dict) else {},
         )
 
@@ -70,5 +70,5 @@ def _merge(base: dict[str, Any], overlay: dict[str, Any]) -> dict[str, int | flo
     merged: dict[str, Any] = {key: base[key] for key in MEMORY_LIMIT_KEYS if key in base}
     for key in MEMORY_LIMIT_KEYS:
         if key in overlay:
-            merged[key] = (merged.get(key) or 0) + (overlay[key] or 0)
+            merged[key] = (merged.get(key) or 0) + overlay[key]
     return merged

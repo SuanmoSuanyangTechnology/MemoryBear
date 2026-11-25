@@ -54,11 +54,10 @@ def _sync_seed_models(runtime: ProcessRuntime, settings: ModelServiceSettings) -
         with runtime.database.sync_session() as session:
             result = load_models(session, silent=True)
         logger.info(
-            "预定义模型加载完成: 成功%s个, 跳过%s个, 失败%s个, 缓存刷新失败=%s",
+            "预定义模型加载完成: 成功%s个, 跳过%s个, 失败%s个",
             result["success"],
             result["skipped"],
             result["failed"],
-            result["cache_refresh_failed"],
         )
     except Exception as exc:
         logger.warning("加载预定义模型时出错: %s", exc)

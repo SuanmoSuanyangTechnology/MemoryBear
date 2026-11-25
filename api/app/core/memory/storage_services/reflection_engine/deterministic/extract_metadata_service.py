@@ -5,8 +5,9 @@ Layer 2 反思引擎第 4 阶段：
 从用户实体的 description 碎片中提取结构化元数据，按分片串行增量 Patch，结果写入 PostgreSQL。
 
 规范：
-1. 存储：只写 PostgreSQL；已迁移/新用户写 meta_data_new，未迁移老用户写旧列新三键；
-2. 结构：只调用 extract_user_metadata_coding_v1.jinja2，不再生成旧 8 字段；
+1. 存储：结果只写入 PostgreSQL end_user_info.meta_data，不写 Neo4j；
+2. 结构：旧 8 字段走 extract_user_metadata.jinja2；新三键走
+   extract_user_metadata_coding_v1.jinja2，两套结果在同一次 PG 写回中无损合并；
 3. 短会话：数据库读写使用独立短会话，LLM 调用期间不持有 DB 连接；
 4. 门控与分片：碎片数 >= min_fragments（默认 5）才触发；碎片按 description 中的存储顺序分片，
    每个分片以上一分片的结果作为 existing_metadata 输入。
@@ -18,17 +19,15 @@ import uuid
 from typing import Any, Dict, List, Optional, Tuple
 
 from app.core.memory.models.metadata_models import (
+    LEGACY_METADATA_FIELDS,
     MetadataExtractionResponse,
     MetadataOperation,
+    apply_legacy_metadata_operations,
     apply_metadata_operations,
     filter_valid_metadata,
+    normalize_legacy_metadata_values,
     normalize_domain_ids,
     project_domain_names,
-)
-from app.core.memory.storage_services.reflection_engine.deterministic.metadata_migration import (
-    MetadataBaseline,
-    ensure_write_lock,
-    read_metadata_baseline,
 )
 from app.core.memory.storage_services.reflection_engine.errors import (
     ReflectionBusinessError,
@@ -88,30 +87,41 @@ def _fetch_special_domains(db: Any, end_user_id: str) -> Tuple[Dict[str, Any], D
 
 
 def _fetch_user_context_pg(
-    end_user_id: str, baseline: MetadataBaseline,
-) -> Tuple[Dict[str, Any], Dict[str, Any], Dict[str, str]]:
+    end_user_id: str,
+) -> Tuple[Dict[str, Any], Dict[str, Any], Dict[str, Any], Dict[str, str]]:
     """独立短会话：读取已有元数据并动态加载关联应用的特殊领域 Schema。
 
     已声明场景的存储 ID 转为本轮 Schema 中的名称，供模型增量更新；
     未声明场景保留原键，继续交给 frozen_ds 保护。
 
     Returns:
-        (existing_new_meta, fields_schema, name_to_id_map)
+        (existing_new_meta, existing_legacy_meta, fields_schema, name_to_id_map)
     """
     from app.db import get_db_context
+    from app.models import EndUserInfo
 
     existing_meta_model: Dict[str, Any] = {
         "identity_background": [],
         "relationships": [],
         "domain_specific_info": {},
     }
+    existing_legacy_meta: Dict[str, Any] = {
+        field: [] for field in LEGACY_METADATA_FIELDS
+    }
     special_domains: Dict[str, Any] = {}
     name_to_id_map: Dict[str, str] = {}
 
+    try:
+        eu_uuid = uuid.UUID(end_user_id)
+    except Exception:
+        logger.warning(f"[Metadata] 非法 end_user_id 格式: {end_user_id}")
+        return existing_meta_model, existing_legacy_meta, {"special_domains": {}}, name_to_id_map
+
     with get_db_context() as db:
-        # 基线与写入列在调用模型前固定，最终 CAS 防止并发覆盖。
-        raw_meta = baseline.metadata
-        if raw_meta:
+        # 1. 读取已有元数据：新三键和旧八字段都以 PG 当前值为增量基线
+        info = db.query(EndUserInfo).filter_by(end_user_id=eu_uuid).first()
+        if info and isinstance(info.meta_data, dict):
+            raw_meta = info.meta_data
             ib = raw_meta.get("identity_background")
             if isinstance(ib, list):
                 existing_meta_model["identity_background"] = [str(x).strip() for x in ib if str(x).strip()]
@@ -120,9 +130,15 @@ def _fetch_user_context_pg(
                 existing_meta_model["relationships"] = [str(x).strip() for x in rel if str(x).strip()]
             ds = raw_meta.get("domain_specific_info")
             if isinstance(ds, dict):
-                existing_meta_model["domain_specific_info"] = {
-                    key: list(values) for key, values in ds.items() if isinstance(values, list)
-                }
+                cleaned_ds = {}
+                for k, v in ds.items():
+                    if isinstance(v, list):
+                        cleaned_ds[k] = [str(x).strip() for x in v if str(x).strip()]
+                existing_meta_model["domain_specific_info"] = cleaned_ds
+            for field in LEGACY_METADATA_FIELDS:
+                existing_legacy_meta[field] = normalize_legacy_metadata_values(
+                    raw_meta.get(field)
+                )
 
         # 2. 通过企业版插件加载特殊场景；社区版未注册插件时返回空配置。
         try:
@@ -145,63 +161,73 @@ def _fetch_user_context_pg(
     )
 
     fields_schema = {"special_domains": special_domains}
-    return existing_meta_model, fields_schema, name_to_id_map
+    return existing_meta_model, existing_legacy_meta, fields_schema, name_to_id_map
 
 
 def _build_metadata_write_payload(model_metadata: Dict[str, Any]) -> Dict[str, Any]:
-    """仅生成新三键；合法空结果压缩为 {}，与 NULL 严格区分。"""
-    payload = {
+    """构造允许写回 PG 的新旧 metadata 字段集合。"""
+    payload: Dict[str, Any] = {
+        field: normalize_legacy_metadata_values(model_metadata.get(field))
+        for field in LEGACY_METADATA_FIELDS
+    }
+    payload.update({
         "identity_background": list(model_metadata.get("identity_background") or []),
         "relationships": list(model_metadata.get("relationships") or []),
         "domain_specific_info": dict(model_metadata.get("domain_specific_info") or {}),
-    }
-    return payload if any(payload.values()) else {}
+    })
+    return payload
 
 
-def _save_metadata_to_pg(
-    end_user_id: str, model_metadata: Dict[str, Any], name_to_id_map: Dict[str, str],
-    baseline: MetadataBaseline,
-) -> bool:
-    """按模型调用前的基线路由 + CAS；老用户未补迁时绝不写新列。"""
-    from app.db import get_db_context
-    from sqlalchemy import text
+def _save_metadata_to_pg(end_user_id: str, model_metadata: Dict[str, Any], name_to_id_map: Dict[str, str]) -> bool:
+    """独立短会话：将新旧 metadata 通过 JSONB 键合并原子写回 PG。
 
-    new_keys = _build_metadata_write_payload(model_metadata)
-    if new_keys:
-        new_keys["domain_specific_info"] = normalize_domain_ids(
-            new_keys.get("domain_specific_info") or {}, name_to_id_map, preserve_unmapped=True,
-        )
-    column = baseline.write_column  # 仅来自受控策略，禁止外部输入 SQL 标识符
-    if column == "meta_data" and not new_keys:
-        # 旧列按键合并时，空结果必须显式清空新三键，不能 || {} 留下旧值。
-        new_keys = {"identity_background": [], "relationships": [], "domain_specific_info": {}}
-    assignment = (
-        "meta_data = coalesce(info.meta_data, '{}'::jsonb) || CAST(:new_keys AS jsonb)"
-        if column == "meta_data" else "meta_data_new = CAST(:new_keys AS jsonb)"
-    )
+    规则：
+    1. 更新旧 8 字段与 identity_background, relationships, domain_specific_info。
+       domain_specific_info 的键在写入前由 scene_name 转换为 scene_type_id。
+    2. 使用 JSONB 键合并写入 (meta_data = coalesce(meta_data, '{}'::jsonb) || :new_keys::jsonb)，
+       meta_data 中的其他键保持不变。
+    3. end_user_info 记录不存在时跳过写入，只记 warning，不视为失败。
+    """
+    if not model_metadata:
+        return True
     try:
-        if not ensure_write_lock():
-            return False
+        from app.db import get_db_context
+        from app.models import EndUserInfo
+        from sqlalchemy import text
+
+        eu_uuid = uuid.UUID(end_user_id)
+        new_keys = _build_metadata_write_payload(model_metadata)
+        new_keys["domain_specific_info"] = normalize_domain_ids(
+            new_keys.get("domain_specific_info") or {},
+            name_to_id_map, preserve_unmapped=True,
+        )
+
         with get_db_context() as db:
-            result = db.execute(text(f"""
-                UPDATE end_user_info AS info SET {assignment}, updated_at = NOW()
-                WHERE info.end_user_id = :end_user_id
-                  AND info.meta_data IS NOT DISTINCT FROM CAST(:old AS jsonb)
-                  AND info.meta_data_new IS NOT DISTINCT FROM CAST(:new AS jsonb)
-                  AND EXISTS (
-                    SELECT 1 FROM end_users AS eu JOIN workspaces AS ws ON ws.id = eu.workspace_id
-                    WHERE eu.id = info.end_user_id AND eu.is_active IS TRUE AND ws.is_active IS TRUE
-                  )
-            """), {
-                "end_user_id": uuid.UUID(end_user_id),
+            info = db.query(EndUserInfo).filter_by(end_user_id=eu_uuid).first()
+            if not info:
+                logger.warning(
+                    f"[Metadata][PG] end_user_info 记录不存在，跳过写入: end_user_id={end_user_id}"
+                )
+                return True
+            stmt = text("""
+                UPDATE end_user_info
+                SET meta_data = coalesce(meta_data, '{}'::jsonb) || CAST(:new_keys AS jsonb),
+                    updated_at = NOW()
+                WHERE end_user_id = :end_user_id
+            """)
+            db.execute(stmt, {
                 "new_keys": json.dumps(new_keys, ensure_ascii=False),
-                "old": None if baseline.meta_data is None else json.dumps(baseline.meta_data),
-                "new": None if baseline.meta_data_new is None else json.dumps(baseline.meta_data_new),
+                "end_user_id": eu_uuid,
             })
             db.commit()
-            return bool(result.rowcount)
-    except Exception:
-        logger.exception("[Metadata] 写入失败 end_user_id=%s column=%s", end_user_id, column)
+
+        logger.info(
+            f"[Metadata][PG] 成功持久化元数据 (新旧结构无损合并): end_user_id={end_user_id}, "
+            f"special_domains={list(new_keys['domain_specific_info'].keys())}"
+        )
+        return True
+    except Exception as e:
+        logger.error(f"[Metadata][PG] 保存元数据失败: end_user_id={end_user_id}, error={e}", exc_info=True)
         return False
 
 
@@ -273,6 +299,51 @@ async def _run_chunk_llm(
     return list(raw.operations or [])
 
 
+async def _run_legacy_chunk_llm(
+    llm_client: Any,
+    language: str,
+    entity_id: str,
+    descriptions: List[str],
+    existing_legacy_meta: Dict[str, Any],
+) -> List[MetadataOperation]:
+    """调用旧 8 字段 prompt，以 PG 当前值为基线生成增量操作。"""
+    template = prompt_env.get_template("extract_user_metadata.jinja2")
+    prompt = template.render(
+        language=language,
+        input_json=json.dumps(
+            {
+                "entity_id": entity_id,
+                "description": descriptions,
+                "existing_metadata": existing_legacy_meta,
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+    )
+
+    try:
+        raw = await llm_client.call_structured(
+            [{"role": "user", "content": prompt}],
+            MetadataExtractionResponse,
+        )
+    except Exception as exc:
+        logger.warning(f"[Metadata] 旧字段分片提取调用异常: {exc}")
+        raise ReflectionBusinessError(
+            ReflectionFailureReason.MODEL_CALL_FAILED,
+            "legacy_metadata_chunk_call",
+            model_type=ReflectionModelType.LLM,
+        ) from exc
+
+    if raw is None:
+        logger.warning("[Metadata] 旧字段分片提取结构化结果为空")
+        raise ReflectionBusinessError(
+            ReflectionFailureReason.RESULT_PARSE_FAILED,
+            "legacy_metadata_chunk_parse",
+            model_type=ReflectionModelType.LLM,
+        )
+    return list(raw.operations or [])
+
+
 # ── 3. 主服务入口 ──
 
 
@@ -287,15 +358,17 @@ async def extract_metadata_for_user(
 ) -> Dict[str, Any]:
     """对指定用户的 User 实体执行时序串行增量元数据提取并持久化到 PostgreSQL。
 
-    流程：活动用户/信息行校验 → 原有碎片门控 → 读取路由列基线 →
-    仅调用新三键提示词 → 保护未声明领域 → CAS 写入对应列。
-    迁移补偿由 Layer2Inspector 在本阶段前完成，失败不影响旧列新三键继续更新。
+    流程：
+    1. Neo4j 扫描 User 节点并获取 description；
+    2. 碎片数 >= min_fragments (默认 5) 门控检查，< 5 时跳过；
+    3. 碎片保持 description 中的存储顺序；
+    4. 独立短会话读 PG：分别获取旧 8 字段与新三键的当前值，以及应用特殊领域 Schema；
+    5. 切片并串行迭代：每轮分别调用旧/新 prompt，两套 Patch 都以 PG 当前值为增量基线；
+    6. 内存中本地有序应用两套 Patch；新结构额外执行白名单校验清洗；
+    7. 循环结束后，将旧 8 字段与新三键一次写入 PG end_user_info.meta_data (按键无损合并)；
+    8. 返回状态放行后续巡检。
     """
     from app.repositories.neo4j.cypher_queries import USER_ENTITY_FOR_METADATA
-
-    baseline = read_metadata_baseline(end_user_id)
-    if baseline is None:
-        return {"status": "skipped", "reason": "inactive_or_missing_info", "extracted": 0, "failed": 0, "details": []}
 
     # ── Step 1. 扫描 Neo4j User 实体 ──
     try:
@@ -304,7 +377,7 @@ async def extract_metadata_for_user(
         )
     except Exception as e:
         logger.warning(f"[Metadata] 查询 User 实体失败: {e}")
-        return {"status": "error", "extracted": 0, "failed": 1, "details": []}
+        return {"extracted": 0, "failed": 0, "details": []}
 
     if not records:
         logger.debug(f"[Metadata] 未找到 User 实体，跳过: end_user_id={end_user_id}")
@@ -342,14 +415,12 @@ async def extract_metadata_for_user(
 
     try:
         # ── Step 3. 独立短会话读 PG ──
-        existing_meta_model, fields_schema, name_to_id_map = _fetch_user_context_pg(end_user_id, baseline)
+        existing_meta_model, existing_legacy_meta, fields_schema, name_to_id_map = _fetch_user_context_pg(end_user_id)
         active_domains = list(fields_schema.get("special_domains", {}).keys())
         logger.info(f"[Metadata] 加载已有元数据与特殊领域: special_domains={active_domains}")
 
         # ── Step 4. 串行迭代提取阶段 ──
         chunk_size = kwargs.get("chunk_size", METADATA_CHUNK_SIZE)
-        if not isinstance(chunk_size, int) or chunk_size < 1:
-            raise ValueError("metadata chunk_size must be positive")
         chunks = [
             target_fragments[i : i + chunk_size]
             for i in range(0, len(target_fragments), chunk_size)
@@ -359,6 +430,7 @@ async def extract_metadata_for_user(
         )
 
         current_meta: Dict[str, Any] = existing_meta_model
+        current_legacy_meta: Dict[str, Any] = existing_legacy_meta
         all_applied_ops: List[MetadataOperation] = []
         trace_llm: List[Dict[str, Any]] = []
         # 开启快照时收集逐条变更记录；未开启时为 None，apply / filter 不做任何记录
@@ -378,6 +450,13 @@ async def extract_metadata_for_user(
             logger.info(f"[Metadata] 保留未声明特殊场景数据，不参与本次提取: {list(frozen_ds.keys())}")
 
         for chunk_idx, chunk in enumerate(chunks):
+            legacy_ops = await _run_legacy_chunk_llm(
+                llm_client=llm_client,
+                language=language,
+                entity_id=entity_id,
+                descriptions=chunk,
+                existing_legacy_meta=current_legacy_meta,
+            )
             chunk_ops = await _run_chunk_llm(
                 llm_client=llm_client,
                 language=language,
@@ -389,8 +468,21 @@ async def extract_metadata_for_user(
             if collect_trace:
                 trace_llm.append({
                     "chunk_index": chunk_idx,
+                    "legacy_operations": [op.model_dump() for op in legacy_ops],
                     "operations": [op.model_dump() for op in chunk_ops],
                 })
+
+            if legacy_ops:
+                mark = len(trace_records) if trace_records is not None else 0
+                current_legacy_meta = apply_legacy_metadata_operations(
+                    current_legacy_meta,
+                    legacy_ops,
+                    trace_records,
+                )
+                all_applied_ops.extend(legacy_ops)
+                if trace_records is not None:
+                    for rec in trace_records[mark:]:
+                        rec["chunk_index"] = chunk_idx
 
             if chunk_ops:
                 mark = len(trace_records) if trace_records is not None else 0
@@ -405,16 +497,16 @@ async def extract_metadata_for_user(
 
             logger.info(
                 f"[Metadata] 分片 {chunk_idx + 1}/{len(chunks)} 处理完成 (碎片数: {len(chunk)}): "
-                f"新字段 operations={len(chunk_ops)} 条, "
+                f"旧字段 operations={len(legacy_ops)} 条, 新字段 operations={len(chunk_ops)} 条, "
                 f"累计生效 operations={len(all_applied_ops)} 条"
             )
 
         # ── Step 5. 合并未声明场景的原有数据 ──
         current_meta["domain_specific_info"] = {**frozen_ds, **current_meta["domain_specific_info"]}
 
-        # 独立短会话写入路由列，旧 8 字段不再生成或更新
-        current_state = _build_metadata_write_payload(current_meta)
-        saved = _save_metadata_to_pg(end_user_id, current_state, name_to_id_map, baseline)
+        # 独立短会话写入 PG (无损合并)
+        current_state = {**current_legacy_meta, **current_meta}
+        saved = _save_metadata_to_pg(end_user_id, current_state, name_to_id_map)
         if not saved:
             return {"status": "error", "extracted": 0, "failed": 1, "details": []}
 
@@ -428,7 +520,8 @@ async def extract_metadata_for_user(
             "entity_name": entity_name,
             "ops": applied_ops_detail,
             "final_domains": (
-                ["identity_background", "relationships"]
+                list(LEGACY_METADATA_FIELDS)
+                + ["identity_background", "relationships"]
                 + list(current_meta.get("domain_specific_info", {}).keys())
             ),
         }]
@@ -449,6 +542,7 @@ async def extract_metadata_for_user(
                     "chunks_count": len(chunks),
                     "descriptions": target_fragments,
                     "existing_metadata": existing_meta_model,
+                    "existing_legacy_metadata": existing_legacy_meta,
                     "special_domains": active_domains,
                 },
                 "llm_raw": {"entity_id": entity_id, "chunks": trace_llm},

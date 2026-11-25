@@ -1,5 +1,11 @@
+/*
+ * @Author: ZhaoYing 
+ * @Date: 2026-02-03 15:52:44 
+ * @Last Modified by: ZhaoYing
+ * @Last Modified time: 2026-02-04 10:00:02
+ */
 import { forwardRef, useImperativeHandle, useState } from 'react';
-import { Switch, Button, Tooltip, Flex, Row, Col } from 'antd';
+import { Switch, Button, Tooltip, Flex } from 'antd';
 import { useTranslation } from 'react-i18next';
 
 import type { ApiKey, ApiKeyModalRef } from '../types';
@@ -57,10 +63,10 @@ const ApiKeyDetailModal = forwardRef<ApiKeyModalRef, { handleCopy: (content: str
       onCancel={handleClose}
     >
       <Flex vertical gap={12}>
-        <div className="rb:text-gray-600 rb:font-medium rb:leading-5">{t('apiKey.baseInfo')}</div>
+        <div className="rb:text-[#5B6167] rb:font-medium rb:leading-5">{t('apiKey.baseInfo')}</div>
         {['id', 'name', 'is_expired', 'created_at'].map((key) => (
           <Flex justify="space-between" gap={20} key={key} className="rb:font-regular rb:text-[14px]">
-            <span className="rb:text-gray-600">{t(`apiKey.${key}`)}</span>
+            <span className="rb:text-[#5B6167]">{t(`apiKey.${key}`)}</span>
             <span className="rb:text-right rb:flex-1 rb:text-ellipsis rb:overflow-hidden rb:whitespace-nowrap">
               { key === 'created_at'
                 ? formatDateTime(data[key], 'YYYY-MM-DD HH:mm:ss')
@@ -73,7 +79,7 @@ const ApiKeyDetailModal = forwardRef<ApiKeyModalRef, { handleCopy: (content: str
         ))}
       </Flex>
 
-      <Flex align="center" justify="space-between" className="rb:text-gray-600 rb:mt-5! rb:py-2! rb:px-4! rb:bg-[#FFFFFF] rb:border rb:border-gray-400 rb:rounded-lg rb:leading-5">
+      <Flex align="center" justify="space-between" className="rb:text-[#5B6167] rb:mt-5! rb:py-2! rb:px-4! rb:bg-[#FFFFFF] rb:border rb:border-[#DFE4ED] rb:rounded-lg rb:leading-5">
         {maskApiKeys(data.api_key)}
 
         <Button className="rb:px-2! rb:h-7! rb:group" onClick={() => handleCopy(data.api_key)}>
@@ -85,44 +91,41 @@ const ApiKeyDetailModal = forwardRef<ApiKeyModalRef, { handleCopy: (content: str
       </Flex>
 
       <Flex vertical gap={12} className="rb:mt-4!">
-        <div className="rb:text-gray-600 rb:font-medium rb:leading-5">{t('apiKey.permissionInfo')}</div>
+        <div className="rb:text-[#5B6167] rb:font-medium rb:leading-5 rb:mb-1">{t('apiKey.permissionInfo')}</div>
 
-        <Row gutter={[12, 12]}>
-          {([
-            ['memory', t('apiKey.memoryEngine')],
-            ['rag', t('apiKey.knowledgeBase')],
-            ['app_mgmt', t('apiKey.app_mgmt')],
-            ['asset', t('apiKey.asset')],
-          ] as const).map(([scope, label]) => (
-            <Col span={12} key={scope}>
-              <Flex align="center" justify="space-between" gap={8} className="rb:h-full rb:bg-gray-100 rb:rounded-xl rb:p-3!">
-                <span className="rb:text-[14px]">{label}</span>
-                <Switch checked={data.scopes?.includes(scope)} disabled />
-              </Flex>
-            </Col>
-          ))}
-        </Row>
+        <Flex justify="space-between" gap={20} className="rb:font-regular rb:text-[14px]">
+          <span className="rb:text-[#5B6167]">{t(`apiKey.memoryEngine`)}</span>
+          <span>
+            <Switch checked={data.scopes?.includes('memory')} disabled />
+          </span>
+        </Flex>
+        <Flex justify="space-between" gap={20} className="rb:font-regular rb:text-[14px]">
+          <span className="rb:text-[#5B6167]">{t(`apiKey.knowledgeBase`)}</span>
+          <span>
+            <Switch checked={data.scopes?.includes('rag')} disabled />
+          </span>
+        </Flex>
       </Flex>
 
       <Flex vertical gap={12} className="rb:mt-4!">
-        <div className="rb:text-gray-600 rb:font-medium rb:leading-5 rb:mb-1">{t('apiKey.advancedSettings')}</div>
+        <div className="rb:text-[#5B6167] rb:font-medium rb:leading-5 rb:mb-1">{t('apiKey.advancedSettings')}</div>
 
         {data.expires_at &&
           <Flex justify="space-between" gap={20} className="rb:font-regular rb:text-[14px]">
-            <span className="rb:text-gray-600">{t(`apiKey.expires_at`)}</span>
+            <span className="rb:text-[#5B6167]">{t(`apiKey.expires_at`)}</span>
             <span>
               {data.expires_at ? formatDateTime(data.expires_at as number, 'YYYY-MM-DD HH:mm:ss') : '-'}
             </span>
           </Flex>
         }
         <Flex justify="space-between" gap={20} className="rb:font-regular rb:text-[14px]">
-          <span className="rb:text-gray-600">{t(`application.qpsLimit`)}</span>
+          <span className="rb:text-[#5B6167]">{t(`application.qpsLimit`)}</span>
           <span>
             {data.rate_limit} {t('application.qpsLimitUnit')}
           </span>
         </Flex>
         <Flex justify="space-between" gap={20} className="rb:font-regular rb:text-[14px]">
-          <span className="rb:text-gray-600">{t(`application.dailyUsageLimit`)}</span>
+          <span className="rb:text-[#5B6167]">{t(`application.dailyUsageLimit`)}</span>
           <span>
             {data.daily_request_limit} {t('application.dailyUsageLimitUnit')}
           </span>

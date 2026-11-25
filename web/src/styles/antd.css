@@ -355,25 +355,3 @@
   font-size: 12px !important;
   line-height: 22px !important;
 }
-
-/* FAQ import result toast: align antd notification to the detail-page prototype. */
-.faq-import-result-notice.ant-notification-notice {
-  width: 360px;
-  max-width: calc(100vw - 32px);
-  padding: 14px 16px;
-  border: 1px solid #dfe4ed;
-  border-radius: 10px;
-  box-shadow: 0 8px 28px #17171920;
-  color: #171719;
-  font-size: 12px;
-}
-.faq-import-result-notice .ant-notification-notice-message {
-  margin-bottom: 6px;
-  font-size: 13px;
-}
-.faq-import-result-notice .ant-notification-notice-description {
-  font-size: 12px;
-}
-.faq-import-result-notice .ant-notification-notice-close {
-  font-size: 16px;
-}

@@ -5,7 +5,6 @@ from fastapi import APIRouter
 
 from .routes.chunk import router as chunk_router
 from .routes.document import router as document_router
-from .routes.faq_import import router as faq_import_router
 from .routes.file import router as file_router
 from .routes.health import router as health_router
 from .routes.knowledge import router as knowledge_router
@@ -25,7 +24,6 @@ internal_v1_router.include_router(knowledge_metadata_router)
 internal_v1_router.include_router(knowledge_share_router)
 internal_v1_router.include_router(wiki_router)
 
-internal_v1_router.include_router(faq_import_router)
 internal_v1_router.include_router(wiki_faq_router)
 
 internal_upload_router = APIRouter(prefix=INTERNAL_UPLOAD_PREFIX)

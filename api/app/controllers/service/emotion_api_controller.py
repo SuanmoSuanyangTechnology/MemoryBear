@@ -18,14 +18,9 @@ tags、wordcloud、health 使用 POST JSON Body；overview、timeline 使用 GET
 认证方式: API Key (@require_api_key_self_db)
 """
 
-from datetime import date
-from typing import Literal
-
-from fastapi import APIRouter, Header, Query, Request, status
+from fastapi import APIRouter, Depends, Header, Request, status
 from fastapi.responses import JSONResponse
 
-from app.integrations.profile.contracts import MemoryProfileAuthSource
-from app.integrations.profile.proxy import memory_profile_proxy
 from app.core.api_key_auth import (
     require_api_key_self_db,
     get_current_api_key_auth,
@@ -35,6 +30,8 @@ from app.core.error_codes import BizCode
 from app.core.logging_config import get_business_logger
 from app.db import get_async_db_context, get_db_context
 from app.schemas.emotion_schema import (
+    EmotionDailyOverviewRequest,
+    EmotionDailyTimelineRequest,
     EmotionHealthRequest,
     EmotionTagsRequest,
     EmotionWordcloudRequest,
@@ -89,7 +86,6 @@ def _resolve_timezone_or_fail(timezone: str | None):
 
 @router.post("/tags", response_model=ApiResponse)
 @require_api_key_self_db(scopes=["memory"])
-@memory_profile_proxy(body_arg="payload", body_fields=("end_user_id", "start_date", "end_date", "limit"), source=MemoryProfileAuthSource.APIKEY)
 async def get_emotion_tags(
     request: Request,
     payload: EmotionTagsRequest,
@@ -122,7 +118,6 @@ async def get_emotion_tags(
 
 @router.post("/wordcloud", response_model=ApiResponse)
 @require_api_key_self_db(scopes=["memory"])
-@memory_profile_proxy(body_arg="payload", body_fields=("end_user_id", "limit"), source=MemoryProfileAuthSource.APIKEY)
 async def get_emotion_wordcloud(
     request: Request,
     payload: EmotionWordcloudRequest,
@@ -152,7 +147,6 @@ async def get_emotion_wordcloud(
 
 @router.post("/health", response_model=ApiResponse)
 @require_api_key_self_db(scopes=["memory"])
-@memory_profile_proxy(body_arg="payload", body_fields=("end_user_id", "time_range"), source=MemoryProfileAuthSource.APIKEY)
 async def get_emotion_health(
     request: Request,
     payload: EmotionHealthRequest,
@@ -190,10 +184,9 @@ async def get_emotion_health(
 
 @router.get("/query_emotion_overview", response_model=ApiResponse)
 @require_api_key_self_db(scopes=["memory"])
-@memory_profile_proxy(query_fields=("end_user_id",), source=MemoryProfileAuthSource.APIKEY)
 async def query_emotion_overview(
     request: Request,
-    end_user_id: str,
+    params: EmotionDailyOverviewRequest = Depends(),
     timezone: str = Header(..., alias="X-Timezone"),
     language_type: str = Header(default=None, alias="X-Language-Type"),
 ):
@@ -211,7 +204,7 @@ async def query_emotion_overview(
         return error_response
 
     # 1. workspace 归属校验（异步 session）
-    end_user_id = await _validated_api_context(end_user_id)
+    end_user_id = await _validated_api_context(params.end_user_id)
     try:
         language = get_language_from_header(language_type)
         # 2. 慢时区实时补数（内部三层短路 + 失败降级，不阻塞查询）
@@ -228,7 +221,7 @@ async def query_emotion_overview(
             "V1 情绪数据概览获取成功",
             extra={
                 "workspace_id": str(get_current_api_key_auth().workspace_id),
-                "end_user_id": end_user_id,
+                "end_user_id": params.end_user_id,
                 "data_quality": data.get("data_quality"),
             },
         )
@@ -248,15 +241,9 @@ async def query_emotion_overview(
 
 @router.get("/query_emotion_timeline", response_model=ApiResponse)
 @require_api_key_self_db(scopes=["memory"])
-@memory_profile_proxy(query_fields=("end_user_id", "start_date", "end_date", "sort", "page", "pagesize"), upper_bounds={"pagesize": 10000}, source=MemoryProfileAuthSource.APIKEY)
 async def query_emotion_timeline(
     request: Request,
-    end_user_id: str,
-    start_date: date | None = Query(None),
-    end_date: date | None = Query(None),
-    sort: Literal["asc", "desc"] = "asc",
-    page: int = Query(1, ge=1),
-    pagesize: int = Query(5, ge=1, le=10000),
+    params: EmotionDailyTimelineRequest = Depends(),
     timezone: str = Header(..., alias="X-Timezone"),
     language_type: str = Header(default=None, alias="X-Language-Type"),
 ):
@@ -274,7 +261,7 @@ async def query_emotion_timeline(
     if error_response is not None:
         return error_response
 
-    end_user_id = await _validated_api_context(end_user_id)
+    end_user_id = await _validated_api_context(params.end_user_id)
     try:
         language = get_language_from_header(language_type)
         # 慢时区实时补数（内部三层短路 + 失败降级，不阻塞查询）
@@ -283,11 +270,11 @@ async def query_emotion_timeline(
             data = EmotionStatsService(db).query_timeline(
                 end_user_id=end_user_id,
                 tz_name=tz_name,
-                start_date=start_date,
-                end_date=end_date,
-                sort=sort,
-                page=page,
-                page_size=pagesize,
+                start_date=params.start_date,
+                end_date=params.end_date,
+                sort=params.sort,
+                page=params.page,
+                page_size=params.pagesize,
                 language=language,
             )
 
@@ -295,7 +282,7 @@ async def query_emotion_timeline(
             "V1 情绪时间轴获取成功",
             extra={
                 "workspace_id": str(get_current_api_key_auth().workspace_id),
-                "end_user_id": end_user_id,
+                "end_user_id": params.end_user_id,
                 "total": data.get("page", {}).get("total"),
             },
         )

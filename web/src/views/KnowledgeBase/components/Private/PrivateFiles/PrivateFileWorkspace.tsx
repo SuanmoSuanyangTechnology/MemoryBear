@@ -3,7 +3,6 @@ import {
   useCallback,
   useEffect,
   useImperativeHandle,
-  useMemo,
   useRef,
   useState,
   type Dispatch,
@@ -16,7 +15,6 @@ import type { AnyObject } from 'antd/es/_util/type';
 import type { ColumnsType } from 'antd/es/table';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
-import clsx from 'clsx';
 
 import {
   createSync,
@@ -27,8 +25,7 @@ import {
 import SearchInput from '@/components/SearchInput';
 import StatusTag from '@/components/StatusTag';
 import Table, { type TableRef } from '@/components/Table';
-import { formatDateTime, formatFileSize } from '@/utils/format';
-import { getFileIconClassByExtension } from '@/utils/fileIcon';
+import { formatDateTime } from '@/utils/format';
 import type { BreadcrumbItem } from '@/hooks/useBreadcrumbManager';
 import type {
   CreateDatasetModalRef,
@@ -40,22 +37,12 @@ import type {
 } from '@/views/KnowledgeBase/types';
 import DirectoryToggle from '../DirectoryToggle';
 import PrivateKnowledgeBaseDialogs from '../PrivateKnowledgeBaseDialogs';
-import RelatedWikiDrawer, { type RelatedWikiDrawerRef } from './RelatedWikiDrawer';
 
 export interface PrivateFileWorkspaceRef {
   refreshTable: () => void;
   openKnowledgeBaseEditor: () => void;
   openCreateFolder: (parentId: string, parentName?: string, parentPath?: string[]) => void;
 }
-
-/** Remove the extension only when it actually sits at the end of the file name, so matching substrings elsewhere are kept */
-const stripFileNameExtension = (fileName: string, fileExt?: string): string => {
-  if (!fileExt) return fileName;
-  const ext = fileExt.startsWith('.') ? fileExt : `.${fileExt}`;
-  return fileName.toLowerCase().endsWith(ext.toLowerCase())
-    ? fileName.slice(0, -ext.length)
-    : fileName;
-};
 
 interface PrivateFileWorkspaceProps {
   knowledgeBase: KnowledgeBaseListItem;
@@ -70,7 +57,6 @@ interface PrivateFileWorkspaceProps {
   onToggleDirectory: () => void;
   onRefreshKnowledgeBase: () => Promise<KnowledgeBaseListItem | null>;
   onRefreshDirectory: () => Promise<void>;
-  onOpenWikiPage: (pageId: string) => void;
 }
 
 const PrivateFileWorkspace = forwardRef<PrivateFileWorkspaceRef, PrivateFileWorkspaceProps>(({
@@ -86,13 +72,11 @@ const PrivateFileWorkspace = forwardRef<PrivateFileWorkspaceRef, PrivateFileWork
   onToggleDirectory,
   onRefreshKnowledgeBase,
   onRefreshDirectory,
-  onOpenWikiPage,
 }, ref) => {
   const { t } = useTranslation();
   const { modal, message: messageApi } = App.useApp();
   const navigate = useNavigate();
   const tableRef = useRef<TableRef>(null);
-  const relatedWikiDrawerRef = useRef<RelatedWikiDrawerRef>(null);
   const createFolderModalRef = useRef<CreateFolderModalRef>(null);
   const createImageDatasetRef = useRef<CreateSetModalRef>(null);
   const createContentModalRef = useRef<CreateSetModalRef>(null);
@@ -102,7 +86,6 @@ const PrivateFileWorkspace = forwardRef<PrivateFileWorkspaceRef, PrivateFileWork
   const syncStartTimeRef = useRef<number | null>(null);
   const [isSyncing, setIsSyncing] = useState(false);
   const apiUrl = getDocumentListUrl(knowledgeBaseId);
-  const tableQuery = useMemo(() => ({ ...query, include_wiki_count: true }), [query]);
 
   const refreshTable = useCallback(() => tableRef.current?.loadData(), []);
 
@@ -230,31 +213,23 @@ const PrivateFileWorkspace = forwardRef<PrivateFileWorkspaceRef, PrivateFileWork
       render: (text: string, record: AnyObject) => {
         const document = record as KnowledgeBaseDocumentData;
         return (
-          <Flex align="center" gap={8} className="rb:min-w-0">
-            <div
-              className={clsx(
-                'rb:size-5 rb:shrink-0 rb:bg-cover',
-                getFileIconClassByExtension(document.file_ext, document.file_name),
-              )}
-            />
-            <span
-              className="rb:min-w-0 rb:cursor-pointer rb:truncate rb:font-medium rb:text-gray-900 rb:hover:underline"
-              onClick={() => document.id && navigate(`/knowledge-base/${knowledgeBaseId}/DocumentDetails`, {
-                state: {
-                  documentId: document.id,
-                  parentId: parentId || knowledgeBaseId,
-                  breadcrumbPath: {
-                    knowledgeBaseFolderPath,
-                    knowledgeBase: { id: knowledgeBase.id, name: knowledgeBase.name, type: 'knowledgeBase' },
-                    documentFolderPath: folderPath,
-                    document: { id: document.id, name: document.file_name || '', type: 'document' },
-                  },
+          <span
+            className="rb:cursor-pointer rb:font-medium rb:text-gray-900 rb:hover:underline"
+            onClick={() => document.id && navigate(`/knowledge-base/${knowledgeBaseId}/DocumentDetails`, {
+              state: {
+                documentId: document.id,
+                parentId: parentId || knowledgeBaseId,
+                breadcrumbPath: {
+                  knowledgeBaseFolderPath,
+                  knowledgeBase: { id: knowledgeBase.id, name: knowledgeBase.name, type: 'knowledgeBase' },
+                  documentFolderPath: folderPath,
+                  document: { id: document.id, name: document.file_name || '', type: 'document' },
                 },
-              })}
-            >
-              {stripFileNameExtension(document.file_name || text, document.file_ext)}
-            </span>
-          </Flex>
+              },
+            })}
+          >
+            {text}
+          </span>
         );
       },
     },
@@ -272,34 +247,6 @@ const PrivateFileWorkspace = forwardRef<PrivateFileWorkspaceRef, PrivateFileWork
               : value === 0 ? t('knowledgeBase.pending') : t('knowledgeBase.processing')}
         />
       ),
-    },
-    {
-      title: t('knowledgeBase.wikiColumn'),
-      key: 'wiki',
-      width: 150,
-      render: (_, record: AnyObject) => {
-        const document = record as KnowledgeBaseDocumentData;
-        // Match the prototype: only "Organized · N" is a clickable link; other states are plain gray text
-        const count = document.wiki_count ?? 0;
-        if (count > 0) {
-          return (
-            <button
-              type="button"
-              onClick={() => relatedWikiDrawerRef.current?.handleOpen(document)}
-              className="rb:p-0! rb:border-0 rb:bg-transparent rb:cursor-pointer rb:text-primary-600 rb:whitespace-nowrap rb:hover:underline"
-            >
-              {t('knowledgeBase.documentWiki.ready', { count })}
-            </button>
-          );
-        }
-        const processing = typeof document.progress === 'number'
-          && document.progress > 0 && document.progress < 1;
-        return (
-          <span className="rb:text-gray-600">
-            {processing ? t('knowledgeBase.documentWiki.processing') : t('knowledgeBase.documentWiki.pending')}
-          </span>
-        );
-      },
     },
     {
       title: t('knowledgeBase.processMsg'),
@@ -322,7 +269,7 @@ const PrivateFileWorkspace = forwardRef<PrivateFileWorkspaceRef, PrivateFileWork
       },
     },
     { title: t('knowledgeBase.processingMode'), dataIndex: 'parser_id', key: 'parser_id', width: 100 },
-    { title: t('knowledgeBase.dataSize'), dataIndex: 'file_size', key: 'file_size', render: (file_size) => formatFileSize(file_size) },
+    { title: t('knowledgeBase.dataSize'), dataIndex: 'file_size', key: 'file_size' },
     {
       title: t('knowledgeBase.createUpdateTime'),
       dataIndex: 'created_at',
@@ -403,7 +350,7 @@ const PrivateFileWorkspace = forwardRef<PrivateFileWorkspaceRef, PrivateFileWork
           <Table
             ref={tableRef}
             apiUrl={apiUrl}
-            apiParams={tableQuery}
+            apiParams={query}
             columns={columns}
             rowKey="id"
             scrollX={1500}
@@ -419,11 +366,6 @@ const PrivateFileWorkspace = forwardRef<PrivateFileWorkspaceRef, PrivateFileWork
         datasetModalRef={datasetModalRef}
         onRefreshDirectory={onRefreshDirectory}
         onRefreshTable={handleRefreshTable}
-      />
-      <RelatedWikiDrawer
-        ref={relatedWikiDrawerRef}
-        knowledgeBaseId={knowledgeBaseId}
-        onOpenWikiPage={onOpenWikiPage}
       />
     </>
   );

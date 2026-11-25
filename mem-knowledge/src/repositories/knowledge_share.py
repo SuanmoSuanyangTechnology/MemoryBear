@@ -49,16 +49,10 @@ async def get_source_kb_ids_by_target_kb_id_async(
 async def create_knowledgeshare_async(
     db: AsyncSession,
     knowledgeshare: KnowledgeShareCreate,
-    *,
-    commit: bool = True,
 ) -> KnowledgeShare:
-    """Create a relation; commit=False leaves the transaction to the caller."""
     try:
         db_share = KnowledgeShare(**knowledgeshare.model_dump())
         db.add(db_share)
-        if not commit:
-            await db.flush()
-            return db_share
         await db.commit()
         await db.refresh(db_share)
         return db_share
@@ -69,21 +63,6 @@ async def create_knowledgeshare_async(
             knowledgeshare.source_kb_id,
         )
         raise
-
-
-async def get_shares_for_target_async(
-    db: AsyncSession,
-    source_kb_id: uuid.UUID,
-    target_workspace_id: uuid.UUID,
-) -> list[KnowledgeShare]:
-    result = await db.execute(
-        select(KnowledgeShare).where(
-            KnowledgeShare.source_kb_id == source_kb_id,
-            KnowledgeShare.target_workspace_id == target_workspace_id,
-        )
-    )
-    return list(result.scalars().all())
-
 
 async def get_knowledgeshare_by_id_async(
     db: AsyncSession,

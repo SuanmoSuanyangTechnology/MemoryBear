@@ -201,7 +201,6 @@ export interface KnowledgeBaseDocumentData { // 知识库文档数据
   qa_prompt?: string; // 提示词
   metadata?: Record<string, any>; // 文档元数据
   parent_child_mode?: boolean; // 是否开启父子模式
-  wiki_count?: number; // Number of related Wiki pages (requires include_wiki_count=true)
 }
 export interface DocumentModalRef {
   handleOpen: (file?: KnowledgeBaseDocumentData | null) => void;
@@ -326,8 +325,7 @@ export interface ListQuery {
   orderby?: string;
   desc?: boolean;
   keywords?: string;
-  status?: 1 | 0;
-  kb_ids?: string;
+  [key: string]: unknown;
 }
 
 // API Key 信息
@@ -470,7 +468,6 @@ export interface PathQuery extends ListQuery {
   kb_id?: string;
   parent_id?: string;
   workspace_id?: string;
-  document_id?: string;
 }
 
 // 

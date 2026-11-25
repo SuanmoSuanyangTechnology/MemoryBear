@@ -16,7 +16,6 @@ PUBLIC_PACKAGE_ROOTS = (
 )
 FORBIDDEN_SERVICE_IMPORTS = {"api", "app", "premium"}
 AUTHORIZED_TASKS_BY_MODULE = {
-    "tasks/wiki_faq_import.py": {"mem_knowledge.tasks.import_faqs"},
     "tasks/wiki_faq.py": {"mem_knowledge.tasks.generate_wiki_faq"},
     "tasks/wiki.py": {
         "mem_knowledge.tasks.sync_wiki_document",

@@ -1,25 +1,5 @@
 provider: dashscope
 models:
-- name: qwen3.8-27b
-  type: llm
-  provider: dashscope
-  description: 通义千问 Qwen3.8 系列视觉语言模型，支持文本、图片和视频输入，提供 100 万 Token 上下文窗口。
-  is_deprecated: false
-  is_official: true
-  input_modalities:
-  - text
-  - image
-  - video
-  output_modalities:
-  - text
-  features:
-  - thinking
-  - json_output
-  - function_call
-  tags:
-  - 大语言模型
-  - 多模态
-  logo: dashscope
 - name: deepseek-r1-distill-qwen-14b
   type: llm
   provider: dashscope

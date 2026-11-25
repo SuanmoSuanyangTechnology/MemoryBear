@@ -1,74 +1,10 @@
 provider: openai
 models:
-- name: gpt-6.2-astra
-  type: llm
-  provider: openai
-  description: 旗舰模型，适合复杂推理、代码和长上下文任务，支持文本和图片输入。
-  is_deprecated: false
-  is_official: true
-  input_modalities:
-  - text
-  - image
-  output_modalities:
-  - text
-  features: []
-  tags:
-  - 大语言模型
-  - 多模态
-  logo: openai
-- name: gpt-6.2-sol
-  type: llm
-  provider: openai
-  description: 面向日常推理、编码和长文档处理，支持文本和图片输入。
-  is_deprecated: false
-  is_official: true
-  input_modalities:
-  - text
-  - image
-  output_modalities:
-  - text
-  features: []
-  tags:
-  - 大语言模型
-  - 多模态
-  logo: openai
-- name: gpt-6.1-terra
-  type: llm
-  provider: openai
-  description: 面向低延迟视觉推理、文档分析和写作，支持文本和图片输入。
-  is_deprecated: false
-  is_official: true
-  input_modalities:
-  - text
-  - image
-  output_modalities:
-  - text
-  features: []
-  tags:
-  - 大语言模型
-  - 多模态
-  logo: openai
-- name: gpt-6-luna
-  type: llm
-  provider: openai
-  description: 面向高吞吐、低成本的分类、提取和轻量推理，支持文本和图片输入。
-  is_deprecated: false
-  is_official: true
-  input_modalities:
-  - text
-  - image
-  output_modalities:
-  - text
-  features: []
-  tags:
-  - 大语言模型
-  - 多模态
-  logo: openai
 - name: chatgpt-4o-latest
   type: llm
   provider: openai
   description: chatgpt-4o-latest大语言模型，支持多工具调用、智能体思考、流式工具调用、视觉能力，128000上下文窗口，对话模式
-  is_deprecated: true
+  is_deprecated: false
   is_official: true
   input_modalities:
   - text
@@ -93,7 +29,7 @@ models:
   type: llm
   provider: openai
   description: gpt-3.5-turbo-0125大语言模型，支持多工具调用、智能体思考、流式工具调用，16385上下文窗口，对话模式
-  is_deprecated: true
+  is_deprecated: false
   is_official: true
   input_modalities:
   - text
@@ -112,7 +48,7 @@ models:
   type: llm
   provider: openai
   description: gpt-3.5-turbo-1106大语言模型，支持多工具调用、智能体思考、流式工具调用，16385上下文窗口，对话模式
-  is_deprecated: true
+  is_deprecated: false
   is_official: true
   input_modalities:
   - text
@@ -131,7 +67,7 @@ models:
   type: llm
   provider: openai
   description: gpt-3.5-turbo-16k大语言模型，支持多工具调用、智能体思考、流式工具调用，16385上下文窗口，对话模式
-  is_deprecated: true
+  is_deprecated: false
   is_official: true
   input_modalities:
   - text
@@ -150,7 +86,7 @@ models:
   type: llm
   provider: openai
   description: gpt-3.5-turbo-instruct大语言模型，4096上下文窗口，文本补全模式
-  is_deprecated: true
+  is_deprecated: false
   is_official: true
   input_modalities:
   - text
@@ -164,7 +100,7 @@ models:
   type: llm
   provider: openai
   description: gpt-3.5-turbo大语言模型，支持多工具调用、智能体思考、流式工具调用，16385上下文窗口，对话模式
-  is_deprecated: true
+  is_deprecated: false
   is_official: true
   input_modalities:
   - text
@@ -183,7 +119,7 @@ models:
   type: llm
   provider: openai
   description: gpt-4-0125-preview大语言模型，支持多工具调用、智能体思考、流式工具调用，128000上下文窗口，对话模式
-  is_deprecated: true
+  is_deprecated: false
   is_official: true
   input_modalities:
   - text
@@ -202,7 +138,7 @@ models:
   type: llm
   provider: openai
   description: gpt-4-1106-preview大语言模型，支持多工具调用、智能体思考、流式工具调用，128000上下文窗口，对话模式
-  is_deprecated: true
+  is_deprecated: false
   is_official: true
   input_modalities:
   - text
@@ -221,7 +157,7 @@ models:
   type: llm
   provider: openai
   description: gpt-4-turbo-2024-04-09大语言模型，支持多工具调用、智能体思考、流式工具调用、视觉能力，128000上下文窗口，对话模式
-  is_deprecated: true
+  is_deprecated: false
   is_official: true
   input_modalities:
   - text
@@ -242,7 +178,7 @@ models:
   type: llm
   provider: openai
   description: gpt-4-turbo-preview大语言模型，支持多工具调用、智能体思考、流式工具调用，128000上下文窗口，对话模式
-  is_deprecated: true
+  is_deprecated: false
   is_official: true
   input_modalities:
   - text
@@ -261,7 +197,7 @@ models:
   type: llm
   provider: openai
   description: gpt-4-turbo大语言模型，支持多工具调用、智能体思考、流式工具调用、视觉能力，128000上下文窗口，对话模式
-  is_deprecated: true
+  is_deprecated: false
   is_official: true
   input_modalities:
   - text
@@ -297,7 +233,7 @@ models:
   type: llm
   provider: openai
   description: o1大语言模型，支持多工具调用、智能体思考、流式工具调用、视觉能力、结构化输出，200000上下文窗口，对话模式
-  is_deprecated: true
+  is_deprecated: false
   is_official: true
   input_modalities:
   - text
@@ -343,7 +279,7 @@ models:
   type: llm
   provider: openai
   description: o3-mini-2025-01-31大语言模型，支持智能体思考、工具调用、流式工具调用、结构化输出，200000上下文窗口，对话模式
-  is_deprecated: true
+  is_deprecated: false
   is_official: true
   input_modalities:
   - text
@@ -364,7 +300,7 @@ models:
   type: llm
   provider: openai
   description: o3-mini大语言模型，支持智能体思考、工具调用、流式工具调用、结构化输出，200000上下文窗口，对话模式
-  is_deprecated: true
+  is_deprecated: false
   is_official: true
   input_modalities:
   - text
@@ -452,7 +388,7 @@ models:
   type: llm
   provider: openai
   description: o4-mini-2025-04-16大语言模型，支持智能体思考、工具调用、视觉能力、流式工具调用、结构化输出，200000上下文窗口，对话模式
-  is_deprecated: true
+  is_deprecated: false
   is_official: true
   input_modalities:
   - text
@@ -475,7 +411,7 @@ models:
   type: llm
   provider: openai
   description: o4-mini大语言模型，支持智能体思考、工具调用、视觉能力、流式工具调用、结构化输出，200000上下文窗口，对话模式
-  is_deprecated: true
+  is_deprecated: false
   is_official: true
   input_modalities:
   - text

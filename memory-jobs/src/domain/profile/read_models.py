@@ -47,28 +47,3 @@ class RefreshCandidate:
     summary_cached_at: datetime | None
     write_time: datetime | None
     metadata_updated_at: datetime | None
-
-
-@dataclass(frozen=True, slots=True)
-class MetadataMigrationCursor:
-    """Position in the write_time DESC NULLS LAST, end_user_id ASC order."""
-
-    write_time: datetime | None
-    end_user_id: EndUserId
-
-
-@dataclass(frozen=True, slots=True)
-class MetadataMigrationScanCandidate:
-    end_user_id: EndUserId
-    workspace_id: WorkspaceId
-    write_time: datetime | None
-
-
-@dataclass(frozen=True, slots=True)
-class MetadataMigrationCandidate:
-    end_user_id: EndUserId
-    workspace_id: WorkspaceId
-    created_at: datetime | None
-    has_info_row: bool
-    meta_data: object
-    meta_data_new: object

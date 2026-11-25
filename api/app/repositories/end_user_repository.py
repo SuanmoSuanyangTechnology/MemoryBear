@@ -8,7 +8,6 @@ from sqlalchemy import func, or_, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
-from task_bridge.metadata_migration import metadata_read_expression
 
 from app.core.logging_config import get_db_logger
 from app.core.utils.datetime_utils import utcnow_naive
@@ -974,15 +973,13 @@ class EndUserRepository:
         # ── 所有表定义：(model, col_name, src_value, tgt_value) ──
         from app.models.conversation_model import Conversation
         from app.models.dialogue_emotion_raw_model import DialogueEmotionRaw
+        from app.models.memory_message_model import MemoryMessage
+        from app.models.memory_short_model import ShortTermMemory, LongTermMemory
         from app.models.forgetting_cycle_history_model import ForgettingCycleHistory
         from app.models.memory_display_record_model import MemoryDisplayRecord
-        from app.models.memory_engine_display_event_model import (
-            MemoryEngineDisplayEvent,
-        )
+        from app.models.memory_engine_display_event_model import MemoryEngineDisplayEvent
         from app.models.memory_forget_model import ForgetAuditModel
-        from app.models.memory_message_model import MemoryMessage
         from app.models.memory_perceptual_model import MemoryPerceptualModel
-        from app.models.memory_short_model import LongTermMemory, ShortTermMemory
         from app.models.reflection_log_model import MemoryReflectionLog
 
         all_tables: list[tuple[type, str, object, object]] = [
@@ -1844,7 +1841,7 @@ class EndUserRepository:
         """读取有效 Workspace 下单个有效用户的 Tag 源数据和当前缓存状态。"""
         result = self.db.execute(
             select(
-                metadata_read_expression(EndUserInfo.meta_data, EndUserInfo.meta_data_new),
+                EndUserInfo.meta_data.label("meta_data"),
                 EndUserInfo.updated_at.label("metadata_updated_at"),
                 EndUser.memory_tags.label("memory_tags"),
                 EndUser.memory_tags_source_fingerprint.label("memory_tags_source_fingerprint"),
@@ -1930,7 +1927,7 @@ class EndUserRepository:
         result = await self.db.execute(
             select(
                 EndUserInfo.id.label("metadata_id"),
-                metadata_read_expression(EndUserInfo.meta_data, EndUserInfo.meta_data_new),
+                EndUserInfo.meta_data.label("meta_data"),
                 EndUserInfo.updated_at.label("metadata_updated_at"),
                 EndUser.write_time.label("write_time"),
                 EndUser.memory_insight_updated_at.label("memory_insight_updated_at"),
@@ -1967,7 +1964,7 @@ class EndUserRepository:
         result = self.db.execute(
             select(
                 EndUserInfo.id.label("metadata_id"),
-                metadata_read_expression(EndUserInfo.meta_data, EndUserInfo.meta_data_new),
+                EndUserInfo.meta_data.label("meta_data"),
                 EndUserInfo.updated_at.label("metadata_updated_at"),
                 EndUser.write_time.label("write_time"),
                 EndUser.memory_insight_updated_at.label("memory_insight_updated_at"),
@@ -2154,7 +2151,6 @@ class EndUserRepository:
         路径: EndUser → workspace → workspace.memory_config → MemoryConfig.forgetting_threshold
         """
         from sqlalchemy import select
-
         from app.models.memory_config_model import MemoryConfig
         from app.models.workspace_model import Workspace
 
@@ -3047,7 +3043,7 @@ class EndUserRepository:
         Returns:
             tuple[list, int]: (items列表[{"end_user": ORM, "expire_time": datetime|None}], 总数)
         """
-        from sqlalchemy import String, cast, desc
+        from sqlalchemy import desc, String, cast
         from sqlalchemy.orm import load_only
         from sqlalchemy.sql.expression import nullslast
 
@@ -3152,7 +3148,7 @@ class EndUserRepository:
         Returns:
             tuple[list, int]: (items列表[{"end_user": ORM, "memory_count": int, "expire_time": datetime|None}], 总数)
         """
-        from sqlalchemy import String, cast, desc
+        from sqlalchemy import desc, String, cast
         from sqlalchemy.orm import load_only
         from sqlalchemy.sql.expression import nullslast
 

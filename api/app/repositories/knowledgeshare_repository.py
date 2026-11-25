@@ -157,17 +157,12 @@ def create_knowledgeshare(db: Session, knowledgeshare: knowledgeshare_schema.Kno
 
 async def create_knowledgeshare_async(
         db: AsyncSession,
-        knowledgeshare: knowledgeshare_schema.KnowledgeShareCreate,
-        *,
-        commit: bool = True,
+        knowledgeshare: knowledgeshare_schema.KnowledgeShareCreate
 ) -> KnowledgeShare:
-    """Create a relation; commit=False leaves the transaction to the caller."""
+    """Async version of create_knowledgeshare."""
     try:
         db_knowledgeshare = KnowledgeShare(**knowledgeshare.model_dump())
         db.add(db_knowledgeshare)
-        if not commit:
-            await db.flush()
-            return db_knowledgeshare
         await db.commit()
         await db.refresh(db_knowledgeshare)
         loaded_share = await get_knowledgeshare_by_id_async(db, db_knowledgeshare.id)
@@ -179,20 +174,6 @@ async def create_knowledgeshare_async(
         )
         await db.rollback()
         raise
-
-
-async def get_shares_for_target_async(
-        db: AsyncSession,
-        source_kb_id: uuid.UUID,
-        target_workspace_id: uuid.UUID,
-) -> list[KnowledgeShare]:
-    result = await db.execute(
-        select(KnowledgeShare).where(
-            KnowledgeShare.source_kb_id == source_kb_id,
-            KnowledgeShare.target_workspace_id == target_workspace_id,
-        )
-    )
-    return list(result.scalars().all())
 
 
 def get_knowledgeshare_by_id(db: Session, knowledgeshare_id: uuid.UUID) -> KnowledgeShare | None:

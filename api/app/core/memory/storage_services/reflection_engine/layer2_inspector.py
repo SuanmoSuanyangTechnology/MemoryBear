@@ -402,24 +402,6 @@ class Layer2Inspector:
                     f"暂缓={dedup.get('deferred_count', 0)}"
                 )
 
-            # 补迁独立于碎片门控；异常/超时只暂缓迁移，正常反思继续走 R13。
-            from app.core.memory.storage_services.reflection_engine.deterministic.metadata_migration import (
-                migrate_before_reflection,
-            )
-            migration_budget = min(settings.METADATA_MIGRATION_TIMEOUT_SECONDS, remaining() / 4)
-            if migration_budget >= 1:
-                try:
-                    migration = await asyncio.wait_for(
-                        migrate_before_reflection(end_user_id, self.llm_client, language),
-                        timeout=migration_budget,
-                    )
-                except Exception:
-                    logger.warning("[Layer2] metadata 补迁暂缓 user=%s", end_user_id, exc_info=True)
-                    migration = {"status": "deferred", "reason": "migration_failed"}
-            else:
-                migration = {"status": "deferred", "reason": "budget_exhausted"}
-            results["metadata_migration"] = migration
-
             # 元数据提取：输入是 description 原始碎片，必须在 description_merge（会清空碎片）之前
             meta = await self._run_step(
                 "元数据提取", end_user_id,
@@ -717,7 +699,7 @@ class Layer2Inspector:
 
         从 Neo4j 中读取当前用户的 User 实体及其 description 碎片，
         调用 extract_metadata_for_user 按分片串行增量 Patch 提取，
-        结果按迁移状态写回 PostgreSQL 的 meta_data / meta_data_new（不回写 Neo4j）。
+        结果只写回 PostgreSQL end_user_info.meta_data（不回写 Neo4j）。
 
         门控：description 碎片数 >= min_fragments（默认 5）才触发提取，
         与 description_merge 共用同一阈值配置。

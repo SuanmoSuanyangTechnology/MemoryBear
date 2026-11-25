@@ -28,7 +28,7 @@ from celery.worker.state import active_requests
 from ..bootstrap import get_settings
 from ..logging import setup_logging as setup_knowledge_logging
 from ..runtime import reset_worker_runtime_after_fork, shutdown_worker_runtime_sync
-from . import document, evidence_graph, legacy_compat, qa_import, wiki, wiki_faq, wiki_faq_import
+from . import document, evidence_graph, legacy_compat, qa_import, wiki, wiki_faq
 from .celery_app import celery_app
 from .observability import record_task_prerun, reset_observability_after_fork
 from .worker_health import (
@@ -312,7 +312,8 @@ def handle_task_postrun(
 
     del kwargs
     logger.info(
-        "event=kb_task_postrun role=%s pid=%s task_name=%s task_id=%s celery_outcome=%s",
+        "event=kb_task_postrun role=%s pid=%s task_name=%s task_id=%s "
+        "celery_outcome=%s",
         get_settings().kb_process_role,
         os.getpid(),
         getattr(sender, "name", "unknown"),
@@ -332,7 +333,8 @@ def handle_task_retry(
 
     del kwargs
     logger.warning(
-        "event=kb_task_retry role=%s pid=%s task_name=%s task_id=%s error_type=%s attempt=%s",
+        "event=kb_task_retry role=%s pid=%s task_name=%s task_id=%s "
+        "error_type=%s attempt=%s",
         get_settings().kb_process_role,
         os.getpid(),
         getattr(sender, "name", "unknown"),
@@ -370,7 +372,6 @@ __all__ = [
     "qa_import",
     "wiki",
     "wiki_faq",
-    "wiki_faq_import",
     "WorkerConfigurationError",
     "handle_task_postrun",
     "handle_worker_shutdown",

@@ -30,6 +30,14 @@ from app.core.memory.retrieval_trace.models import (
 _PROFILE_FIELDS = (
     "aliases_name",
     "description",
+    "core_facts",
+    "goals",
+    "interests",
+    "relations",
+    "beliefs_or_stances",
+    "anchors",
+    "events",
+    "traits",
     *PROFILE_DISPLAY_KEYS,
 )
 _ARRAY_PROFILE_FIELDS = tuple(field for field in _PROFILE_FIELDS if field != "description")
@@ -78,7 +86,13 @@ def project_profile_data(result: MemorySearchResult | None) -> dict[str, Any]:
     for field in _ARRAY_PROFILE_FIELDS:
         if field == "aliases_name":
             continue
-        profile[field] = _profile_list(display_profile.get(field))
+        if field in PROFILE_DISPLAY_KEYS:
+            profile[field] = _profile_list(display_profile.get(field))
+        elif field == "events":
+            # memory.data 中事件字段名为 event_timeline
+            profile[field] = _profile_list(source.get("event_timeline", source.get("events")))
+        else:
+            profile[field] = _profile_list(source.get(field))
     return profile
 
 
@@ -145,9 +159,7 @@ def _memory_content(
     data = memory.data if isinstance(memory.data, dict) else {}
     if kind == MemoryDisplayType.PROFILE:
         profile = project_profile_data(MemorySearchResult(memories=[memory]))
-        values = profile["aliases_name"] or ([profile["description"]] if profile["description"] else [])
-        if not values:
-            values = next((profile[field] for field in PROFILE_DISPLAY_KEYS if profile[field]), [])
+        values = profile["core_facts"] or profile["aliases_name"] or ([profile["description"]] if profile["description"] else [])
         return display_text("；".join(values), 300)
     if kind == MemoryDisplayType.ENTITY:
         candidates = (data.get("description"), data.get("description_summary"), data.get("name"), memory.content)

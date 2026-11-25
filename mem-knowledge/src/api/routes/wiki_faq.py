@@ -1,11 +1,9 @@
 """管理端 FAQ 接口：作用域隔离，已变更内容保存时确认审核，启停保持独立。"""
 
 from typing import Annotated, Literal
-from urllib.parse import quote
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query, Request
-from fastapi.responses import StreamingResponse
 
 from ...errors import KnowledgeError
 from ...repositories.wiki_faq import read, write
@@ -147,24 +145,6 @@ async def batch_enabled(
             action="enabled",
             is_enabled=payload.is_enabled,
         )
-    )
-
-
-@router.get(
-    "/export",
-    response_class=StreamingResponse,
-    responses={200: {"content": {"text/csv": {"schema": {"type": "string", "format": "binary"}}}}},
-)
-async def export_faqs(
-    kb_id: UUID,
-    principal: PrincipalDep,
-    runtime: RuntimeDep,
-) -> StreamingResponse:
-    filename, stream = await service.start_csv_export(runtime, scope_for(kb_id, principal))
-    return StreamingResponse(
-        stream,
-        media_type="text/csv",
-        headers={"Content-Disposition": f"attachment; filename*=UTF-8''{quote(filename)}"},
     )
 
 

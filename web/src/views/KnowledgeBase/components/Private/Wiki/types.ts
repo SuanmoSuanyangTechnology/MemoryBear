@@ -137,8 +137,6 @@ export interface WikiPagesQuery {
    * 默认 50，上限 200。
    */
   pagesize?: number;
-  /** Filter by source document, used by the file list "Related Wiki" drawer */
-  document_id?: string;
 }
 export interface FolderPathItem {
   id: string;

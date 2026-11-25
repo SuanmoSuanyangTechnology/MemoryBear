@@ -24,8 +24,11 @@ llm 族（G2 非流式 / G3 流式 + 工具）：逐请求参数并进 ``provide
 provider 构造器对未知字段静默忽略，绑错通道即工具静默失效）；token 归因取自返回消息的
 ``usage_metadata``（流式取最后一个带 usage 的块；缺则记 0，不臆造）。
 
-embedding / rerank 双模式：文本模式与结构化模式按模型能力选路。结构化 embedding 中，
-qwen3-vl 和火山方舟可融合多个内容块，Bedrock Nova 每次接收一个内容块。
+embedding / rerank 双模式（G4b）：文本模式（``input`` / ``query``+``documents``）旧口径
+零改动；结构化模式（``contents`` / ``query_content``+``views``）按 resolved 能力选路——
+qwen3-vl 走包内 ``EmbeddingRequest``（单向量融合）/ ``RerankCandidateView``（多模态
+rerank），volcano embedding 走多模态宽入；能力不匹配即 INVALID_PARAMETER 拒止
+（不静默降级文本路径）。
 
 流式（G3）：``chunk_sink`` 非空 = 增量下发，runtime 的块经 ``_drain_stream`` 归一后推入
 有界队列（``await put`` 背压）；首块由候选循环内 eager 拉取（``open_astream``），故首块前
@@ -77,7 +80,6 @@ from redbear_model import (
     publish_usage_safely,
     run_candidate_fallback_async,
 )
-from redbear_model.providers.bedrock import is_bedrock_nova_embedding
 from redbear_model.runtime import (
     RedBearAudioTranscriber,
     RedBearEmbeddings,
@@ -193,27 +195,26 @@ async def _invoke_embedding(
     *,
     client_pool: ModelClientPool | None = None,
 ) -> dict[str, Any]:
-    """文本批量向量化，每条独立输入对应一个向量。
+    """embedding 族：统一走包内 RedBearEmbeddings（火山走 embed_batch 多模态批入口）。
 
     ``client_pool`` 由调用方注入进程级池（连接复用 + 并发闸门）；缺省自建（aclose 按
     所有权判定，借用池不会被本实例关闭）。rerank 族包内 runtime 不支持池注入。
     """
     runtime = RedBearEmbeddings(resolved, client_pool=client_pool)
     try:
-        texts = list(params.input)
-        vectors = await asyncio.to_thread(runtime.embed_documents, texts)
-        if len(vectors) != len(texts):
-            raise InvalidProviderResponseError("embedding", "vector count does not match input")
-        dimension = len(vectors[0]) if vectors else 0
-        if not dimension or any(len(vector) != dimension for vector in vectors):
-            raise InvalidProviderResponseError("embedding", "empty or inconsistent vectors")
+        embed: Callable[[list[str]], list[list[float]]] = (
+            runtime.embed_batch
+            if resolved.provider is ModelProvider.VOLCANO
+            else runtime.embed_documents
+        )
+        vectors = await asyncio.to_thread(embed, list(params.input))
     finally:
         await runtime.aclose()
     return {
         "vectors": [list(vector) for vector in vectors],
         "usage": {
             "count": len(vectors),
-            "dimension": dimension,
+            "dimension": len(vectors[0]) if vectors else 0,
         },
     }
 
@@ -229,7 +230,7 @@ async def _invoke_embedding_structured(
     - qwen3-vl（``is_qwen3_vl_embedding``）：包内 ``EmbeddingRequest`` 单向量融合
       （2048 维），usage（含 image_tokens）原样透传。
     - volcano：``embed_multimodal`` 多模态宽入（OpenAI 内容块形状），批内容整体融合。
-    - Bedrock Nova：单个文本或图片内容块。
+    - 其余模型：INVALID_PARAMETER 响亮拒止（不静默降级文本路径）。
     """
     if params.purpose is None or params.contents is None:
         # schema 互斥校验已保证；非 HTTP 构造路径（内部/测试）违反即契约违规
@@ -237,30 +238,17 @@ async def _invoke_embedding_structured(
             code=BizCode.INVALID_PARAMETER,
             message="结构化 embedding 需要 purpose 与 contents",
         )
-    is_qwen = is_qwen3_vl_embedding(resolved)
-    is_nova = is_bedrock_nova_embedding(resolved)
-    if not (is_qwen or is_nova or resolved.provider is ModelProvider.VOLCANO):
+    if not is_qwen3_vl_embedding(resolved) and resolved.provider is not ModelProvider.VOLCANO:
         raise InvokeFailure(
             code=BizCode.INVALID_PARAMETER,
             message=(
                 f"模型 {resolved.model_name} 不支持结构化 embedding 入参"
-                "（支持 qwen3-vl embedding、火山方舟和 Bedrock Nova）"
+                "（需 qwen3-vl embedding 或 volcano 多模态）"
             ),
-        )
-    if is_nova and (
-        len(params.contents) != 1
-        or (
-            isinstance(params.contents[0], ImageContentBlock)
-            and params.contents[0].media_type == "image/bmp"
-        )
-    ):
-        raise InvokeFailure(
-            code=BizCode.INVALID_PARAMETER,
-            message="Bedrock Nova 每次需要一条文本或一张 JPEG、PNG、WebP 图片",
         )
     runtime = RedBearEmbeddings(resolved, client_pool=client_pool)
     try:
-        if is_qwen:
+        if is_qwen3_vl_embedding(resolved):
             result = await runtime.aembed_contents(
                 EmbeddingRequest(
                     purpose=EmbeddingPurpose(params.purpose),
@@ -274,19 +262,11 @@ async def _invoke_embedding_structured(
                 "dimension": result.dimension,
                 "usage": dict(result.usage),
             }
-        if is_nova:
-            vector = await asyncio.to_thread(
-                runtime.embed_nova,
-                _package_content_block(params.contents[0]),
-                EmbeddingPurpose(params.purpose),
-            )
-        else:
-            vectors = await runtime.aembed_multimodal(
-                [_volcano_content_block(block) for block in params.contents]
-            )
-            if len(vectors) != 1 or not vectors[0]:
-                raise InvalidProviderResponseError("embedding", "expected one non-empty Ark vector")
-            vector = list(vectors[0])
+        vectors = await runtime.aembed_multimodal(
+            [_volcano_content_block(block) for block in params.contents]
+        )
+        # volcano 多模态把整批内容融合为单向量（response.data.embedding 单条）
+        vector = list(vectors[0]) if vectors else []
         return {"vector": vector, "dimension": len(vector), "usage": {}}
     finally:
         await runtime.aclose()

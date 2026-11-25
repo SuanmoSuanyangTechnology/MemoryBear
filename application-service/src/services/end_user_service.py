@@ -211,7 +211,7 @@ class EndUserService:
                 "end_user_id": str(record.end_user_id),
                 "other_name": record.other_name,
                 "aliases": record.aliases,
-                "meta_data": record.meta_data_new if isinstance(record.meta_data_new, dict) else {},
+                "meta_data": record.meta_data,
                 "created_at": to_timestamp_ms(record.created_at),
                 "updated_at": to_timestamp_ms(record.updated_at),
             },

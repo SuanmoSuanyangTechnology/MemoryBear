@@ -37,7 +37,6 @@ from ..rag.parser_config import normalize_document_parser_config
 from ..repositories import document as document_repository
 from ..repositories import file as file_repository
 from . import knowledge as knowledge_service
-from .folder_hierarchy import validate_file_hierarchy
 from .knowledge_file_storage import KnowledgeFileStorage, generate_kb_file_key
 from .qa_export import cleanup_export_file, iter_export_file
 from .write_validation import validate_file_size_text, validate_write_fields
@@ -182,8 +181,6 @@ async def create_folder(
     parent_id: uuid.UUID,
     folder_name: str,
     principal: Principal,
-    *,
-    max_folder_depth: int,
 ) -> File:
     # 文件夹名称去除首尾空白后不允许为空（缺参占位符 '/' 不能作为真实名称落库）
     folder_name = (folder_name or "").strip()
@@ -194,10 +191,6 @@ async def create_folder(
     if await knowledge_service.get_knowledge(db, kb_id, principal) is None:
         raise KnowledgeError.from_code("KB_KNOWLEDGE_NOT_FOUND")
     await require_parent_folder(db, kb_id, parent_id, principal)
-    await db.run_sync(
-        validate_file_hierarchy, kb_id, {"parent_id": parent_id, "file_ext": "folder"},
-        max_folder_depth,
-    )
     return await file_repository.create_file_async(
         db,
         FileCreate(
@@ -429,23 +422,13 @@ async def update_file(
     file_id: uuid.UUID,
     update_data: FileUpdate,
     principal: Principal,
-    *,
-    max_folder_depth: int | None = None,
 ) -> File:
     file = await get_file(db, file_id, principal)
     if file is None:
         raise KnowledgeError.from_code("KB_FILE_NOT_FOUND")
     update_fields = update_data.model_dump(exclude_unset=True)
     if "parent_id" in update_fields:
-        from ..bootstrap import get_settings
-
-        await db.run_sync(
-            validate_file_hierarchy, file.kb_id, update_fields,
-            max_folder_depth if max_folder_depth is not None
-            else get_settings().kb_file_folder_max_depth,
-            file.id,
-        )
-        await db.refresh(file)
+        await require_parent_folder(db, file.kb_id, update_fields["parent_id"], principal)
     validate_write_fields(update_fields, non_nullable=("file_name", "file_ext", "file_size"))
     size = update_fields.get("file_size")
     if isinstance(size, str):

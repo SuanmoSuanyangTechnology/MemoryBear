@@ -38,20 +38,6 @@ class Message(ReadOnlyBase):
     parent_message_id = Column(UUID(as_uuid=True), nullable=True)
 
 
-class ConversationDetail(ReadOnlyBase):
-    """Read-only projection of the ``conversation_details`` table."""
-
-    __tablename__ = "conversation_details"
-
-    id = Column(UUID(as_uuid=True), primary_key=True)
-    conversation_id = Column(UUID(as_uuid=True), nullable=True)
-    theme = Column(String, nullable=True)
-    summary = Column(String, nullable=True)
-    takeaways = Column(JSON, nullable=True)
-    question = Column(JSON, nullable=True)
-    info_score = Column(Integer, nullable=True)
-
-
 class MemoryMessage(ReadOnlyBase):
     __tablename__ = "memory_messages"
 
@@ -63,7 +49,6 @@ class MemoryMessage(ReadOnlyBase):
     content = Column(Text, nullable=False)
     message_seq = Column(Integer, nullable=False)
     dialog_at = Column(String(64), nullable=True)
-    files = Column(JSON, nullable=True)
     created_at = Column(DateTime, nullable=True)
 
 
@@ -89,65 +74,24 @@ class ShortTermMemory(ReadOnlyBase):
     end_user_id = Column(String(255), nullable=False)
     messages = Column(Text, nullable=False)
     aimessages = Column(Text, nullable=True)
-    search_switch = Column(String(50), nullable=True)
     retrieved_content = Column(JSON, nullable=True)
     created_at = Column(DateTime, nullable=False)
 
 
 class ForgetAudit(ReadOnlyBase):
-    """One forgotten-memory audit row (``memory_forget_log``).
-
-    The profile statistics module only counts rows, while the migrated forget
-    endpoints also page and aggregate them; the full column set is mapped so one
-    class serves both without a second mapping of the same table.
-    """
-
     __tablename__ = "memory_forget_log"
 
     id = Column(UUID(as_uuid=True), primary_key=True)
     end_user_id = Column(UUID(as_uuid=True), nullable=False)
-    node_id = Column(String, nullable=False)
-    node_type = Column(String, nullable=False)
-    content = Column(String, nullable=False)
-    trigger = Column(Integer, nullable=False)
-    reason = Column(String, nullable=False)
-    recoverable = Column(Boolean, nullable=False)
-    operator = Column(UUID(as_uuid=True), nullable=True)
-    delete_at = Column(DateTime, nullable=False)
-    is_recovered = Column(Boolean, nullable=False)
 
 
 class ImplicitEmotionsStorage(ReadOnlyBase):
-    """Read-only access to API-owned cached implicit profiles and suggestions."""
+    """Read-only access to API-owned cached implicit profiles."""
 
     __tablename__ = "implicit_emotions_storage"
 
     id = Column(UUID(as_uuid=True), primary_key=True)
     end_user_id = Column(String(255), nullable=False)
     implicit_profile = Column(JSONB, nullable=True)
-    emotion_suggestions = Column(JSONB, nullable=True)
 
-    created_at = Column(DateTime, nullable=False)
     updated_at = Column(DateTime, nullable=False)
-    implicit_generated_at = Column(DateTime, nullable=True)
-    emotion_generated_at = Column(DateTime, nullable=True)
-
-
-class MemoryIncrement(ReadOnlyBase):
-    __tablename__ = "memory_increments"
-
-    id = Column(UUID(as_uuid=True), primary_key=True)
-    workspace_id = Column(UUID(as_uuid=True), nullable=False)
-    total_num = Column(Integer, nullable=False)
-    created_at = Column(DateTime, nullable=True)
-    updated_at = Column(DateTime, nullable=True)
-
-
-class DialogueEmotionRaw(ReadOnlyBase):
-    __tablename__ = "dialogue_emotion_raw"
-
-    id = Column(UUID(as_uuid=True), primary_key=True)
-    dialogue_id = Column(String(255), nullable=False)
-    end_user_id = Column(UUID(as_uuid=True), nullable=False)
-    created_at = Column(DateTime, nullable=False)
-    emotion = Column(String(50), nullable=False)

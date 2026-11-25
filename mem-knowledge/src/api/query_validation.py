@@ -1,10 +1,7 @@
 """Validate legacy list filters that otherwise fail in the database layer."""
 
-from typing import Any
 from uuid import UUID
 
-from error_core.knowledge import validation_diagnostic
-from pydantic import ValidationError, ValidatorFunctionWrapHandler
 from sqlalchemy import JSON
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.exc import DBAPIError
@@ -13,16 +10,6 @@ from sqlalchemy.orm import ColumnProperty, InstrumentedAttribute
 from sqlalchemy.sql import Select
 
 from ..errors import KnowledgeError
-
-
-def localized_query_validation(value: Any, handler: ValidatorFunctionWrapHandler) -> Any:
-    try:
-        return handler(value)
-    except ValidationError as exc:
-        errors = exc.errors(include_input=False, include_context=False)
-        raise KnowledgeError.from_code(
-            "KB_VALIDATION_ERROR", status_code=422, diagnostic=validation_diagnostic(errors),
-        ) from exc
 
 
 def parse_uuid_filter(value: str | None, *, field: str) -> list[UUID] | None:

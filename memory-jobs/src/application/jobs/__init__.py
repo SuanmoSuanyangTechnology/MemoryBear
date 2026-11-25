@@ -15,7 +15,6 @@ Adding a job means a handler module here plus one entry in
 from src.application.jobs.health_ping import PingJob
 from src.application.jobs.interest_generate import GenerateInterestDistributionJob
 from src.application.jobs.interest_prewarm import PrewarmInterestDistributionsJob
-from src.application.jobs.metadata_migration import DoMetadataMigrationJob, ScanMetadataMigrationJob
 from src.application.jobs.profile_cache_generate import GenerateProfileCacheJob
 from src.application.jobs.profile_cache_generate_workspace import (
     FanOutWorkspaceJob,
@@ -29,6 +28,4 @@ __all__ = [
     "PingJob",
     "PrewarmInterestDistributionsJob",
     "ScanProfileCachesJob",
-    "DoMetadataMigrationJob",
-    "ScanMetadataMigrationJob",
 ]

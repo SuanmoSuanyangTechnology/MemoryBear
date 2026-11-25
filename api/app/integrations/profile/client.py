@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 import time
-from collections.abc import AsyncIterator, Mapping
+from collections.abc import Mapping
 from typing import Any
 
 import httpx
@@ -12,7 +12,6 @@ import httpx
 from .contracts import MemoryProfileAuthSource, MemoryProfileRawResponse
 from .errors import (
     MemoryProfileProtocolError,
-    MemoryProfileServiceError,
     MemoryProfileTimeoutError,
     MemoryProfileUnavailableError,
 )
@@ -255,90 +254,6 @@ class MemoryProfileServiceClient:
             return envelope
         finally:
             await response.aclose()
-
-
-    async def stream(
-        self,
-        *,
-        method: str,
-        path: str,
-        workspace_id: str,
-        tenant_id: str,
-        actor_id: str,
-        source: MemoryProfileAuthSource,
-        trace_id: str,
-        language_type: str | None = None,
-        payload: Any | None = None,
-        timeout: float | None = None,
-    ) -> AsyncIterator[bytes]:
-        """Forward one SSE route and yield the upstream bytes unchanged.
-
-        The streaming face cannot be buffered: the caller's ``text/event-stream``
-        body is relayed chunk by chunk. Non-200 upstreams become
-        :class:`MemoryProfileServiceError` so the proxy can emit its single error
-        frame; transport failures map like :meth:`request`.
-        """
-
-        path = _internal_path(path)
-        http_method = method.upper()
-        actor_header = (
-            "x-api-key-id" if source == MemoryProfileAuthSource.APIKEY else "x-user-id"
-        )
-        headers = {
-            "Accept": "text/event-stream",
-            "x-tenant-id": tenant_id,
-            "x-workspace-id": workspace_id,
-            "x-source": source.value,
-            "X-Trace-Id": trace_id,
-            actor_header: actor_id,
-        }
-        if language_type is not None:
-            headers["X-Language-Type"] = language_type
-        if payload is not None:
-            headers["Content-Type"] = "application/json"
-
-        started_at = time.perf_counter()
-        try:
-            async with self._client.stream(
-                http_method,
-                self._url(path),
-                headers=headers,
-                json=payload,
-                timeout=timeout,
-            ) as response:
-                if response.status_code != 200:
-                    body = await response.aread()
-                    logger.warning(
-                        "memory_profile_stream_failed method=%s path=%s status=%s "
-                        "elapsed_ms=%.2f trace_id=%s",
-                        http_method,
-                        path,
-                        response.status_code,
-                        (time.perf_counter() - started_at) * 1000,
-                        trace_id,
-                    )
-                    raise MemoryProfileServiceError(
-                        response.status_code,
-                        body.decode("utf-8", "replace")[:200],
-                    )
-                async for chunk in response.aiter_bytes():
-                    yield chunk
-            logger.info(
-                "memory_profile_stream_completed method=%s path=%s "
-                "elapsed_ms=%.2f trace_id=%s",
-                http_method,
-                path,
-                (time.perf_counter() - started_at) * 1000,
-                trace_id,
-            )
-        except httpx.TimeoutException as exc:
-            raise MemoryProfileTimeoutError(
-                "Memory profile stream timed out"
-            ) from exc
-        except httpx.RequestError as exc:
-            raise MemoryProfileUnavailableError(
-                "Memory profile stream is unavailable"
-            ) from exc
 
     async def ready(self) -> bool:
         try:

@@ -100,18 +100,11 @@ async def get_source(
         ) from exc
 
 
-def is_manager_request(request: Request) -> bool:
-    # The gateway and monolith proxy forward the source in different headers.
-    source = request.headers.get("X-Source") or request.headers.get("X-KB-Source")
-    return source == KnowledgeRetrievalSource.MANAGER_API
-
-
 __all__ = [
     "Principal",
     "get_optional_principal",
     "get_principal",
     "get_runtime",
     "get_source",
-    "is_manager_request",
     "require_knowledge_copy_principal",
 ]

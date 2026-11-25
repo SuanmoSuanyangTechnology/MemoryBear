@@ -373,7 +373,7 @@
           "V1 - App API"
         ],
         "summary": "Chat",
-        "description": "Agent/Workflow 聊天接口\n\n对外画像仅包含 aliases_name、description 和 13 个通用画像键；旧画像字段\n不在非流式结果或 profile_loaded 事件中返回。\n\n- 不传 version：使用当前生效版本（current_release，回滚后为回滚目标版本）\n- 传 version=release_id：使用指定版本uuid的历史快照，例如 {\"version\": \"{{release_id}}\"}",
+        "description": "Agent/Workflow 聊天接口\n\n- 不传 version：使用当前生效版本（current_release，回滚后为回滚目标版本）\n- 传 version=release_id：使用指定版本uuid的历史快照，例如 {\"version\": \"{{release_id}}\"}",
         "operationId": "chat_v1_app_chat_post",
         "requestBody": {
           "content": {
@@ -1540,26 +1540,6 @@
               "title": "Kb Ids"
             },
             "description": "Knowledge base ids, separated by commas"
-          },
-          {
-            "name": "status",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "integer",
-                  "maximum": 1,
-                  "minimum": 0
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "0: disabled, 1: enabled",
-              "title": "Status"
-            },
-            "description": "0: disabled, 1: enabled"
           }
         ],
         "requestBody": {
@@ -2105,48 +2085,6 @@
               }
             }
           }
-        },
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiResponse"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/v1/knowledgeshares/share": {
-      "post": {
-        "tags": [
-          "V1 - RAG API"
-        ],
-        "summary": "Create Knowledgeshare",
-        "description": "Create or reuse a same-tenant share; configure Agents with target_kb_id.",
-        "operationId": "create_knowledgeshare_v1_knowledgeshares_share_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/KnowledgeShareRequest"
-              }
-            }
-          },
-          "required": true
         },
         "responses": {
           "200": {
@@ -2797,255 +2735,6 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/v1/files/v1/file": {
-      "post": {
-        "tags": [
-          "V1 - RAG API"
-        ],
-        "summary": "Upload File V1",
-        "operationId": "upload_file_v1_v1_files_v1_file_post",
-        "security": [
-          {
-            "APIKeyHeader": []
-          },
-          {
-            "KnowledgeUploadApiKeyBearer": []
-          }
-        ],
-        "parameters": [
-          {
-            "name": "kb_id",
-            "in": "query",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid",
-              "title": "Kb Id"
-            }
-          },
-          {
-            "name": "parent_id",
-            "in": "query",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid",
-              "title": "Parent Id"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "multipart/form-data": {
-              "schema": {
-                "$ref": "#/components/schemas/Body_upload_file_v1_v1_files_v1_file_post"
-              }
-            }
-          }
-        },
-        "responses": {
-          "201": {
-            "description": "文档已创建",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/UploadCreated_UploadedDocument_"
-                }
-              }
-            },
-            "headers": {
-              "X-Trace-Id": {
-                "description": "请求追踪 ID",
-                "schema": {
-                  "type": "string"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "请求格式无法解析",
-            "headers": {
-              "X-Trace-Id": {
-                "description": "请求追踪 ID",
-                "schema": {
-                  "type": "string"
-                }
-              }
-            },
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/UploadFailure"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "未认证",
-            "headers": {
-              "X-Trace-Id": {
-                "description": "请求追踪 ID",
-                "schema": {
-                  "type": "string"
-                }
-              }
-            },
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/UploadFailure"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "无权限",
-            "headers": {
-              "X-Trace-Id": {
-                "description": "请求追踪 ID",
-                "schema": {
-                  "type": "string"
-                }
-              }
-            },
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/UploadFailure"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "目标知识库或目录不存在或不可见",
-            "headers": {
-              "X-Trace-Id": {
-                "description": "请求追踪 ID",
-                "schema": {
-                  "type": "string"
-                }
-              }
-            },
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/UploadFailure"
-                }
-              }
-            }
-          },
-          "409": {
-            "description": "同一知识库内存在相同文件",
-            "headers": {
-              "X-Trace-Id": {
-                "description": "请求追踪 ID",
-                "schema": {
-                  "type": "string"
-                }
-              }
-            },
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/DuplicateUpload"
-                }
-              }
-            }
-          },
-          "413": {
-            "description": "文件超限",
-            "headers": {
-              "X-Trace-Id": {
-                "description": "请求追踪 ID",
-                "schema": {
-                  "type": "string"
-                }
-              }
-            },
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/UploadFailure"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "参数或文件内容校验失败",
-            "headers": {
-              "X-Trace-Id": {
-                "description": "请求追踪 ID",
-                "schema": {
-                  "type": "string"
-                }
-              }
-            },
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/UploadFailure"
-                }
-              }
-            }
-          },
-          "500": {
-            "description": "服务内部错误",
-            "headers": {
-              "X-Trace-Id": {
-                "description": "请求追踪 ID",
-                "schema": {
-                  "type": "string"
-                }
-              }
-            },
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/UploadFailure"
-                }
-              }
-            }
-          },
-          "503": {
-            "description": "必要依赖暂时不可用",
-            "headers": {
-              "X-Trace-Id": {
-                "description": "请求追踪 ID",
-                "schema": {
-                  "type": "string"
-                }
-              }
-            },
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/UploadFailure"
-                }
-              }
-            }
-          },
-          "429": {
-            "description": "API Key 触发限流或调用配额",
-            "headers": {
-              "X-Trace-Id": {
-                "description": "请求追踪 ID",
-                "schema": {
-                  "type": "string"
-                }
-              }
-            },
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/UploadFailure"
                 }
               }
             }
@@ -3951,282 +3640,6 @@
         }
       }
     },
-    "/v1/chunks/v1/{kb_id}/import_qa": {
-      "post": {
-        "tags": [
-          "V1 - RAG API"
-        ],
-        "summary": "Import Qa V1",
-        "operationId": "import_qa_v1_v1_chunks_v1__kb_id__import_qa_post",
-        "security": [
-          {
-            "APIKeyHeader": []
-          },
-          {
-            "KnowledgeUploadApiKeyBearer": []
-          }
-        ],
-        "parameters": [
-          {
-            "name": "kb_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid",
-              "title": "Kb Id"
-            }
-          },
-          {
-            "name": "parent_id",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string",
-                  "format": "uuid"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "目标目录，省略为根目录",
-              "title": "Parent Id"
-            },
-            "description": "目标目录，省略为根目录"
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "multipart/form-data": {
-              "schema": {
-                "$ref": "#/components/schemas/Body_import_qa_v1_v1_chunks_v1__kb_id__import_qa_post"
-              }
-            }
-          }
-        },
-        "responses": {
-          "201": {
-            "description": "文档已创建，QA 导入任务已提交",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/UploadCreated_UploadedQA_"
-                }
-              }
-            },
-            "headers": {
-              "X-Trace-Id": {
-                "description": "请求追踪 ID",
-                "schema": {
-                  "type": "string"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "请求格式无法解析",
-            "headers": {
-              "X-Trace-Id": {
-                "description": "请求追踪 ID",
-                "schema": {
-                  "type": "string"
-                }
-              }
-            },
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/UploadFailure"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "未认证",
-            "headers": {
-              "X-Trace-Id": {
-                "description": "请求追踪 ID",
-                "schema": {
-                  "type": "string"
-                }
-              }
-            },
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/UploadFailure"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "无权限",
-            "headers": {
-              "X-Trace-Id": {
-                "description": "请求追踪 ID",
-                "schema": {
-                  "type": "string"
-                }
-              }
-            },
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/UploadFailure"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "目标知识库或目录不存在或不可见",
-            "headers": {
-              "X-Trace-Id": {
-                "description": "请求追踪 ID",
-                "schema": {
-                  "type": "string"
-                }
-              }
-            },
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/UploadFailure"
-                }
-              }
-            }
-          },
-          "409": {
-            "description": "同一知识库内存在相同文件",
-            "headers": {
-              "X-Trace-Id": {
-                "description": "请求追踪 ID",
-                "schema": {
-                  "type": "string"
-                }
-              }
-            },
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/DuplicateUpload"
-                }
-              }
-            }
-          },
-          "413": {
-            "description": "文件超限",
-            "headers": {
-              "X-Trace-Id": {
-                "description": "请求追踪 ID",
-                "schema": {
-                  "type": "string"
-                }
-              }
-            },
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/UploadFailure"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "参数或文件内容校验失败",
-            "headers": {
-              "X-Trace-Id": {
-                "description": "请求追踪 ID",
-                "schema": {
-                  "type": "string"
-                }
-              }
-            },
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/UploadFailure"
-                }
-              }
-            }
-          },
-          "500": {
-            "description": "服务内部错误",
-            "headers": {
-              "X-Trace-Id": {
-                "description": "请求追踪 ID",
-                "schema": {
-                  "type": "string"
-                }
-              }
-            },
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/UploadFailure"
-                }
-              }
-            }
-          },
-          "503": {
-            "description": "必要依赖暂时不可用",
-            "headers": {
-              "X-Trace-Id": {
-                "description": "请求追踪 ID",
-                "schema": {
-                  "type": "string"
-                }
-              }
-            },
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/UploadFailure"
-                }
-              }
-            }
-          },
-          "429": {
-            "description": "API Key 触发限流或调用配额",
-            "headers": {
-              "X-Trace-Id": {
-                "description": "请求追踪 ID",
-                "schema": {
-                  "type": "string"
-                }
-              }
-            },
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/UploadFailure"
-                }
-              }
-            }
-          },
-          "415": {
-            "description": "不支持的 QA 文件格式",
-            "headers": {
-              "X-Trace-Id": {
-                "description": "请求追踪 ID",
-                "schema": {
-                  "type": "string"
-                }
-              }
-            },
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/UploadFailure"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
     "/v1/chunks/{kb_id}/import_qa": {
       "post": {
         "tags": [
@@ -4326,7 +3739,7 @@
           "V1 - Memory API"
         ],
         "summary": "Read Memory Sync",
-        "description": "Read memory synchronously.\n\nRequires API Key with 'memory' scope. The public response removes the eight\nlegacy profile fields only from the terminal-user profile node\n(id == end_user_id); ordinary memory nodes are returned unchanged.\n\nSupports two modes:\n- Single user (backward-compatible): pass ``end_user_id`` (string).\n  Returns ``{\"answer\": \"...\", \"intermediate_outputs\": [...]}``.\n- Multi user: pass ``end_user_ids`` (list of strings). Reads are executed\n  concurrently via ``asyncio.gather``.\n  Returns ``{\"<end_user_id>\": {\"answer\": \"...\", \"intermediate_outputs\": [...]}, ...}``.",
+        "description": "Read memory synchronously.\n\nRequires API Key with 'memory' scope.\n\nSupports two modes:\n- Single user (backward-compatible): pass ``end_user_id`` (string).\n  Returns ``{\"answer\": \"...\", \"intermediate_outputs\": [...]}``.\n- Multi user: pass ``end_user_ids`` (list of strings). Reads are executed\n  concurrently via ``asyncio.gather``.\n  Returns ``{\"<end_user_id>\": {\"answer\": \"...\", \"intermediate_outputs\": [...]}, ...}``.",
         "operationId": "read_memory_sync_v1_memory_read_sync_post",
         "requestBody": {
           "content": {
@@ -4726,7 +4139,7 @@
           "V1 - End User API"
         ],
         "summary": "Get End User Info",
-        "description": "Get end user info.\n\nRetrieves the info record for the specified end user. meta_data contains only\nthe migrated 13-key profile display projection and domain_specific_info; the\neight legacy profile fields are not returned.\nDelegates to the manager-side controller for shared logic.",
+        "description": "Get end user info.\n\nRetrieves the info record (aliases, meta_data, etc.) for the specified end user.\nDelegates to the manager-side controller for shared logic.",
         "operationId": "get_end_user_info_v1_end_user_info_get",
         "parameters": [
           {
@@ -4930,26 +4343,6 @@
                 "schema": {
                   "$ref": "#/components/schemas/HTTPValidationError"
                 }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/v1/memory_config/scenes/simple": {
-      "get": {
-        "tags": [
-          "V1 - Memory Config API"
-        ],
-        "summary": "List Simple Scenes",
-        "description": "List scenes through the memory-profile API.",
-        "operationId": "list_simple_scenes_v1_memory_config_scenes_simple_get",
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {}
               }
             }
           }
@@ -6793,7 +6186,7 @@
           "V1 - Memory Display API"
         ],
         "summary": "Get Retrieved Memories",
-        "description": "获取读取展示记录列表。\n\n- 传 end_user_id：返回指定用户的读取展示卡片；\n- 不传 end_user_id：返回 API Key 所属工作空间的全部读取卡片（空间级），\n  每项额外携带 end_user_id 字段区分归属。\n社区检索卡片的 search_mode 为 \"community\"，content 展示入选场景的主题范围。",
+        "description": "获取读取展示记录列表。\n\n- 传 end_user_id：返回指定用户的读取展示卡片；\n- 不传 end_user_id：返回 API Key 所属工作空间的全部读取卡片（空间级），\n  每项额外携带 end_user_id 字段区分归属。",
         "operationId": "get_retrieved_memories_v1_memory_display_retrieved_get",
         "parameters": [
           {
@@ -6917,7 +6310,7 @@
           "V1 - Memory Display API"
         ],
         "summary": "Get Engine Display Cards",
-        "description": "获取引擎动态展示卡片列表\n\n- 传 end_user_id：返回指定用户的引擎卡片；\n- 不传 end_user_id：返回 API Key 所属工作空间的全部引擎卡片（空间级，\n  仍按用户维度拆分），每张卡片额外携带 end_user_id。\n\n按\"指定时区下的自然日 + 引擎类型\"聚合事件并返回卡片。\nengine_type 包含人格锚定引擎（PERSONALITY_ANCHOR）等，由前端映射分类标签。\nX-Language-Type 控制 name/content 文案。\n\n聚合边界必须在服务端确定，因此 X-Timezone 为必传请求头，\n前端统一传全局时区设置（useI18n().timeZone），\n保证卡片的聚合日期与前端展示 occurred_at 时使用的时区一致。",
+        "description": "获取引擎动态展示卡片列表\n\n- 传 end_user_id：返回指定用户的引擎卡片；\n- 不传 end_user_id：返回 API Key 所属工作空间的全部引擎卡片（空间级，\n  仍按用户维度拆分），每张卡片额外携带 end_user_id。\n\n按\"指定时区下的自然日 + 引擎类型\"聚合事件并返回卡片。engine_type 为\nEXTRACTION、CROSS_MODAL、EMOTION、FORGETTING、REFLECTION、SCENE_SUMMARY\n或 MEMORY_VALUE，由前端负责展示文案映射；X-Language-Type\n仅控制 name/content 文案。\n\n聚合边界必须在服务端确定，因此 X-Timezone 为必传请求头，\n前端统一传全局时区设置（useI18n().timeZone），\n保证卡片的聚合日期与前端展示 occurred_at 时使用的时区一致。",
         "operationId": "get_engine_display_cards_v1_memory_display_engines_get",
         "parameters": [
           {
@@ -7068,7 +6461,7 @@
           "V1 - Memory Display API"
         ],
         "summary": "Get All Memory Display",
-        "description": "获取写入、读取和引擎动态的统一时间线。\n\n- 传 end_user_id：指定用户的统一时间线；\n- 不传 end_user_id：API Key 所属工作空间的统一时间线（空间级），\n  每项额外携带 end_user_id 区分归属。\n社区检索卡片使用 source=\"retrieved\" 和 search_mode=\"community\"。",
+        "description": "获取写入、读取和引擎动态的统一时间线。\n\n- 传 end_user_id：指定用户的统一时间线；\n- 不传 end_user_id：API Key 所属工作空间的统一时间线（空间级），\n  每项额外携带 end_user_id 区分归属。",
         "operationId": "get_all_memory_display_v1_memory_display_all_get",
         "parameters": [
           {
@@ -7274,7 +6667,7 @@
           "V1 - Memory Value Ranking API"
         ],
         "summary": "List Permanent Memories",
-        "description": "Query memory-profile using the API Key workspace and resolved end user.",
+        "description": "Query the shared value-ranking service using the API Key workspace.",
         "operationId": "list_permanent_memories_v1_memory_value_ranking_permanent_memories_get",
         "parameters": [
           {
@@ -9211,37 +8604,6 @@
         ],
         "title": "Body_import_qa_new_doc_v1_chunks__kb_id__import_qa_post"
       },
-      "Body_import_qa_v1_api_chunks_v1__kb_id__import_qa_post": {
-        "properties": {
-          "file": {
-            "type": "string",
-            "format": "binary",
-            "title": "File"
-          }
-        },
-        "type": "object",
-        "required": [
-          "file"
-        ],
-        "title": "Body_import_qa_v1_api_chunks_v1__kb_id__import_qa_post"
-      },
-      "Body_import_qa_v1_v1_chunks_v1__kb_id__import_qa_post": {
-        "properties": {
-          "file": {
-            "type": "string",
-            "format": "binary",
-            "title": "File"
-          },
-          "api_key_auth": {
-            "$ref": "#/components/schemas/ApiKeyAuth"
-          }
-        },
-        "type": "object",
-        "required": [
-          "file"
-        ],
-        "title": "Body_import_qa_v1_v1_chunks_v1__kb_id__import_qa_post"
-      },
       "Body_import_skill_package_api_skills_packages_import_post": {
         "properties": {
           "file": {
@@ -9680,20 +9042,6 @@
         ],
         "title": "Body_upload_file_api_storage_files_post"
       },
-      "Body_upload_file_v1_api_files_v1_file_post": {
-        "properties": {
-          "file": {
-            "type": "string",
-            "format": "binary",
-            "title": "File"
-          }
-        },
-        "type": "object",
-        "required": [
-          "file"
-        ],
-        "title": "Body_upload_file_v1_api_files_v1_file_post"
-      },
       "Body_upload_file_v1_files_file_post": {
         "properties": {
           "api_key_auth": {
@@ -9710,23 +9058,6 @@
           "file"
         ],
         "title": "Body_upload_file_v1_files_file_post"
-      },
-      "Body_upload_file_v1_v1_files_v1_file_post": {
-        "properties": {
-          "file": {
-            "type": "string",
-            "format": "binary",
-            "title": "File"
-          },
-          "api_key_auth": {
-            "$ref": "#/components/schemas/ApiKeyAuth"
-          }
-        },
-        "type": "object",
-        "required": [
-          "file"
-        ],
-        "title": "Body_upload_file_v1_v1_files_v1_file_post"
       },
       "Body_upload_file_with_share_token_api_storage_share_files_post": {
         "properties": {
@@ -11154,52 +10485,6 @@
         "title": "DraftRunRequest",
         "description": "试运行请求"
       },
-      "DuplicateFileData": {
-        "properties": {
-          "existing_file_name": {
-            "type": "string",
-            "title": "Existing File Name"
-          }
-        },
-        "type": "object",
-        "required": [
-          "existing_file_name"
-        ],
-        "title": "DuplicateFileData"
-      },
-      "DuplicateUpload": {
-        "properties": {
-          "code": {
-            "type": "integer",
-            "const": 9244,
-            "title": "Code"
-          },
-          "msg": {
-            "type": "string",
-            "title": "Msg"
-          },
-          "data": {
-            "$ref": "#/components/schemas/DuplicateFileData"
-          },
-          "error": {
-            "type": "string",
-            "title": "Error"
-          },
-          "time": {
-            "type": "integer",
-            "title": "Time"
-          }
-        },
-        "type": "object",
-        "required": [
-          "code",
-          "msg",
-          "data",
-          "error",
-          "time"
-        ],
-        "title": "DuplicateUpload"
-      },
       "EdgeDefinition": {
         "properties": {
           "id": {
@@ -12258,10 +11543,6 @@
             "anyOf": [
               {
                 "type": "string"
-              },
-              {
-                "type": "integer",
-                "minimum": 0.0
               },
               {
                 "type": "null"
@@ -13394,26 +12675,6 @@
           "target_workspace_id"
         ],
         "title": "KnowledgeShareCreate"
-      },
-      "KnowledgeShareRequest": {
-        "properties": {
-          "source_kb_id": {
-            "type": "string",
-            "format": "uuid",
-            "title": "Source Kb Id"
-          },
-          "target_workspace_id": {
-            "type": "string",
-            "format": "uuid",
-            "title": "Target Workspace Id"
-          }
-        },
-        "type": "object",
-        "required": [
-          "source_kb_id",
-          "target_workspace_id"
-        ],
-        "title": "KnowledgeShareRequest"
       },
       "KnowledgeType": {
         "type": "string",
@@ -15280,7 +14541,31 @@
         ],
         "title": "PermanentMemoryItem"
       },
-      "PermanentMemoryList": {
+      "PermanentMemoryList-Input": {
+        "properties": {
+          "page": {
+            "$ref": "#/components/schemas/PageMeta"
+          },
+          "quota": {
+            "$ref": "#/components/schemas/PermanentMemoryQuota"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/PermanentMemoryItem"
+            },
+            "type": "array",
+            "title": "Items"
+          }
+        },
+        "type": "object",
+        "required": [
+          "page",
+          "quota",
+          "items"
+        ],
+        "title": "PermanentMemoryList"
+      },
+      "PermanentMemoryList-Output": {
         "properties": {
           "page": {
             "$ref": "#/components/schemas/PageMeta"
@@ -15319,7 +14604,7 @@
             "default": "OK"
           },
           "data": {
-            "$ref": "#/components/schemas/PermanentMemoryList"
+            "$ref": "#/components/schemas/PermanentMemoryList-Output"
           },
           "error": {
             "type": "string",
@@ -15916,10 +15201,16 @@
             "description": "公开分享标题"
           },
           "icon": {
-            "type": "string",
-            "minLength": 1,
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Icon",
-            "description": "公开分享图标，发布必填"
+            "description": "公开分享图标，未传则使用应用图标"
           },
           "usage_examples": {
             "items": {
@@ -15927,7 +15218,7 @@
             },
             "type": "array",
             "title": "Usage Examples",
-            "description": "Agent/集群发布时必填 3~5 条、每条 ≤500 字；其他类型不适用。"
+            "description": "Agent/集群使用示例；3~5 条、每条 ≤500 字。"
           },
           "setup_steps": {
             "anyOf": [
@@ -15939,7 +15230,7 @@
               }
             ],
             "title": "Setup Steps",
-            "description": "工作流/对话工作流发布时必填，最多 2000 字；其他类型不适用。"
+            "description": "工作流/对话工作流设置步骤；必填，最多 2000 字。"
           },
           "categories": {
             "items": {
@@ -15954,8 +15245,7 @@
         "required": [
           "version_name",
           "release_notes",
-          "name",
-          "icon"
+          "name"
         ],
         "title": "PublishRequest",
         "description": "发布应用请求"
@@ -16750,7 +16040,31 @@
         ],
         "title": "ShortTermMemoItem"
       },
-      "ShortTermMemoList": {
+      "ShortTermMemoList-Input": {
+        "properties": {
+          "counts": {
+            "$ref": "#/components/schemas/ShortTermMemoCounts"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ShortTermMemoItem"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "page": {
+            "$ref": "#/components/schemas/PageMeta"
+          }
+        },
+        "type": "object",
+        "required": [
+          "counts",
+          "items",
+          "page"
+        ],
+        "title": "ShortTermMemoList"
+      },
+      "ShortTermMemoList-Output": {
         "properties": {
           "counts": {
             "$ref": "#/components/schemas/ShortTermMemoCounts"
@@ -16789,7 +16103,7 @@
             "default": "OK"
           },
           "data": {
-            "$ref": "#/components/schemas/ShortTermMemoList"
+            "$ref": "#/components/schemas/ShortTermMemoList-Output"
           },
           "error": {
             "type": "string",
@@ -17784,260 +17098,6 @@
         ],
         "title": "UpdateSharePermissionRequest",
         "description": "更新共享权限请求"
-      },
-      "UploadCreated_UploadedDocument_": {
-        "properties": {
-          "code": {
-            "type": "integer",
-            "const": 0,
-            "title": "Code"
-          },
-          "msg": {
-            "type": "string",
-            "title": "Msg"
-          },
-          "data": {
-            "$ref": "#/components/schemas/UploadedDocument"
-          },
-          "error": {
-            "type": "string",
-            "const": "",
-            "title": "Error"
-          },
-          "time": {
-            "type": "integer",
-            "title": "Time"
-          }
-        },
-        "type": "object",
-        "required": [
-          "code",
-          "msg",
-          "data",
-          "error",
-          "time"
-        ],
-        "title": "UploadCreated[UploadedDocument]"
-      },
-      "UploadCreated_UploadedQA_": {
-        "properties": {
-          "code": {
-            "type": "integer",
-            "const": 0,
-            "title": "Code"
-          },
-          "msg": {
-            "type": "string",
-            "title": "Msg"
-          },
-          "data": {
-            "$ref": "#/components/schemas/UploadedQA"
-          },
-          "error": {
-            "type": "string",
-            "const": "",
-            "title": "Error"
-          },
-          "time": {
-            "type": "integer",
-            "title": "Time"
-          }
-        },
-        "type": "object",
-        "required": [
-          "code",
-          "msg",
-          "data",
-          "error",
-          "time"
-        ],
-        "title": "UploadCreated[UploadedQA]"
-      },
-      "UploadFailure": {
-        "properties": {
-          "code": {
-            "type": "integer",
-            "title": "Code"
-          },
-          "msg": {
-            "type": "string",
-            "title": "Msg"
-          },
-          "data": {
-            "additionalProperties": true,
-            "type": "object",
-            "title": "Data"
-          },
-          "error": {
-            "type": "string",
-            "title": "Error"
-          },
-          "time": {
-            "type": "integer",
-            "title": "Time"
-          }
-        },
-        "type": "object",
-        "required": [
-          "code",
-          "msg",
-          "data",
-          "error",
-          "time"
-        ],
-        "title": "UploadFailure"
-      },
-      "UploadedDocument": {
-        "properties": {
-          "id": {
-            "type": "string",
-            "format": "uuid",
-            "title": "Id"
-          },
-          "kb_id": {
-            "type": "string",
-            "format": "uuid",
-            "title": "Kb Id"
-          },
-          "created_by": {
-            "anyOf": [
-              {
-                "type": "string",
-                "format": "uuid"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Created By"
-          },
-          "file_id": {
-            "type": "string",
-            "format": "uuid",
-            "title": "File Id"
-          },
-          "file_name": {
-            "type": "string",
-            "title": "File Name"
-          },
-          "file_ext": {
-            "type": "string",
-            "title": "File Ext"
-          },
-          "file_size": {
-            "type": "integer",
-            "title": "File Size"
-          },
-          "file_meta": {
-            "additionalProperties": true,
-            "type": "object",
-            "title": "File Meta"
-          },
-          "parser_id": {
-            "type": "string",
-            "title": "Parser Id"
-          },
-          "parser_config": {
-            "additionalProperties": true,
-            "type": "object",
-            "title": "Parser Config"
-          },
-          "parent_child_mode": {
-            "type": "boolean",
-            "title": "Parent Child Mode"
-          },
-          "chunk_num": {
-            "type": "integer",
-            "title": "Chunk Num"
-          },
-          "progress": {
-            "type": "number",
-            "title": "Progress"
-          },
-          "progress_msg": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Progress Msg"
-          },
-          "process_begin_at": {
-            "type": "integer",
-            "title": "Process Begin At"
-          },
-          "process_duration": {
-            "type": "number",
-            "title": "Process Duration"
-          },
-          "run": {
-            "type": "integer",
-            "title": "Run"
-          },
-          "status": {
-            "type": "integer",
-            "title": "Status"
-          },
-          "created_at": {
-            "type": "integer",
-            "title": "Created At"
-          },
-          "updated_at": {
-            "type": "integer",
-            "title": "Updated At"
-          }
-        },
-        "type": "object",
-        "required": [
-          "id",
-          "kb_id",
-          "file_id",
-          "file_name",
-          "file_ext",
-          "file_size",
-          "file_meta",
-          "parser_id",
-          "parser_config",
-          "parent_child_mode",
-          "chunk_num",
-          "progress",
-          "progress_msg",
-          "process_begin_at",
-          "process_duration",
-          "run",
-          "status",
-          "created_at",
-          "updated_at"
-        ],
-        "title": "UploadedDocument"
-      },
-      "UploadedQA": {
-        "properties": {
-          "file_id": {
-            "type": "string",
-            "format": "uuid",
-            "title": "File Id"
-          },
-          "document_id": {
-            "type": "string",
-            "format": "uuid",
-            "title": "Document Id"
-          },
-          "task_id": {
-            "type": "string",
-            "title": "Task Id"
-          }
-        },
-        "type": "object",
-        "required": [
-          "file_id",
-          "document_id",
-          "task_id"
-        ],
-        "title": "UploadedQA"
       },
       "UserCreate": {
         "properties": {
@@ -19554,15 +18614,6 @@
             "tokenUrl": "token"
           }
         }
-      },
-      "APIKeyHeader": {
-        "type": "apiKey",
-        "in": "header",
-        "name": "X-API-Key"
-      },
-      "KnowledgeUploadApiKeyBearer": {
-        "type": "http",
-        "scheme": "bearer"
       }
     }
   }
