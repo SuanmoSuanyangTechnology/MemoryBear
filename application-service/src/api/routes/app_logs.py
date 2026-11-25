@@ -21,7 +21,6 @@ from ...guards.workspace_access import require_workspace_access
 from ...models.app_model import AppType
 from ...models.file_metadata_model import FileMetadata
 from ...schemas.app_log_schema import (
-    AppLogConversation,
     AppLogConversationDetail,
     AppLogMessage,
     LogFileInfo,
@@ -84,7 +83,7 @@ def list_app_logs(
         end_date=end_date,
     )
 
-    items = [AppLogConversation.model_validate(c) for c in conversations]
+    items = log_service.build_conversation_summaries(conversations, app.type)
 
     # Multi-agent clusters: the list page's "sub-agent count" column. Single
     # agent / workflow apps stay at 0 (no query issued, to avoid noise cost).
@@ -202,7 +201,7 @@ def get_app_log_detail(
     )
 
     # Base conversation info (built without ORM relationships)
-    base = AppLogConversation.model_validate(conversation)
+    base = log_service.build_conversation_summaries([conversation], app.type)[0]
 
     # Workflow pages carry their business execution ids in page_meta for the
     # intervention query; agent pages have none.

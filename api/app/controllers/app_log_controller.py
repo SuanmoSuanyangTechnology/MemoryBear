@@ -11,7 +11,6 @@ from app.core.response_utils import success
 from app.db import get_db
 from app.dependencies import get_current_user, cur_workspace_access_guard
 from app.schemas.app_log_schema import (
-    AppLogConversation,
     AppLogConversationDetail,
     AppLogMessage,
     LogFileInfo,
@@ -71,7 +70,7 @@ def list_app_logs(
         end_date=end_date,
     )
 
-    items = [AppLogConversation.model_validate(c) for c in conversations]
+    items = log_service.build_conversation_summaries(conversations, app.type)
 
     # 多 Agent 集群：列表页"子 Agent 数"。单 Agent / 工作流应用恒为 0（不做查询，避免噪音开销）。
     if app.type == AppType.MULTI_AGENT and items:
@@ -172,7 +171,7 @@ def get_app_log_detail(
     )
 
     # 构建基础会话信息（不经过 ORM relationship）
-    base = AppLogConversation.model_validate(conversation)
+    base = log_service.build_conversation_summaries([conversation], app.type)[0]
 
     # 单独处理 messages，避免触发 SQLAlchemy relationship 校验
     if messages and isinstance(messages[0], AppLogMessage):
