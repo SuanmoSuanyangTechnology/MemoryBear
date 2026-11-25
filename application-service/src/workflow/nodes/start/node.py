@@ -8,6 +8,7 @@ import json
 import logging
 from typing import Any
 
+from ....errors import BizCode, BusinessException
 from ...engine.state_manager import WorkflowState
 from ...engine.variable_pool import VariablePool
 from ..base_node import BaseNode
@@ -92,7 +93,7 @@ class StartNode(BaseNode):
             Dictionary of processed custom variables
         
         Raises:
-            ValueError: A required variable is missing
+            BusinessException: A required variable is missing
         """
         # Read custom variables from the input data
         input_variables = pool.get_value("sys.input_variables", default={}, strict=False)
@@ -171,9 +172,10 @@ class StartNode(BaseNode):
                                 )
 
             elif var_def.required and var_def.default is None:
-                raise ValueError(
-                    f"缺少必需的输入变量: {var_name}"
-                    + (f" ({var_def.description})" if var_def.description else "")
+                raise BusinessException(
+                    f"Missing required workflow input: {var_name}",
+                    BizCode.MISSING_PARAMETER,
+                    context={"field": var_name},
                 )
 
             else:

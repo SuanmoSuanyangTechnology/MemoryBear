@@ -17,7 +17,7 @@ from error_core.knowledge import knowledge_message
 from error_core.messages import fallback_message, user_message
 
 from ..errors import BusinessException
-from ..i18n import get_current_locale
+from ..i18n import get_current_locale, translate
 from ..integrations.knowledge.errors import KnowledgeServiceError
 from ..integrations.model.errors import ModelInvokeFailedError
 from ..trace import get_trace_id
@@ -70,6 +70,9 @@ def workflow_error_info(
         msg = user_message(code, locale) or fallback_message(
             http_status_for(code), locale
         )
+        field = exc.context.get("field")
+        if code == BizCode.MISSING_PARAMETER and isinstance(field, str) and field:
+            msg = translate("errors.validation.missing_field", locale, field=field)
         detail = exc.message or code_name(code)
         retryable = http_status_for(code) >= 500
     else:

@@ -14,7 +14,7 @@ import time
 import uuid as uuid_module
 from collections import defaultdict
 from dataclasses import dataclass, field
-from ..utils.datetime_utils import utcnow_naive
+from datetime import datetime
 from typing import Any, ClassVar
 
 from sqlalchemy import (
@@ -29,6 +29,8 @@ from sqlalchemy.exc import DBAPIError
 
 from ..config import current_settings
 from ..db import get_async_db_context
+from ..utils.datetime_utils import utcnow_naive
+from ..utils.text_sanitize import sanitize_text
 
 logger = logging.getLogger(__name__)
 
@@ -316,6 +318,9 @@ def _row(
     meta_data: dict[str, Any] | None = None,
     status: str = "completed",
     parent_message_id: uuid_module.UUID | None = None,
+    *,
+    created_at: datetime | None = None,
+    is_current: bool = True,
 ) -> dict[str, Any]:
     return {
         "id": msg_id,
@@ -325,7 +330,8 @@ def _row(
         "meta_data": meta_data or {},
         "status": status,
         "parent_message_id": parent_message_id,
-        "created_at": utcnow_naive(),
+        "created_at": created_at if created_at is not None else utcnow_naive(),
+        "is_current": is_current,
     }
 
 
@@ -371,13 +377,24 @@ async def _bulk_persist_messages(
             user_msg_id = args.get("user_message_id", uuid_module.uuid4())
             msg_id = args.get("message_id", uuid_module.uuid4())
             user_content = args.get("user_message_content", "")
-            _add_row(_row(user_msg_id, conv_id, "user",
-                          user_content,
-                          {"files": args.get("files_meta", [])}), conv_id)
-            _add_row(_row(msg_id, conv_id, "assistant",
-                          args.get("error_message", "An error occurred during generation."),
-                          {"error": args.get("error_detail", "")},
-                          status="failed"), conv_id)
+            user_meta = {"files": args.get("files_meta", [])}
+            error_meta = {"error": args.get("error_detail", "")}
+            log_only = args.get("log_only", False)
+            if log_only:
+                user_meta["log_only"] = True
+                error_meta.update(
+                    log_only=True, error_code=args["error_code"], trace_id=args.get("trace_id")
+                )
+            _add_row(_row(
+                user_msg_id, conv_id, "user", user_content, user_meta,
+                created_at=args.get("started_at"), is_current=not log_only,
+            ), conv_id)
+            _add_row(_row(
+                msg_id, conv_id, "assistant",
+                args.get("error_message", "An error occurred during generation."), error_meta,
+                status="failed", parent_message_id=user_msg_id if log_only else None,
+                created_at=args.get("finished_at"), is_current=not log_only,
+            ), conv_id)
             conv_titles[conv_id] = None
             continue
 
@@ -520,6 +537,43 @@ async def _bulk_persist_messages(
         await db.execute(
             sa_update(Conversation).where(Conversation.id == conv_id).values(**values)
         )
+
+
+async def persist_failed_chat_turn(
+    *,
+    conversation_id: uuid_module.UUID,
+    user_message_id: uuid_module.UUID,
+    message_id: uuid_module.UUID,
+    message: str,
+    error_code: int,
+    error_message: str,
+    trace_id: str | None,
+    started_at: datetime,
+    execution_id: uuid_module.UUID | None,
+) -> None:
+    """Commit a failed turn for log readers before the non-streaming request returns."""
+    error_message = sanitize_text(error_message)
+    task = PersistTask(task_type="save_failed_message", args={
+        "conversation_id": conversation_id,
+        "user_message_id": user_message_id,
+        "message_id": message_id,
+        "user_message_content": sanitize_text(message),
+        "error_message": error_message,
+        "error_detail": error_message,
+        "error_code": error_code,
+        "trace_id": trace_id,
+        "started_at": started_at,
+        "finished_at": utcnow_naive(),
+        "log_only": True,
+    })
+    async with get_async_db_context() as db:
+        await _bulk_persist_messages(db, [task])
+        await db.commit()
+        if execution_id is not None:
+            await _handle_link_agent_execution_message(
+                db, execution_id=execution_id, message_id=message_id,
+            )
+            await db.commit()
 
 
 def _to_uuid(value: Any) -> uuid_module.UUID | None:

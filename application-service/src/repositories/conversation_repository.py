@@ -7,7 +7,7 @@ import logging
 import uuid
 from datetime import datetime
 
-from sqlalchemy import desc, func, select
+from sqlalchemy import desc, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
@@ -374,6 +374,7 @@ class MessageRepository:
         page: int = 1,
         pagesize: int = 20,
         current_only: bool = True,
+        include_log_only: bool = False,
     ) -> tuple[list[Message], bool]:
         """One offset page of a conversation's messages.
 
@@ -390,7 +391,7 @@ class MessageRepository:
             Message.is_deleted.is_not(True),
         ]
         if current_only:
-            filters.append(Message.is_current.is_not(False))
+            filters.append(self._current_message_filter(include_log_only))
 
         offset = (page - 1) * pagesize
         rows = list(self.db.scalars(
@@ -410,6 +411,8 @@ class MessageRepository:
         self,
         conversation_id: uuid.UUID,
         current_only: bool = True,
+        *,
+        include_log_only: bool = False,
     ) -> int:
         """Total non-deleted messages of a conversation (current versions only
         by default)."""
@@ -419,10 +422,18 @@ class MessageRepository:
             Message.is_deleted.is_not(True),
         ]
         if current_only:
-            filters.append(Message.is_current.is_not(False))
+            filters.append(self._current_message_filter(include_log_only))
         return int(
             self.db.scalar(select(func.count()).select_from(Message).where(*filters))
         )
+
+    @staticmethod
+    def _current_message_filter(include_log_only: bool):
+        current = Message.is_current.is_not(False)
+        if include_log_only:
+            # Failed turns stored for logs are excluded from the model history.
+            return or_(current, Message.meta_data["log_only"].as_string() == "true")
+        return current
 
 
 __all__ = ["ConversationRepository", "MessageRepository"]
