@@ -89,7 +89,7 @@ async def _consume_claim(event: ClaimedEvent, repo: OutboxRepository, projector)
             else:
                 # 重要：PG 确认失败不在投影重试处理器范围内。
                 # 此时 ES 可能已成功；绝不为该事件再次执行 ES。
-                updated = await repo.mark_processed(event.id, event.claim_token)
+                updated = await repo.mark_processed(event)
                 return "processed" if updated else "lost"
         return "lost"
     finally:

@@ -50,6 +50,11 @@ class OutboxEvent:
     operation: str
     attempt_count: int
     claim_token: UUID
+    #: Highest sequence pending for this node at claim time. The projection
+    #: re-reads Neo4j, so every row already queued then is covered by the state
+    #: just written and may converge to a terminal state without projecting.
+    #: ``0`` disables the collapse (acknowledge this row only).
+    queue_tip: int = 0
 
 
 @dataclass(slots=True)
@@ -110,8 +115,8 @@ class OutboxStore(Protocol):
     def begin_attempt(self, event_id: UUID, claim_token: UUID) -> int | None:
         """Count one attempt and return it, or ``None`` when the lease is gone."""
 
-    def mark_processed(self, event_id: UUID, claim_token: UUID) -> bool:
-        """Write the terminal ``processed`` state."""
+    def mark_processed(self, event: OutboxEvent) -> bool:
+        """Write the terminal ``processed`` state and collapse covered siblings."""
 
     def mark_failed(self, event_id: UUID, claim_token: UUID, error: str) -> bool:
         """Write the terminal ``failed`` state with a bounded error text."""
