@@ -23,7 +23,11 @@ from ..models.conversation_model import Conversation, Message
 from ..models.file_metadata_model import FileMetadata
 from ..models.workflow_model import WorkflowExecution
 from ..repositories.agent_execution_repository import AgentExecutionRepository
-from ..repositories.conversation_repository import ConversationRepository, MessageRepository
+from ..repositories.conversation_repository import (
+    ConversationRepository,
+    MessageRepository,
+    select_first_log_user_message,
+)
 from ..repositories.workflow_repository import WorkflowExecutionRepository
 from ..schemas.app_log_schema import (
     AppLogAgentSummary,
@@ -84,22 +88,7 @@ class AppLogService:
         if not conversations:
             return []
 
-        first_message = (
-            select(Message.content)
-            .where(
-                Message.conversation_id == Conversation.id,
-                Message.role == "user",
-                Message.is_deleted.is_not(True),
-                or_(
-                    Message.is_current.is_not(False),
-                    Message.meta_data["log_only"].as_string() == "true",
-                ),
-                Message.content.op("~")("[^[:space:]]"),
-            )
-            .order_by(Message.created_at.asc().nulls_last(), Message.id)
-            .limit(1)
-            .scalar_subquery()
-        )
+        first_message = select_first_log_user_message(Conversation.id).scalar_subquery()
         title_source = first_message
         message_count_source = Conversation.message_count
         if app_type in (AppType.WORKFLOW, AppType.PURE_WORKFLOW):

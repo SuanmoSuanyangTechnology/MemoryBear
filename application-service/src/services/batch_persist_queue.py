@@ -22,6 +22,7 @@ from sqlalchemy import (
     insert as sa_insert,
     update as sa_update,
     case as sa_case,
+    func as sa_func,
     text as sa_text,
 )
 from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -349,6 +350,7 @@ async def _bulk_persist_messages(
     rows actually inserted (via ``RETURNING id``).
     """
     from ..models.conversation_model import Message, Conversation
+    from ..repositories.conversation_repository import select_first_log_user_message
     from .chat_context import StreamResult
 
     rows: list[dict[str, Any]] = []
@@ -375,7 +377,7 @@ async def _bulk_persist_messages(
         if task.task_type == "save_failed_message":
             user_msg_id = args.get("user_message_id", uuid_module.uuid4())
             msg_id = args.get("message_id", uuid_module.uuid4())
-            user_content = args.get("user_message_content", "")
+            user_content = args.get("user_message_content") or ""
             user_meta = {"files": args.get("files_meta", [])}
             error_meta = {"error": args.get("error_detail", "")}
             log_only = args.get("log_only", False)
@@ -514,35 +516,28 @@ async def _bulk_persist_messages(
 
     # --- atomic UPDATE per conversation, counting only actually inserted rows ---
     actual_deltas: dict[uuid_module.UUID, int] = defaultdict(int)
-    conv_titles: dict[uuid_module.UUID, str] = {}
-    # Match the log's message ordering when multiple rows share a timestamp.
-    for row in sorted(unique_rows, key=lambda row: (row["created_at"], str(row["id"]))):
-        mid = _to_uuid(row["id"])
-        if mid not in inserted_ids:
-            continue
-        conv_id = row_conv[mid]
-        actual_deltas[conv_id] += 1
-        if row["role"] == "user" and conv_id not in conv_titles:
-            content = row["content"].strip()
-            if content:
-                conv_titles[conv_id] = content[:50] + ("..." if len(content) > 50 else "")
+    for mid in inserted_ids:
+        actual_deltas[row_conv[mid]] += 1
 
+    content = sa_func.regexp_replace(Message.content, "^[[:space:]]+|[[:space:]]+$", "", "g")
+    title = sa_func.concat(
+        sa_func.left(content, 50),
+        sa_case((sa_func.length(content) > 50, "..."), else_=""),
+    )
     for conv_id, delta in actual_deltas.items():
-        if delta <= 0:
-            continue
+        first_title = select_first_log_user_message(conv_id).with_only_columns(title).scalar_subquery()
         values: dict[str, Any] = {
             "message_count": Conversation.message_count + delta,
-        }
-        if conv_titles.get(conv_id):
-            values["title"] = sa_case(
+            "title": sa_case(
                 (
                     (Conversation.message_count <= 1)
                     | Conversation.title.is_(None)
                     | Conversation.title.in_(("", "New Conversation")),
-                    conv_titles[conv_id],
+                    sa_func.coalesce(first_title, Conversation.title),
                 ),
                 else_=Conversation.title,
-            )
+            ),
+        }
         await db.execute(
             sa_update(Conversation).where(Conversation.id == conv_id).values(**values)
         )
