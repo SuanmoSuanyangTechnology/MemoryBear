@@ -44,9 +44,9 @@ async def _respond[T](
         return ApiResponse(data=await operation, msg=success_msg)
     except ProfileError as exc:
         return legacy_fail_response(exc.code, exc.message, exc.detail)
-    except Exception as exc:
+    except Exception:
         logger.exception(error_msg)
-        return legacy_fail_response(BizCode.INTERNAL_ERROR, error_msg, str(exc))
+        return legacy_fail_response(BizCode.INTERNAL_ERROR, error_msg)
 
 
 @router.get("/stats", response_model=ApiResponse[ReflectionLogStats])
