@@ -39,6 +39,7 @@ from src.schemas.memory_config import (
     SceneConfigData,
     SimpleSceneData,
     ValidateConfigResult,
+    WorkspaceActiveConfigData,
 )
 from src.schemas.memory_config_requests import (
     CommunityPreviewBody,
@@ -71,6 +72,23 @@ def _handler(request: Request) -> MemoryConfigHandler:
 
 
 # ── Reads ────────────────────────────────────────────────────────────────────
+
+
+@router.get(
+    "/workspace_active_config",
+    response_model=ApiResponse[WorkspaceActiveConfigData],
+)
+async def workspace_active_config(
+    request: Request,
+    context: Context,
+) -> ApiResponse[WorkspaceActiveConfigData]:
+    """The acting workspace's active configuration id.
+
+    Service-to-service read (the application service resolves the config before
+    a memory call), so it stays off the API-key contract.
+    """
+
+    return await _handler(request).workspace_active_config(context, request)
 
 
 @router.get("/scenes/simple", response_model=ApiResponse[list[SimpleSceneData]])
