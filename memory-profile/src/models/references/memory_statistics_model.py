@@ -7,17 +7,32 @@ from src.models.base import ReadOnlyBase
 
 
 class MemoryMessage(ReadOnlyBase):
+    """The API's ``memory_messages`` row.
+
+    ``ReadOnlyBase`` names who owns the DDL, not the access mode: this service
+    inserts and updates rows here for the write faces while the API keeps the
+    table's schema and its workers consume what is written. Every column the
+    three write entry points need is mapped, so no other module has to declare
+    the table a second time.
+    """
+
     __tablename__ = "memory_messages"
 
     id = Column(UUID(as_uuid=True), primary_key=True)
     conversation_id = Column(UUID(as_uuid=True), nullable=True)
+    original_message_id = Column(UUID(as_uuid=True), nullable=True)
     end_user_id = Column(String, nullable=False)
     source = Column(String(32), nullable=False)
     role = Column(String(20), nullable=False)
     content = Column(Text, nullable=False)
     message_seq = Column(Integer, nullable=False)
+    should_memorize = Column(Boolean, nullable=False, default=True)
     dialog_at = Column(String(64), nullable=True)
     files = Column(JSON, nullable=True)
+    pruned_content = Column(Text, nullable=True)
+    topic_entity_hint = Column(String(512), nullable=True)
+    scene_boundary = Column(String(32), nullable=True)
+    scene_summary_claimed_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, nullable=True)
 
 

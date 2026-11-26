@@ -242,6 +242,11 @@ class EndUserRepository:
             select(
                 EndUser.id.label("id"),
                 EndUser.workspace_id.label("workspace_id"),
+                # The write face needs the stored identity to decide whether the
+                # caller's feature string is a no-op — the host's fast path reads
+                # the same two columns off the row it resolved.
+                EndUser.identity_features.label("identity_features"),
+                EndUser.identity_status.label("identity_status"),
                 sa.literal(0).label("priority"),
             )
             .where(EndUser.id == end_user_id, EndUser.is_active.is_(True))
@@ -251,6 +256,8 @@ class EndUserRepository:
             select(
                 EndUser.id.label("id"),
                 EndUser.workspace_id.label("workspace_id"),
+                EndUser.identity_features.label("identity_features"),
+                EndUser.identity_status.label("identity_status"),
                 sa.literal(1).label("priority"),
             )
             .select_from(EndUserMerge)
