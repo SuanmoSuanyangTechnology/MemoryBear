@@ -67,7 +67,8 @@ def load_map(session, delivery, *, failure_limit=None):
         delivery["requested_version"],
         allow_inactive=delivery["operation"] == "retract",
     )
-    if state.task_id != delivery["task_id"]:
+    if (state.task_id != delivery["task_id"] or
+            (delivery.get("batch_id") and str(state.batch_id) != delivery["batch_id"])):
         raise WikiSuperseded("WIKI_TASK_SUPERSEDED", retryable=False)
     if state.operation != delivery["operation"]:
         raise WikiSuperseded("WIKI_OPERATION_SUPERSEDED", retryable=False)
@@ -107,6 +108,7 @@ def load_map(session, delivery, *, failure_limit=None):
             state.input_hash and not state.plan_ready
             and (state.map_progress or {}).get("identity_version") == TOPIC_MAP_VERSION
         ),
+        "explicit_page_rerun": bool((state.map_progress or {}).get("explicit_page_rerun")),
         "mapped": state.mapped_version == state.requested_version,
         "requested_version": state.requested_version,
     }
@@ -291,7 +293,7 @@ def fix_plan(
     if state.mapped_version == state.requested_version:
         raise WikiSuperseded("WIKI_MAP_ALREADY_COMMITTED", retryable=False)
     if planning_revision is not None:
-        current_revision = _planning_context(session, knowledge.id)["revision"]
+        current_revision = planning_context(session, knowledge.id)["revision"]
         if current_revision != planning_revision:
             raise WikiDeferred("WIKI_TAXONOMY_CHANGED", diagnostics={
                 "stage": "taxonomy_register", "knowledge_id": str(knowledge.id),
@@ -364,8 +366,11 @@ def fix_plan(
                 planned_ontology=ontology_by_page.get(page_id),
             )
         )
-    state.map_progress = {"candidate_count": len(topics), "planned_pages": len(targets),
-                          "identity_version": TOPIC_MAP_VERSION}
+    progress = {"candidate_count": len(topics), "planned_pages": len(targets),
+                "identity_version": TOPIC_MAP_VERSION}
+    if (state.map_progress or {}).get("explicit_page_rerun"):
+        progress["explicit_page_rerun"] = True
+    state.map_progress = progress
     state.plan_ready, state.input_hash = True, input_hash
     state.stage = "materials"
     append_log(document, f"Wiki page plan ready: pages={len(targets)}.")
@@ -377,10 +382,16 @@ def load_planning_context(session, delivery):
     knowledge, _ = lock_knowledge(session, delivery["kb_id"])
     document, state = lock_document(session, delivery["kb_id"], delivery["document_id"])
     require_round(document, state, delivery["requested_version"])
-    return _planning_context(session, knowledge.id)
+    return planning_context(session, knowledge.id)
 
 
-def _planning_context(session, kb_id):
+def load_batch_context(session, kb_id):
+    knowledge, _ = lock_knowledge(session, kb_id)
+    return {**planning_context(session, knowledge.id),
+            "config_hash": generation_config_hash(knowledge.llm_id, knowledge.parser_config)}
+
+
+def planning_context(session, kb_id):
     pages = [{"page_id": str(row.id), "name": row.title, "kind": row.page_type,
               "canonical_key": row.canonical_key,
               "scope": row.topic_scope, "aliases": row.aliases,

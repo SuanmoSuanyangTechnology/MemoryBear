@@ -252,7 +252,7 @@ async def apply_document_update(
     db: AsyncSession,
     plan: DocumentUpdatePlan,
     principal: Principal,
-) -> tuple[Document, list[str], dict | None]:
+) -> tuple[Document, list[str | dict[str, str]], dict | None]:
     document = await get_document(db, plan.document_id, principal, plan.knowledge_id)
     if document is None:
         raise KnowledgeError.from_code("KB_DOCUMENT_NOT_FOUND")
@@ -279,6 +279,15 @@ async def apply_document_update(
         from ..repositories.wiki.state import cancel
 
         wiki_pages = await db.run_sync(lambda session: cancel(session, knowledge.id, document.id))
+    elif plan.status_changed:
+        from ..bootstrap import get_settings
+        from ..repositories.wiki.state import reenable, withdraw
+
+        if get_settings().wiki_batch_enabled(knowledge.id):
+            if document.status == 1:
+                wiki_delivery = await db.run_sync(lambda s: reenable(s, knowledge.id, document.id))
+            else:
+                wiki_pages = await db.run_sync(lambda s: withdraw(s, knowledge.id, document.id))
     document.updated_at = utcnow_naive()
     try:
         await db.commit()
@@ -511,7 +520,7 @@ async def prepare_document_deletion(
 async def delete_document_records(
     db: AsyncSession,
     snapshot: DocumentDeletionSnapshot,
-) -> list[str]:
+) -> list[str | dict[str, str]]:
     try:
         from ..repositories.wiki.state import withdraw
 

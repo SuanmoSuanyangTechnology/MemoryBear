@@ -20,6 +20,8 @@ AUTHORIZED_TASKS_BY_MODULE = {
     "tasks/wiki_faq.py": {"mem_knowledge.tasks.generate_wiki_faq"},
     "tasks/wiki.py": {
         "mem_knowledge.tasks.sync_wiki_document",
+        "mem_knowledge.tasks.open_wiki_map_batch",
+        "mem_knowledge.tasks.run_wiki_page_delivery",
         "mem_knowledge.tasks.reduce_wiki_page",
         "mem_knowledge.tasks.enqueue_unprocessed_wiki_documents",
     },
@@ -472,6 +474,8 @@ def _scan_worker_observability(root: Path) -> list[str]:
         ("graphrag_worker", "graphrag_tasks"),
         ("qa_import_worker", "qa_import"),
         ("wiki_worker", "wiki_tasks"),
+        ("wiki_map_worker", "wiki_map_tasks"),
+        ("wiki_reduce_worker", "wiki_reduce_tasks"),
         ("faq_worker", "faq_tasks"),
     ):
         if role not in worker_source or queue not in worker_source:

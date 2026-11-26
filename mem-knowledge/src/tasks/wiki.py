@@ -222,3 +222,40 @@ def enqueue_unprocessed_wiki_documents(self, kb_id, upper_at_ms):
                 "error_code": error.code,
                 "failed_at_ms": int(time.time() * 1000),
             }
+
+@celery_app.task(name="mem_knowledge.tasks.open_wiki_map_batch")
+@bind_usage("kb", "kb_id")
+def open_wiki_map_batch(kb_id):
+    from ..services.wiki.batch import run_batch
+
+    runtime = get_worker_runtime()
+    context = task_context_from_current_task(role="wiki_map_worker", knowledge_id=kb_id)
+    with observe_task(context, sinks=[StructuredLogSink()],
+                      heartbeat_seconds=runtime.settings.kb_task_heartbeat_seconds) as run:
+        result = run_batch(runtime, kb_id)
+        run.finish(BusinessOutcome.FAILURE if result.get("failed") else BusinessOutcome.SUCCESS)
+        return result
+
+
+@celery_app.task(name="mem_knowledge.tasks.run_wiki_page_delivery")
+@bind_usage("kb", "kb_id")
+def run_wiki_page_delivery(kb_id, page_id, delivery_id, attempt_id):
+    from ..rag.wiki.config import WikiSuperseded
+    from ..services.wiki.delivery import run_delivery
+
+    runtime = get_worker_runtime()
+    context = task_context_from_current_task(
+        role="wiki_reduce_worker", knowledge_id=kb_id, page_id=page_id,
+    )
+    with observe_task(context, sinks=[StructuredLogSink()],
+                      heartbeat_seconds=runtime.settings.kb_task_heartbeat_seconds) as run:
+        try:
+            result = run_delivery(runtime, {"kb_id": kb_id, "page_id": page_id,
+                                            "delivery_id": delivery_id, "attempt_id": attempt_id})
+        except WikiSuperseded:
+            run.finish(BusinessOutcome.SKIPPED)
+            return {"status": "superseded"}
+        status = (result or {}).get("status")
+        outcome = {"failed": BusinessOutcome.FAILURE, "retry_wait": BusinessOutcome.RETRY}
+        run.finish(outcome.get(status, BusinessOutcome.SUCCESS))
+        return result
