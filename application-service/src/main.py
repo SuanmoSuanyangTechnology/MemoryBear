@@ -25,6 +25,7 @@ from .integrations.sandbox.runtime import (
     close_sandbox_integration,
     initialize_sandbox_integration,
 )
+from .protocols.market_gateway import DisabledMarketGateway, MarketGateway
 from .request_logging import RequestLoggingFastAPI
 from .runtime import ProcessRuntime
 from .services.batch_persist_queue import BatchPersistQueue
