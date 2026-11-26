@@ -10,9 +10,9 @@ from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..api.dependencies import Principal
+from ..application.runtime import ProcessRuntime
 from ..errors import KnowledgeError
 from ..models.owned import FILE_ROLE_SOURCE, Document, File, UploadFingerprint
-from ..runtime import ProcessRuntime
 from . import file as file_service
 from .knowledge_file_storage import KnowledgeFileStorage
 

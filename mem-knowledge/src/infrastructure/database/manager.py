@@ -16,7 +16,7 @@ from sqlalchemy.ext.asyncio import (
 )
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
-from .config import KnowledgeSettings
+from ...application.config import KnowledgeSettings
 
 
 class KnowledgeBase(DeclarativeBase):

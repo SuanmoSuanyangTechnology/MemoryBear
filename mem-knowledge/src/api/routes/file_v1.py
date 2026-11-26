@@ -11,8 +11,8 @@ from starlette.datastructures import UploadFile as StarletteUploadFile
 from starlette.formparsers import MultiPartException, MultiPartParser
 from starlette.responses import JSONResponse
 
+from ...application.runtime import ProcessRuntime
 from ...errors import KnowledgeError
-from ...runtime import ProcessRuntime
 from ...services import document_v1 as service
 from ...services.document import ParseDocumentSnapshot
 from ...services.knowledge_file_storage import KnowledgeFileStorage

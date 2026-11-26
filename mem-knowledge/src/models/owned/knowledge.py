@@ -7,7 +7,7 @@ from sqlalchemy import JSON, CheckConstraint, Column, DateTime, ForeignKey, Inte
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 
-from ...db import KnowledgeBase
+from ...infrastructure.database.manager import KnowledgeBase
 from ...parser_configuration.schema import INDEX_STRATEGY_CHECK, SOURCE_TYPE_CHECK
 from ...rag.parser_config import build_default_knowledge_parser_config
 from ...utils.datetime_utils import utcnow_naive

@@ -20,7 +20,9 @@ from jinja2 import Environment
 from pypdf import PdfReader
 from redbear_model import QWEN3_VL_EMBEDDING_DIMENSION
 
-from ..error_mapping import map_model_error
+from ..application.runtime import ProcessRuntime
+from ..errors.mapping import map_model_error
+from ..errors.model_errors import MODEL_FIELD_ROLES, ModelFailure, model_error
 from ..integrations.model.asr_video import (
     AudioTranscriptionChunkModel,
     VideoUnderstandingChunkModel,
@@ -30,7 +32,6 @@ from ..integrations.model.embedding import RedBearEmbeddings
 from ..integrations.model.invoke_backend import ref_from_view
 from ..integrations.model.views import is_qwen3_vl_embedding_view
 from ..integrations.model.vision import QWenCV as ImageQWenCV
-from ..model_errors import MODEL_FIELD_ROLES, ModelFailure, model_error
 from ..models.owned import Document, Knowledge
 from ..models.references import Workspace
 from ..parser_configuration import to_runtime
@@ -54,7 +55,6 @@ from ..repositories.parser_configuration import (
     document_configuration,
     knowledge_configuration,
 )
-from ..runtime import ProcessRuntime
 from ..tasks.dispatch import TaskDispatcher
 from ..tasks.observability import BusinessOutcome, TaskRun
 from ..utils.datetime_utils import to_iso_z, to_timestamp_ms, utcnow, utcnow_naive

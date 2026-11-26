@@ -8,7 +8,7 @@ from collections.abc import Callable, Sequence
 from concurrent.futures import as_completed
 from dataclasses import dataclass
 
-from ....runtime import get_worker_runtime
+from ....application.runtime import get_worker_runtime
 from ..context import ImageVisionScope, LogicalChunk, LogicalChunkType
 from ..prompts import vision_llm_figure_describe_prompt
 from ..vision import vision_llm_chunk

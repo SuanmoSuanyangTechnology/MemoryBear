@@ -8,7 +8,7 @@ from typing import Any
 
 import requests
 
-from .....bootstrap import get_settings
+from .....application.bootstrap import get_settings
 from ...context import ParseResult
 from ..base import DocumentParser
 from ..structured_markdown import StructMarkdownParser

@@ -6,11 +6,11 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, Query, Request
 from pydantic import WrapValidator
 
+from ...application.runtime import ProcessRuntime
 from ...errors import KnowledgeError
 from ...parser_configuration.options import configuration_options
 from ...rag.retrieval.async_elasticsearch import collection_name_for_knowledge
 from ...repositories.reference import ReferenceRepository
-from ...runtime import ProcessRuntime
 from ...services import document as document_service
 from ...services import document_v1 as document_v1_service
 from ...services import knowledge as shared

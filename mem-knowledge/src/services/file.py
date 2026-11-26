@@ -50,7 +50,7 @@ logger = logging.getLogger(__name__)
 ZIP_STREAM_CHUNK_SIZE = 1024 * 1024
 
 if TYPE_CHECKING:
-    from ..runtime import ProcessRuntime
+    from ..application.runtime import ProcessRuntime
 
 
 @dataclass(frozen=True)
@@ -568,7 +568,7 @@ async def update_file(
         raise KnowledgeError.from_code("KB_FILE_NOT_FOUND")
     update_fields = update_data.model_dump(exclude_unset=True)
     if {"parent_id", "file_ext"} & update_fields.keys():
-        from ..bootstrap import get_settings
+        from ..application.bootstrap import get_settings
 
         await db.run_sync(
             validate_file_hierarchy, file.kb_id, update_fields,

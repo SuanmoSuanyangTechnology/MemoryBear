@@ -13,9 +13,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..api.dependencies import Principal
 from ..api.schemas.common import SuccessEnvelope
 from ..api.schemas.knowledge_metadata import KnowledgeMetadataCreate
-from ..error_mapping import map_database_error
 from ..errors import KnowledgeError, public_text
-from ..model_errors import MODEL_FIELD_ROLES, ModelFailure, model_error
+from ..errors.mapping import map_database_error
+from ..errors.model_errors import MODEL_FIELD_ROLES, ModelFailure, model_error
 from ..models.owned import Knowledge, KnowledgeType, PermissionType
 from ..models.references import ModelConfig
 from ..rag.knowledge_graph import GraphPipeline

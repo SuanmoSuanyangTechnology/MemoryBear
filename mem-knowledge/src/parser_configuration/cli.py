@@ -22,8 +22,8 @@ def main(argv: list[str] | None = None) -> int:
         if args.fixture:
             report = inspect_fixture(json.loads(args.fixture.read_text(encoding="utf-8")))
         else:
-            from ..bootstrap import get_settings
-            from ..db import DatabaseManager
+            from ..application.bootstrap import get_settings
+            from ..infrastructure.database.manager import DatabaseManager
 
             database = DatabaseManager(get_settings())
             try:

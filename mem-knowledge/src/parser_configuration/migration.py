@@ -9,7 +9,7 @@ from uuid import UUID
 from sqlalchemy import Table, func, select, text
 from sqlalchemy.orm import Session
 
-from ..db import KnowledgeBase
+from ..infrastructure.database.manager import KnowledgeBase
 from ..models.owned import Document, DocumentParserConfig, File, Knowledge, KnowledgeParserConfig
 from .conversion import KnowledgeContext, to_runtime, validate_values
 from .entities import Configuration, ConfigurationError, KnowledgeConfiguration

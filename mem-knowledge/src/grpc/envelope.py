@@ -19,7 +19,7 @@ import grpc
 
 from ..api.schemas.common import fail, success
 from ..errors import KnowledgeError
-from ..i18n import translate
+from ..errors.i18n import translate
 
 TRACE_ID_TRAILER = "x-trace-id"
 

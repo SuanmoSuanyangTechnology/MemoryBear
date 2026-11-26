@@ -7,7 +7,7 @@ from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Query, Request
 
-from ...runtime import ProcessRuntime
+from ...application.runtime import ProcessRuntime
 from ...services import knowledge_share as share_service
 from ..dependencies import Principal, get_principal, get_runtime
 from ..schemas.common import SuccessEnvelope, success

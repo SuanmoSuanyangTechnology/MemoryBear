@@ -22,7 +22,7 @@ from ..models.owned import File
 from .knowledge_file_storage import KnowledgeFileStorage
 
 if TYPE_CHECKING:
-    from ..runtime import ProcessRuntime
+    from ..application.runtime import ProcessRuntime
 
 MAX_IMAGE_BYTES = 10 * 1024 * 1024
 MAX_BASE64_CHARACTERS = ((MAX_IMAGE_BYTES + 2) // 3) * 4

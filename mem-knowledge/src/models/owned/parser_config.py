@@ -1,6 +1,6 @@
 """Configuration rows share the owner primary key; no relationships cross share boundaries."""
 
-from ...db import KnowledgeBase
+from ...infrastructure.database.manager import KnowledgeBase
 from ...parser_configuration.fields import Scope
 from ...parser_configuration.schema import configuration_table
 

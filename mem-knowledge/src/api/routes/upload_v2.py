@@ -16,8 +16,8 @@ from error_core.knowledge_upload import (
 from fastapi import APIRouter, Depends, File, Query, Request, UploadFile
 from fastapi.responses import RedirectResponse
 
+from ...application.runtime import ProcessRuntime
 from ...errors import KnowledgeError
-from ...runtime import ProcessRuntime
 from ...services import file as file_service
 from ...services.knowledge_file_storage import KnowledgeFileStorage
 from ...services.qa_import import dispatch_qa_import, prepare_qa_import_resources

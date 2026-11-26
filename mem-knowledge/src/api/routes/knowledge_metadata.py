@@ -7,8 +7,8 @@ from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Request
 
+from ...application.runtime import ProcessRuntime
 from ...errors import KnowledgeError
-from ...runtime import ProcessRuntime
 from ...services import knowledge as knowledge_service
 from ...services.knowledge_metadata import KnowledgeMetadataService
 from ..dependencies import Principal, get_principal, get_runtime

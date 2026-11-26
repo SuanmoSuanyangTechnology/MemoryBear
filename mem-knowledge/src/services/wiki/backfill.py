@@ -2,7 +2,7 @@
 
 from datetime import UTC, datetime
 
-from sqlalchemy import and_, or_, select
+from sqlalchemy import and_, or_, select, update
 
 from ...models.owned import Document, Knowledge, WikiDocumentState
 from ...parser_configuration import to_runtime
@@ -74,6 +74,16 @@ def register_backfill(session, kb_id, upper_at_ms, admission_id, batch_size):
                 registered += 1
             cursor = (created_at, document_id)
     return registered
+
+
+def confirm_batch_trigger(session, kb_id, admission_id):
+    lock_knowledge(session, kb_id)
+    session.execute(update(WikiDocumentState).where(
+        WikiDocumentState.kb_id == as_uuid(kb_id),
+        WikiDocumentState.admission_id == admission_id,
+        WikiDocumentState.stage == "map_pending",
+        WikiDocumentState.status == "pending",
+    ).values(publish_confirmed=True))
 
 
 def record_backfill_publish_failure(session, kb_id, admission_id, batch_size):

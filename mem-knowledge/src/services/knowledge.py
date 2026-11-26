@@ -20,7 +20,7 @@ from ..api.schemas.knowledge import (
     UserSummary,
 )
 from ..errors import KnowledgeError, public_text
-from ..model_errors import MODEL_FIELD_ROLES, ModelFailure, model_error
+from ..errors.model_errors import MODEL_FIELD_ROLES, ModelFailure, model_error
 from ..models.owned import Knowledge, KnowledgeType, PermissionType
 from ..models.references import ModelBase, ModelConfig, ModelProvider, ModelType, User
 from ..parser_configuration import KnowledgeConfiguration, to_legacy, to_runtime
@@ -702,7 +702,7 @@ async def prepare_knowledge_update(
     if processing_configuration is not None:
         next_config = patch_configuration(next_config, processing_configuration)
     if {"parent_id", "status", "type"} & update_dict.keys():
-        from ..bootstrap import get_settings
+        from ..application.bootstrap import get_settings
 
         await db.run_sync(
             validate_knowledge_hierarchy, knowledge.workspace_id, update_dict,
@@ -766,7 +766,7 @@ async def apply_knowledge_update(
     if knowledge is None:
         raise _not_found()
     if {"parent_id", "status", "type"} & plan.update_fields.keys():
-        from ..bootstrap import get_settings
+        from ..application.bootstrap import get_settings
 
         await db.run_sync(
             validate_knowledge_hierarchy, knowledge.workspace_id, plan.update_fields,
@@ -829,7 +829,7 @@ async def apply_knowledge_update(
     registered = 0
     try:
         if wiki_enable_transition:
-            from ..bootstrap import get_settings
+            from ..application.bootstrap import get_settings
             from .wiki.backfill import register_backfill
 
             task_id = str(uuid.uuid4())

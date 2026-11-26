@@ -5,7 +5,7 @@ import uuid
 from sqlalchemy import Column, DateTime, ForeignKey, Index, Integer, String
 from sqlalchemy.dialects.postgresql import UUID
 
-from ...db import KnowledgeBase
+from ...infrastructure.database.manager import KnowledgeBase
 from ...utils.datetime_utils import utcnow_naive
 
 FILE_ROLE_SOURCE = "source"

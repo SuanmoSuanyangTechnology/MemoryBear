@@ -7,8 +7,8 @@ from uuid import UUID
 from fastapi import Request
 from pydantic import BaseModel, ValidationError
 
+from ..application.runtime import ProcessRuntime
 from ..errors import KnowledgeError
-from ..runtime import ProcessRuntime
 from .schemas.chunk import KnowledgeRetrievalSource
 
 

@@ -18,13 +18,13 @@ from mem_storage import StorageError
 from sqlalchemy.exc import OperationalError
 from starlette.exceptions import HTTPException
 
-from ..error_mapping import map_storage_error
 from ..errors import KnowledgeError
-from ..i18n import normalize_locale, resolve_locale, translate_legacy
+from ..errors.i18n import normalize_locale, resolve_locale, translate_legacy
+from ..errors.mapping import map_storage_error
 from ..integrations.model.errors import ModelInvokeProtocolError
-from ..request_logging import log_request_failure
+from ..observability.request_logging import log_request_failure
+from ..observability.trace import TRACE_ID_HEADER, get_trace_id, normalize_trace_id
 from ..services.upload_deduplication import DuplicateUploadError
-from ..trace import TRACE_ID_HEADER, get_trace_id, normalize_trace_id
 from .knowledge_capacity import WorkspaceCapacityExceeded
 from .schemas.common import fail
 from .upload_contract import is_knowledge_upload

@@ -7,16 +7,15 @@ import logging
 import mimetypes
 import uuid
 from typing import Annotated, Any, cast
-from typing import Annotated, Any
 from urllib.parse import quote
 
 from fastapi import APIRouter, Body, Depends, Query, Request
 from fastapi.responses import StreamingResponse
 from pydantic import WrapValidator
 
+from ...application.runtime import ProcessRuntime
 from ...errors import KnowledgeError
 from ...infrastructure.streaming import ClosingStreamingResponse
-from ...runtime import ProcessRuntime
 from ...services import document as document_service
 from ...services import file as file_service
 from ...services.knowledge_file_storage import KnowledgeFileStorage

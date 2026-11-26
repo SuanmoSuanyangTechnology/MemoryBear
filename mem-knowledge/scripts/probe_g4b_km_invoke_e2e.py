@@ -78,8 +78,9 @@ from redbear_model import (  # noqa: E402
     TextEmbeddingContent,
 )
 
-from src.bootstrap import BootstrapPaths, load_settings  # noqa: E402
-from src.error_mapping import map_model_error  # noqa: E402
+from src.application.bootstrap import BootstrapPaths, load_settings  # noqa: E402
+from src.application.runtime import ProcessRuntime  # noqa: E402
+from src.errors.mapping import map_model_error  # noqa: E402
 from src.integrations.model import (  # noqa: E402
     ModelInvokeFailedError,
     ModelInvokeTimeoutError,
@@ -91,6 +92,7 @@ from src.integrations.model.asr_video import AudioTranscriptionChunkModel  # noq
 from src.integrations.model.chat import RedBearChatModel, message_text  # noqa: E402
 from src.integrations.model.embedding import RedBearEmbeddings  # noqa: E402
 from src.integrations.model.rerank import RedBearRerank  # noqa: E402
+from src.integrations.model.usage_context import bind_usage_context  # noqa: E402
 from src.integrations.model.views import (  # noqa: E402
     is_qwen3_vl_embedding_view,
     is_qwen3_vl_rerank_view,
@@ -104,13 +106,11 @@ from src.rag.retrieval.async_elasticsearch import (  # noqa: E402
 from src.rag.retrieval.models import RetrievalSearchOptions  # noqa: E402
 from src.rag.vdb.vector_store import TaskVectorStore  # noqa: E402
 from src.repositories.model_registry import SyncSQLModelRegistry  # noqa: E402
-from src.runtime import ProcessRuntime  # noqa: E402
 from src.services.chunk import (  # noqa: E402
     ChunkDocumentSnapshot,
     build_chunk_store,
     preview_with_vision,
 )
-from src.usage_context import bind_usage_context  # noqa: E402
 
 _OK = "OK"
 _WARN = "WARN"

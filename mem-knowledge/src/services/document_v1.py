@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..api.dependencies import Principal
 from ..api.schemas.document_v1 import ProcessingDispatchResult
+from ..application.runtime import ProcessRuntime
 from ..errors import KnowledgeError
 from ..models.owned import Document, Knowledge
 from ..parser_configuration import DocumentConfiguration, Scope, from_api, new_configuration, to_api
@@ -21,7 +22,6 @@ from ..repositories.parser_configuration import (
     document_configuration,
     knowledge_configuration,
 )
-from ..runtime import ProcessRuntime
 from ..tasks.dispatch import TaskDispatcher
 from . import document as shared
 from . import file as file_service

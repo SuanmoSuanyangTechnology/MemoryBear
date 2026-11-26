@@ -5,8 +5,8 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, Request
 
+from ...application.runtime import ProcessRuntime
 from ...errors import KnowledgeError
-from ...runtime import ProcessRuntime
 from ...services import document_v1 as service
 from ..dependencies import Principal, get_principal, get_runtime, get_source
 from ..error_handlers import request_locale

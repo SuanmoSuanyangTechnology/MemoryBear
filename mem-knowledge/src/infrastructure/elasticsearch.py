@@ -7,7 +7,7 @@ import threading
 
 from elasticsearch import AsyncElasticsearch, Elasticsearch
 
-from ..config import KnowledgeSettings
+from ..application.config import KnowledgeSettings
 
 
 class ElasticsearchManager:

@@ -8,8 +8,8 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel, ConfigDict, Field, StrictStr, ValidationError
 
+from ...application.runtime import ProcessRuntime
 from ...errors import KnowledgeError
-from ...runtime import ProcessRuntime
 from ...services import wiki_faq_import as service
 from ..dependencies import Principal, get_runtime
 from ..schemas.common import SuccessEnvelope, success

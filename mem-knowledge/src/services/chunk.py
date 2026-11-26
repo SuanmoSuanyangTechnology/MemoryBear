@@ -20,13 +20,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..api.dependencies import Principal
 from ..api.schemas.chunk import ChunkCreate, ChunkType
-from ..error_mapping import map_model_error
+from ..application.runtime import ProcessRuntime
 from ..errors import KnowledgeError
+from ..errors.mapping import map_model_error
+from ..errors.model_errors import MODEL_FIELD_ROLES
 from ..integrations.model.embedding import RedBearEmbeddings
 from ..integrations.model.errors import ModelInvokeClientError
 from ..integrations.model.invoke_backend import ref_from_view
 from ..integrations.model.views import is_qwen3_vl_embedding_view
-from ..model_errors import MODEL_FIELD_ROLES
 from ..models.owned import Document
 from ..parser_configuration import to_runtime
 from ..rag.chunk.metadata import merge_parser_metadata
@@ -38,7 +39,6 @@ from ..repositories.parser_configuration import (
     document_configuration,
 )
 from ..repositories.reference import ReferenceRepository
-from ..runtime import ProcessRuntime
 from ..tasks.dispatch import TaskDispatcher
 from ..utils.datetime_utils import to_timestamp_ms
 from . import document as document_service

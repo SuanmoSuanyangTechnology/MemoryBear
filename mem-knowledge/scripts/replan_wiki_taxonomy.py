@@ -11,8 +11,8 @@ from pathlib import Path
 SERVICE_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(SERVICE_ROOT))
 
+from src.application.runtime import get_worker_runtime, shutdown_worker_runtime_sync  # noqa: E402
 from src.rag.wiki.diagnostics import diagnostic_json, exception_details  # noqa: E402
-from src.runtime import get_worker_runtime, shutdown_worker_runtime_sync  # noqa: E402
 from src.services.wiki.taxonomy import apply_taxonomy, preview_taxonomy  # noqa: E402
 
 

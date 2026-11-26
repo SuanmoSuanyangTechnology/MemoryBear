@@ -12,14 +12,14 @@ from fastapi import FastAPI
 from .api.error_handlers import register_error_handlers
 from .api.router import internal_upload_router, internal_v1_router
 from .api.schemas.common import ApiResponse
-from .bootstrap import get_settings
-from .config import KnowledgeSettings
-from .database_migrations import upgrade_database_on_startup
-from .i18n import load_catalogs
-from .logging import setup_logging
-from .request_logging import RequestLoggingFastAPI
-from .runtime import ProcessRuntime
-from .trace import TraceIdMiddleware
+from .application.bootstrap import get_settings
+from .application.config import KnowledgeSettings
+from .application.runtime import ProcessRuntime
+from .errors.i18n import load_catalogs
+from .infrastructure.database.migrations import upgrade_database_on_startup
+from .observability.logging import setup_logging
+from .observability.request_logging import RequestLoggingFastAPI
+from .observability.trace import TraceIdMiddleware
 
 logger = logging.getLogger(__name__)
 
@@ -39,7 +39,7 @@ def create_app(settings: KnowledgeSettings | None = None) -> FastAPI:
     service_settings = settings or get_settings()
     setup_logging(service_settings)
     runtime = ProcessRuntime(service_settings)
-    from .auth import KbAuthConfig, KbAuthMiddleware, _load_gateway_auth
+    from .api.auth import KbAuthConfig, KbAuthMiddleware, _load_gateway_auth
     from .grpc.server import build_grpc_server
 
     kb_auth_config = KbAuthConfig(

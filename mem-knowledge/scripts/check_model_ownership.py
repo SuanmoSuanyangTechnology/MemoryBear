@@ -17,6 +17,7 @@ EXPECTED_OWNED_TABLES = {
     "wiki_page_versions",
     "wiki_folders",
     "wiki_pages",
+    "wiki_reduce_deliveries",
     "wiki_page_sources",
     "wiki_page_links",
     "wiki_document_states",
@@ -177,10 +178,10 @@ def validate_model_ownership(source_root: Path) -> list[str]:
     """Return all ownership violations under a service source tree."""
 
     errors: list[str] = []
-    knowledge_base_path = source_root / "db.py"
+    knowledge_base_path = source_root / "infrastructure/database/manager.py"
     reference_base_path = source_root / "models" / "references" / "base.py"
     if not _defines_class(knowledge_base_path, "KnowledgeBase"):
-        errors.append("db.py does not define KnowledgeBase")
+        errors.append("infrastructure/database/manager.py does not define KnowledgeBase")
     if not _defines_class(reference_base_path, "ReferenceBase"):
         errors.append("models/references/base.py does not define ReferenceBase")
 

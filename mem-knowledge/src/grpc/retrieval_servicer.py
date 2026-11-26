@@ -30,13 +30,13 @@ from ..api.schemas.knowledge_retrieval import (
     KnowledgeRetrievalRequest,
     prepare_retrieval_request,
 )
+from ..application.runtime import ProcessRuntime
 from ..errors import KnowledgeError
-from ..i18n import resolve_locale
-from ..request_logging import failure_diagnostics
-from ..runtime import ProcessRuntime
+from ..errors.i18n import resolve_locale
+from ..observability.request_logging import failure_diagnostics
+from ..observability.trace import get_trace_id, normalize_trace_id, reset_trace_id, set_trace_id
 from ..services.knowledge_retrieval import KnowledgeRetrievalService
 from ..services.knowledge_retrieval_preparation import KnowledgeRetrievalPreparation
-from ..trace import get_trace_id, normalize_trace_id, reset_trace_id, set_trace_id
 from .envelope import TRACE_ID_TRAILER, abort_with_error, success_body
 
 logger = logging.getLogger(__name__)

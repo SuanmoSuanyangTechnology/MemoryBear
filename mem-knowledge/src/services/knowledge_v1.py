@@ -10,8 +10,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..api.dependencies import Principal
 from ..api.query_validation import parse_uuid_filter
 from ..api.schemas.knowledge import KnowledgeCreate, KnowledgeUpdate
+from ..application.runtime import ProcessRuntime
 from ..errors import KnowledgeError
-from ..model_errors import MODEL_FIELD_ROLES, ModelFailure, model_error
+from ..errors.model_errors import MODEL_FIELD_ROLES, ModelFailure, model_error
 from ..models.owned import Knowledge, PermissionType
 from ..models.references import Workspace
 from ..parser_configuration import to_api
@@ -21,7 +22,6 @@ from ..repositories import knowledge as repository
 from ..repositories import knowledge_v1 as directory_repository
 from ..repositories.parser_configuration import knowledge_configuration
 from ..repositories.reference import ReferenceRepository
-from ..runtime import ProcessRuntime
 from ..utils.datetime_utils import to_timestamp_ms
 from . import knowledge as shared
 from .folder_hierarchy import validate_knowledge_hierarchy

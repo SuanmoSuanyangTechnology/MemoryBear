@@ -15,9 +15,10 @@ from pydantic import WrapValidator
 from sqlalchemy import select
 from starlette.background import BackgroundTask
 
-from ...error_mapping import map_connector_check_error, map_model_error
+from ...application.runtime import ProcessRuntime
 from ...errors import KnowledgeError
-from ...model_errors import ModelRole
+from ...errors.mapping import map_connector_check_error, map_model_error
+from ...errors.model_errors import ModelRole
 from ...models.owned import FILE_ROLE_SOURCE, File, KnowledgeType, ParserType, PermissionType
 from ...parser_configuration.api import require_sync_source
 from ...rag.integrations.feishu import FeishuAPIClient
@@ -30,7 +31,6 @@ from ...rag.knowledge_graph.elasticsearch_store import GraphElasticsearchStore
 from ...rag.retrieval.async_elasticsearch import collection_name_for_knowledge
 from ...repositories.model_registry import AsyncSQLModelRegistry
 from ...repositories.parser_configuration import AsyncParserConfigurationRepository
-from ...runtime import ProcessRuntime
 from ...services import file as file_service
 from ...services import graph as graph_service
 from ...services import knowledge as knowledge_service
@@ -439,16 +439,29 @@ async def dispatch_knowledge_update(
     graph_dispatch_failed = False
     reparse_dispatch_failed = False
     if outcome.wiki_backfill_required:
-        from ...rag.wiki.config import BACKFILL_REGISTERED_HEADER, BACKFILL_TASK, WIKI_QUEUE
+        from ...rag.wiki.config import (
+            BACKFILL_REGISTERED_HEADER,
+            BACKFILL_TASK,
+            BATCH_TASK,
+            MAP_QUEUE,
+            WIKI_QUEUE,
+        )
         from ...rag.wiki.diagnostics import diagnostic_json, exception_details
-        from ...services.wiki.backfill import record_backfill_publish_failure
+        from ...services.wiki.backfill import confirm_batch_trigger, record_backfill_publish_failure
         from ...services.wiki.runtime import transaction
 
         try:
-            await dispatcher.send(BACKFILL_TASK, kwargs={
-                "kb_id": str(knowledge_id), "upper_at_ms": outcome.wiki_backfill_upper_at_ms,
-            }, queue=WIKI_QUEUE, task_id=outcome.wiki_backfill_task_id,
-                headers={BACKFILL_REGISTERED_HEADER: True})
+            if runtime.settings.wiki_batch_enabled(knowledge_id):
+                await dispatcher.send(
+                    BATCH_TASK, kwargs={"kb_id": str(knowledge_id)}, queue=MAP_QUEUE,
+                    task_id=outcome.wiki_backfill_task_id,
+                    countdown=runtime.settings.kb_wiki_batch_delay_seconds,
+                )
+            else:
+                await dispatcher.send(BACKFILL_TASK, kwargs={
+                    "kb_id": str(knowledge_id), "upper_at_ms": outcome.wiki_backfill_upper_at_ms,
+                }, queue=WIKI_QUEUE, task_id=outcome.wiki_backfill_task_id,
+                    headers={BACKFILL_REGISTERED_HEADER: True})
         except Exception as exc:
             logger.error(
                 "Wiki 配置与待处理状态已保存，但补录派发失败 "
@@ -470,6 +483,11 @@ async def dispatch_knowledge_update(
                     diagnostic_json(exception_details(state_exc)),
                 )
             raise KnowledgeError.from_code("KB_WIKI_BACKFILL_DISPATCH_FAILED") from exc
+        if runtime.settings.wiki_batch_enabled(knowledge_id):
+            await asyncio.to_thread(
+                transaction, runtime, confirm_batch_trigger,
+                knowledge_id, outcome.wiki_backfill_task_id,
+            )
     if outcome.graph_enabled_before is not None:
         try:
             await dispatch_graph_transition(

@@ -12,6 +12,7 @@ from typing import cast
 
 from redbear_model import QWEN3_VL_EMBEDDING_DIMENSION
 
+from ..application.runtime import ProcessRuntime
 from ..integrations.model.embedding import RedBearEmbeddings
 from ..integrations.model.invoke_backend import ref_from_view
 from ..integrations.model.views import is_qwen3_vl_embedding_view
@@ -23,7 +24,6 @@ from ..rag.models.task_runtime import TaskModelFactory
 from ..rag.vdb.field import Field
 from ..rag.vdb.vector_store import TaskVectorStore
 from ..repositories.parser_configuration import ParserConfigurationRepository
-from ..runtime import ProcessRuntime
 from ..tasks.observability import BusinessOutcome, TaskRun
 from ..utils.datetime_utils import to_iso_z, to_timestamp_ms, utcnow, utcnow_naive
 from .document_mutation_guard import DocumentMutationLeaseLost, sync_document_mutation_guard

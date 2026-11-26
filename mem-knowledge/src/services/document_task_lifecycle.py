@@ -8,12 +8,12 @@ from collections.abc import AsyncIterator, Sequence
 from contextlib import asynccontextmanager
 from typing import Any
 
+from ..application.runtime import ProcessRuntime
 from ..errors import KnowledgeError
 from ..models.owned import Document, WikiDocumentState
 from ..rag.chunk.mutation import ChunkWriteResult
 from ..rag.vdb.field import Field
 from ..rag.vdb.vector_store import collection_name_for_knowledge
-from ..runtime import ProcessRuntime
 from ..tasks.state import PARSE_CANCEL_KEY
 from .document_mutation_guard import (
     DocumentMutationLeaseLost,
