@@ -528,12 +528,20 @@ class KnowledgeSettings(BaseSettings):
     )
 
     # Knowledge business environment variables
-    knowledge_capacity_quota_gib: Decimal = Field(
-        default=Decimal("0.3"),
+    knowledge_capacity_quota_gb: Decimal | None = Field(
+        default=None,
         ge=0,
         allow_inf_nan=False,
         validation_alias="QUOTA_KNOWLEDGE_CAPACITY_QUOTA",
     )
+
+    @field_validator("knowledge_capacity_quota_gb", mode="before")
+    @classmethod
+    def _empty_knowledge_capacity_quota(cls, value: Any) -> Any:
+        if isinstance(value, str) and not value.strip():
+            return None
+        return value
+
     max_file_size: int = Field(
         default=52428800,
         ge=1,

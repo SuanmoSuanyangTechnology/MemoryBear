@@ -273,8 +273,8 @@ def register_error_handlers(application: FastAPI) -> None:
             code=BizCode.QUOTA_EXCEEDED, msg=message, error=message,
             data={
                 "resource": "知识库容量" if language == "zh" else "knowledge base capacity",
-                "current_usage": float(exc.used_gib),
-                "quota_limit": float(exc.limit_gib),
+                "current_usage": float(exc.used_gb),
+                "quota_limit": float(exc.limit_gb),
             },
         )
         return JSONResponse(
