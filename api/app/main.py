@@ -49,6 +49,7 @@ from app.integrations.knowledge.validation import (
     safe_retrieval_validation_response,
 )
 from app.core.models.failover import channel_error_to_business
+from app.integrations.model.errors import ModelInvokeFailedError
 
 # Initialize logging system
 LoggingConfig.setup_logging()
@@ -804,6 +805,36 @@ async def business_exception_handler(request: Request, exc: BusinessException):
 @app.exception_handler(ChannelSwitchExhaustedError)
 async def channel_failover_exception_handler(request: Request, exc: Exception):
     return await business_exception_handler(request, channel_error_to_business(exc))
+
+
+# 模型服务已归类的调用失败（含 402 额度不足分级）：透传服务侧业务码与分级文案，
+# 诊断串只进 error 字段。未捕获时会退化成 10001 + 诊断串当 msg 的错误形态。
+@app.exception_handler(ModelInvokeFailedError)
+async def model_invoke_failed_handler(request: Request, exc: ModelInvokeFailedError):
+    code = coerce_code(exc.biz_code)
+    if code in (None, BizCode.OK.value):
+        code = BizCode.INTERNAL_ERROR.value
+    language = getattr(request.state, "language", None) or get_current_locale()
+    trace_id = getattr(request.state, "trace_id", None)
+    display = exc.user_msg or user_message(code, language)
+    detail = format_diagnostics(trace_id=trace_id, detail=exc.detail or str(exc))
+    logger.error(
+        "Model invoke failed code=%s code_name=%s msg_locale=%s upstream_status=%s "
+        "channel_id=%s attempts=%s retryable=%s trace_id=%s detail=%s",
+        code,
+        code_name(code),
+        language,
+        exc.http_status,
+        exc.channel_id,
+        exc.attempts,
+        exc.retryable,
+        trace_id,
+        exc.detail,
+    )
+    return JSONResponse(
+        status_code=http_status_for(code),
+        content=fail(code=code, msg=display, error=detail),
+    )
 
 
 @app.exception_handler(KnowledgeClientError)

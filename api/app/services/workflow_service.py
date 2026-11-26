@@ -7042,6 +7042,12 @@ class WorkflowService:
                 await self._save_failed_conversation_async(
                     conversation_id_uuid, None, human_message, human_meta, error_info["msg"]
                 )
+            # 模型服务已归类的失败（如 402 额度不足）保留原异常：外层按服务侧
+            # 业务码与分级文案输出，包成 INTERNAL_ERROR 会退化成 10001 + 诊断串。
+            from app.integrations.model.errors import ModelInvokeFailedError
+
+            if isinstance(e, ModelInvokeFailedError):
+                raise
             raise BusinessException(
                 code=BizCode.INTERNAL_ERROR,
                 message=f"工作流执行失败: {str(e)}"

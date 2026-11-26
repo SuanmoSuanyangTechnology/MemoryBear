@@ -18,6 +18,9 @@ from app.core.utils.datetime_utils import parse_timestamp_to_utc_naive, utcnow_n
 from app.core.logging_config import get_business_logger
 from app.core.exceptions import BusinessException
 from app.core.error_codes import BizCode
+from app.core.model_failure import model_failure_fields
+from app.integrations.model.errors import ModelInvokeFailedError
+from error_core.envelope import error_frame
 from app.core.usage_context import bind_usage
 from app.db import get_db, get_async_db_context, end_read_transaction
 from app.integrations.knowledge.contracts import KnowledgeRetrievalSource
@@ -1865,11 +1868,16 @@ class AppChatService:
 
             debug_id = self.agent_service._build_debug_id()
             public_error = classify_multimodal_exception(e, debug_id=debug_id)
+            model_failure = None
             if public_error is not None:
                 display_error = public_error["message"]
             elif isinstance(e, BusinessException):
                 # 业务异常给的是面向用户的文案，str(e) 会带上内部错误码前缀
                 display_error = e.message
+            elif isinstance(e, ModelInvokeFailedError):
+                # 模型失败按服务侧分级文案展示，诊断串只进错误帧的 error 字段
+                model_failure = model_failure_fields(e)
+                display_error = model_failure["msg"]
             else:
                 display_error = str(e)
 
@@ -1930,6 +1938,19 @@ class AppChatService:
                 ))
             except Exception:
                 pass  # 保存失败不影响错误事件发送
+            if model_failure is not None:
+                # 模型失败先发统一错误帧（code/msg/error/retryable），再补旧格式 end 帧。
+                yield "event: error\ndata: " + json.dumps(
+                    error_frame(
+                        code=model_failure["code"],
+                        msg=model_failure["msg"],
+                        error=model_failure["error"],
+                        retryable=model_failure["retryable"],
+                        attempts=model_failure["attempts"],
+                        channel_id=model_failure["channel_id"],
+                    ),
+                    ensure_ascii=False,
+                ) + "\n\n"
             # 保持体验分享页面既有的 end/error 字符串契约，避免前端出现对象渲染问题。
             yield f"event: end\ndata: {json.dumps({'error': display_error}, ensure_ascii=False)}\n\n"
 
@@ -2429,8 +2450,22 @@ class AppChatService:
                     ))
                 except Exception:
                     pass
-            # 发送错误事件
-            yield f"event: error\ndata: {json.dumps({'error': str(e)}, ensure_ascii=False)}\n\n"
+            # 发送错误事件：模型失败按统一错误帧，其余异常保留原有字符串契约。
+            if isinstance(e, ModelInvokeFailedError):
+                failure = model_failure_fields(e)
+                yield "event: error\ndata: " + json.dumps(
+                    error_frame(
+                        code=failure["code"],
+                        msg=failure["msg"],
+                        error=failure["error"],
+                        retryable=failure["retryable"],
+                        attempts=failure["attempts"],
+                        channel_id=failure["channel_id"],
+                    ),
+                    ensure_ascii=False,
+                ) + "\n\n"
+            else:
+                yield f"event: error\ndata: {json.dumps({'error': str(e)}, ensure_ascii=False)}\n\n"
 
     async def workflow_chat(
             self,

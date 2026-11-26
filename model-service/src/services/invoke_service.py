@@ -76,6 +76,7 @@ from redbear_model import (
     open_astream,
     publish_usage_safely,
     run_candidate_fallback_async,
+    upstream_error_code,
 )
 from redbear_model.providers.bedrock import is_bedrock_nova_embedding
 from redbear_model.runtime import (
@@ -965,6 +966,9 @@ def _failure_code(exc: BaseException) -> BizCode:
         return BizCode.RATE_LIMITED
     if status in (401, 403):
         return BizCode.API_KEY_INVALID
+    if status == 402:
+        # 402 恒为额度不足，不能落到下面的 4xx 参数错误兜底。
+        return BizCode.QUOTA_EXCEEDED
     if status is not None and 400 <= status < 500:
         return BizCode.INVALID_PARAMETER
     return BizCode.INTERNAL_ERROR
@@ -1016,19 +1020,32 @@ def _channel_diagnostics(
     return format_channel_diagnostics(entries, trace_id=get_trace_id())
 
 
-def _upstream_code(exc: BaseException) -> str | None:
-    """沿异常链读取供应商错误码（字符串），供逐供应商映射使用。"""
+#: 402 额度不足的分级文案（只按 error_code 选本地文案，不透传上游 message：
+#: 上游声明文案可能调整，且 msg 需中英双语）。未细分与未知 error_code 走 generic。
+_QUOTA_MESSAGE_KEYS: tuple[tuple[str, str], ...] = (
+    ("BILLING_TENANT_", "errors.invoke.quota_tenant"),
+    ("BILLING_PROJECT_", "errors.invoke.quota_project"),
+    ("BILLING_API_KEY_", "errors.invoke.quota_api_key"),
+)
 
-    current: BaseException | None = exc
-    for _ in range(8):
-        if current is None:
-            break
-        for attr in ("code", "error_code", "type"):
-            value = getattr(current, attr, None)
-            if isinstance(value, str) and value:
-                return value
-        current = current.__cause__ or current.__context__
-    return None
+
+def _quota_message(failure: ProviderFailure) -> str | None:
+    """402 额度不足 → 分级用户文案；非额度不足失败返回 None（渲染期回落码文案）。
+
+    渠道级额度不足归 10003（暂时不可用、可重试），不套额度文案：换渠道后服务仍可能
+    恢复，给用户看「额度不足，请充值」是误导。
+    """
+
+    if failure.http_status != 402 or failure.biz_code != int(BizCode.QUOTA_EXCEEDED):
+        return None
+    from ..i18n import get_current_locale, translate
+
+    normalized = (failure.upstream_code or "").upper()
+    key = next(
+        (key for prefix, key in _QUOTA_MESSAGE_KEYS if normalized.startswith(prefix)),
+        "errors.invoke.quota_generic",
+    )
+    return translate(key, get_current_locale())
 
 
 def _log_provider_failure(failure: ProviderFailure, *, attempts: int) -> None:
@@ -1092,7 +1109,7 @@ def _failure_from_exception(
             silent=aggregated.silent if aggregated is not None else False,
         )
     status = _provider_status(exc)
-    upstream_code = _upstream_code(exc)
+    upstream_code = upstream_error_code(exc)
     # Classify only when the exception carries a status or upstream code: internal
     # faults on a resolved channel keep INTERNAL_ERROR instead of UPSTREAM_UNKNOWN.
     if provider and (status is not None or upstream_code is not None):
@@ -1103,6 +1120,9 @@ def _failure_from_exception(
         return InvokeFailure(
             code=failure.biz_code,
             message=SensitiveDataFilter.filter_string(failure.message),
+            # 402 额度不足：msg 由上游 error_code 决定分级文案（不透传上游 message）；
+            # error 仍是包含 provider/upstream_status/完整 BILLING_* 的诊断串。
+            msg=_quota_message(failure),
             detail=format_failure_detail(
                 failure, channel_id=channel_id, attempts=attempts
             ),
