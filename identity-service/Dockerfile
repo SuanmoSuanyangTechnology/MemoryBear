@@ -12,7 +12,7 @@ ARG NEED_MIRROR=1
 
 # 零 apt：asyncpg/pydantic-core 等均有 cp312 manylinux wheel，无需编译期系统依赖
 # pip 走清华镜像（NEED_MIRROR=1 时）
-RUN if [ "$NEED_MIRROR" == "1" ]; then \
+RUN if [ "$NEED_MIRROR" = "1" ]; then \
         pip3 config set global.index-url https://pypi.tuna.tsinghua.edu.cn/simple && \
         pip3 config set global.trusted-host pypi.tuna.tsinghua.edu.cn; \
     fi

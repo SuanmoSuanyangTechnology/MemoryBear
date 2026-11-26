@@ -42,14 +42,19 @@ def register_enterprise_market() -> None:
 def register_enterprise_plugins(runtime: ProcessRuntime) -> None:
     """Register enterprise plugins when the private package is installed.
 
-    Open-source builds cannot install enterprise-extensions, so the import
-    failure is expected and leaves the community plugin registry empty.
+    Community deployments must start without a License and keep the community
+    context path, so the private hook receives the deployment mode and skips
+    the License-gated plugins itself. Open-source builds cannot install
+    enterprise-extensions, so the import failure is expected and leaves the
+    community plugin registry empty.
     """
     try:
         from enterprise_ext.app import register_app_plugins
     except ImportError:
         return
-    register_app_plugins(runtime.upstream)
+    register_app_plugins(
+        runtime.upstream, deployment_mode=runtime.settings.deployment_mode
+    )
 
 
 def load_market_gateway(runtime: ProcessRuntime) -> MarketGateway:

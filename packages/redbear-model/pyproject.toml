@@ -47,8 +47,8 @@ all = [
 packages = ["src/redbear_model"]
 
 [tool.uv.sources]
-memorybear-grpc = { path = "../memorybear-grpc" }
-error-core = { path = "../error-core" }
+memorybear-grpc = { path = "../memorybear-grpc", editable = true }
+error-core = { path = "../error-core", editable = true }
 
 # Resolve through the mirror so re-locks keep every lock URL on it.
 [[tool.uv.index]]

@@ -35,7 +35,7 @@ ENV DEBIAN_FRONTEND=noninteractive
 # python-docx:   default-jdk                              tika-server-standard-3.0.0.jar
 # Building C extensions: libpython3-dev libgtk-4-1 libnss3 xdg-utils libgbm-dev
 RUN --mount=type=cache,id=mem_apt,target=/var/cache/apt,sharing=locked \
-    if [ "$NEED_MIRROR" == "1" ]; then \
+    if [ "$NEED_MIRROR" = "1" ]; then \
         sed -i 's|http://ports.ubuntu.com|http://mirrors.tuna.tsinghua.edu.cn|g' /etc/apt/sources.list; \
         sed -i 's|http://archive.ubuntu.com|http://mirrors.tuna.tsinghua.edu.cn|g' /etc/apt/sources.list; \
     fi; \
@@ -54,7 +54,7 @@ RUN --mount=type=cache,id=mem_apt,target=/var/cache/apt,sharing=locked \
     apt install -y ghostscript && \
     apt install -y libmagic1
 
-RUN if [ "$NEED_MIRROR" == "1" ]; then \
+RUN if [ "$NEED_MIRROR" = "1" ]; then \
         pip3 config set global.index-url https://pypi.tuna.tsinghua.edu.cn/simple && \
         pip3 config set global.trusted-host pypi.tuna.tsinghua.edu.cn; \
         mkdir -p /etc/uv && \
@@ -82,7 +82,7 @@ COPY api/migrations /code/migrations
 # https://github.com/astral-sh/uv/issues/10462
 # uv records index url into uv.lock but doesn't failover among multiple indexes
 RUN --mount=type=cache,id=mem_uv,target=/root/.cache/uv,sharing=locked \
-    if [ "$NEED_MIRROR" == "1" ]; then \
+    if [ "$NEED_MIRROR" = "1" ]; then \
         sed -i 's|pypi.org|pypi.tuna.tsinghua.edu.cn|g' uv.lock; \
     else \
         sed -i 's|pypi.tuna.tsinghua.edu.cn|pypi.org|g' uv.lock; \

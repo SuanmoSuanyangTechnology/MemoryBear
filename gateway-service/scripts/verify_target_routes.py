@@ -6,7 +6,8 @@ Fatal findings:
 - uncovered path: a target business path matches no entry (would 404 externally).
 
 Usage:
-  uv run --project core/gateway-service python core/gateway-service/scripts/verify_target_routes.py \
+  uv run --project core/gateway-service python \
+    core/gateway-service/scripts/verify_target_routes.py \
     --routes core/gateway-service/routes.json \
     --openapi file-service=k8s/openapi/file-service.json \
     --openapi application-service=http://127.0.0.1:8080/openapi.json
@@ -40,6 +41,20 @@ _EXEMPT_PREFIXES = (
     "/internal/v2/chunks", "/internal/v2/files",
     "/internal/v1/invoke", "/internal/v1/platform",
     "/internal/v1/admin", "/internal/v1/catalog",
+    # identity-service sibling faces: JWKS publication and the /internal/*
+    # snapshot/verify/ACL API are consumed by the gateway and peer services,
+    # never by the public edge.
+    "/jwks", "/internal/user-snapshot", "/internal/api-key-verify",
+    "/internal/acl-rules",
+    # Sibling-only faces added for the P3-3 full sweep: identity renders
+    # workspace model options/selection by calling model-service; ops-service
+    # calls identity's SSO/tenant-admin/tenant-user/email-exists internals and
+    # serves the home-page version read that application-service proxies.
+    "/internal/v1/workspace-model-options",
+    "/internal/v1/workspace-model-selection",
+    "/internal/v1/home-page",
+    "/internal/sso", "/internal/tenant-admins", "/internal/tenant-users",
+    "/internal/users",
 )
 
 
@@ -50,7 +65,12 @@ def _target_prefix(route: dict) -> str:
 
 
 def _matches(path: str, prefix: str) -> bool:
-    return path == prefix or path.startswith(prefix + "/")
+    # The runtime resolver uses plain startswith, so a broad family prefix such
+    # as /sys/alert legitimately covers /sys/alert-events. Accept a hyphen
+    # boundary for that case but not a bare character extension, so typos like
+    # /internal/v1/storagex still surface as dead entries.
+    return (path == prefix or path.startswith(prefix + "/")
+            or path.startswith(prefix + "-"))
 
 
 def _is_exempt(path: str) -> bool:

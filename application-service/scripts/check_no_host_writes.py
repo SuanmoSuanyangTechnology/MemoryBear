@@ -41,8 +41,9 @@ DML_RE = re.compile(
 )
 DML_KEYWORD_RE = re.compile(r"\b(?:INSERT\s+INTO|MERGE\s+INTO|UPDATE|DELETE\s+FROM)\b", re.IGNORECASE)
 # The token after a DML keyword may be a clause rather than a table name
-# (e.g. ``ON CONFLICT DO UPDATE SET`` or the rare ``DELETE FROM (SELECT ...)`` form).
-SQL_KEYWORDS = frozenset({"select", "set", "values", "where", "only"})
+# (e.g. ``ON CONFLICT DO UPDATE SET``, the row-lock ``FOR UPDATE OF`` clause,
+# or the rare ``DELETE FROM (SELECT ...)`` form).
+SQL_KEYWORDS = frozenset({"select", "set", "values", "where", "only", "of"})
 DYNAMIC = "?"
 MAX_RESOLVE_DEPTH = 25
 

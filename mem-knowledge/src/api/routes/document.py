@@ -4,20 +4,33 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import mimetypes
 import uuid
 from typing import Annotated, Any
+from urllib.parse import quote
 
 from fastapi import APIRouter, Body, Depends, Query, Request
+from fastapi.responses import StreamingResponse
 from pydantic import WrapValidator
 
+from ...errors import KnowledgeError
+from ...infrastructure.streaming import ClosingStreamingResponse
 from ...runtime import ProcessRuntime
 from ...services import document as document_service
 from ...services import file as file_service
 from ...services.knowledge_file_storage import KnowledgeFileStorage
 from ...services.knowledge_metadata import KnowledgeMetadataService
 from ...tasks.dispatch import TaskDispatcher
-from ..dependencies import Principal, get_principal, get_runtime, is_manager_request
+from ..dependencies import (
+    Principal,
+    get_optional_principal,
+    get_principal,
+    get_runtime,
+    get_source,
+    is_manager_request,
+)
 from ..query_validation import localized_query_validation
+from ..schemas.chunk import KnowledgeRetrievalSource
 from ..schemas.common import SERVICE_UNAVAILABLE_RESPONSE, SuccessEnvelope, success
 from ..schemas.document import DocumentCreate, DocumentUpdate
 from ..schemas.knowledge_metadata import (
@@ -31,6 +44,9 @@ router = APIRouter(
     tags=["documents"],
     dependencies=[Depends(get_principal)],
 )
+# The citation download is public by contract (capability URL), so it cannot
+# ride the router-level principal dependency above.
+download_router = APIRouter(prefix="/documents", tags=["documents"])
 logger = logging.getLogger(__name__)
 
 
@@ -361,4 +377,44 @@ async def delete_document_metadata(
     return _success(request, result, "文档元数据删除成功")
 
 
-__all__ = ["router"]
+@download_router.get("/{document_id}/download")
+async def download_document(
+    document_id: uuid.UUID,
+    principal: Annotated[Principal | None, Depends(get_optional_principal)],
+    source: Annotated[KnowledgeRetrievalSource, Depends(get_source)],
+    runtime: Annotated[ProcessRuntime, Depends(get_runtime)],
+) -> StreamingResponse:
+    """Stream the original file behind a document.
+
+    Anonymous by contract: the app citation download is a capability URL, so a
+    principal-less caller must assert a trusted business source (same rule as
+    the public single-file download). A principal-bearing caller scopes the
+    lookup to its workspace.
+    """
+
+    workspace_id = None
+    if principal is None:
+        if source not in {
+            KnowledgeRetrievalSource.EXTERNAL_API,
+            KnowledgeRetrievalSource.MANAGER_API,
+        }:
+            raise KnowledgeError.from_code("KB_PRINCIPAL_INVALID")
+    else:
+        workspace_id = principal.workspace_id
+    async with runtime.database.async_session() as db:
+        snapshot = await file_service.get_document_file_snapshot(
+            db, document_id, workspace_id=workspace_id
+        )
+    media_type = mimetypes.guess_type(snapshot.file_name)[0] or "application/octet-stream"
+    return ClosingStreamingResponse(
+        KnowledgeFileStorage(runtime.storage).download_stream(snapshot.file_key),
+        media_type=media_type,
+        headers={
+            "Content-Disposition": (
+                f"attachment; filename*=UTF-8''{quote(snapshot.file_name)}"
+            )
+        },
+    )
+
+
+__all__ = ["download_router", "router"]

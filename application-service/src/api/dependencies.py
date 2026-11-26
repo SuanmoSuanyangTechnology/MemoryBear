@@ -15,6 +15,7 @@ from sqlalchemy.orm import Session
 
 from ..errors import BizCode, BusinessException
 from ..infrastructure.upstream import MonolithUpstream
+from ..integrations.memory_profile import MemoryProfileClient
 from ..runtime import ProcessRuntime
 
 ACTOR_ID_HEADER = "X-App-Actor-ID"
@@ -57,6 +58,13 @@ def get_upstream(request: Request) -> MonolithUpstream:
 
     runtime: ProcessRuntime = request.app.state.runtime
     return runtime.upstream
+
+
+def get_memory_profile(request: Request) -> MemoryProfileClient:
+    """Process-wide memory-profile write client (end-user merge)."""
+
+    runtime: ProcessRuntime = request.app.state.runtime
+    return runtime.memory_profile
 
 
 def get_sync_redis(request: Request) -> SyncRedis:
@@ -171,11 +179,13 @@ __all__ = [
     "API_KEY_ID_HEADER",
     "TENANT_ID_HEADER",
     "WORKSPACE_ID_HEADER",
+    "MemoryProfileClient",
     "MonolithUpstream",
     "Principal",
     "ShareTokenData",
     "SyncRedis",
     "get_async_db",
+    "get_memory_profile",
     "get_principal",
     "get_runtime",
     "get_share_user_id",
