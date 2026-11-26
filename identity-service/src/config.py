@@ -145,6 +145,19 @@ class Settings:
         os.getenv("MODEL_SERVICE_READ_TIMEOUT_SECONDS", "120")
     )
 
+    # ---- 出站老单体（W2-A 过渡回调：在途 reembed job id 与 workspace_models 原子写）----
+    # 回调写单元保持老单体单事务（决策 D1）；密钥两端同名同值，未配置时
+    # PUT 失败关闭（503）、job id 降级 null
+    MONOLITH_BASE_URL: str = os.getenv("MONOLITH_BASE_URL", "http://api:8000")
+    MONOLITH_CONNECT_TIMEOUT_SECONDS: float = float(
+        os.getenv("MONOLITH_CONNECT_TIMEOUT_SECONDS", "5")
+    )
+    # 覆盖老单体探活预算（LLM_TIMEOUT 默认 120s）
+    MONOLITH_READ_TIMEOUT_SECONDS: float = float(
+        os.getenv("MONOLITH_READ_TIMEOUT_SECONDS", "180")
+    )
+    IDENTITY_CALLBACK_SECRET: str = os.getenv("IDENTITY_CALLBACK_SECRET", "")
+
     # ---- Celery 生产端（identity 不跑 worker；任务由 notification-service 消费）----
     CELERY_BROKER_URL: str = os.getenv("CELERY_BROKER_URL", "")
     REDIS_DB_CELERY_BROKER: int = int(os.getenv("REDIS_DB_CELERY_BROKER", "3"))

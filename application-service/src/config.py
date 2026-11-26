@@ -421,6 +421,19 @@ class AppServiceSettings(BaseSettings):
         default=None,
         validation_alias="MODEL_SERVICE_BASE_URL",
     )
+    # East-west read of the home-page version card (ops-service owns
+    # version_notes). Unset or unreachable degrades to SYSTEM_VERSION with
+    # empty structured intros — the monolith's last-resort fallback.
+    ops_service_base_url: str = Field(
+        default="",
+        validation_alias="OPS_SERVICE_BASE_URL",
+    )
+    ops_service_connect_timeout_seconds: float = Field(
+        default=2.0, gt=0, validation_alias="OPS_SERVICE_CONNECT_TIMEOUT_SECONDS"
+    )
+    ops_service_read_timeout_seconds: float = Field(
+        default=5.0, gt=0, validation_alias="OPS_SERVICE_READ_TIMEOUT_SECONDS"
+    )
     # gRPC server (same process as FastAPI; --loop asyncio is mandatory because
     # grpc.aio cannot run on uvloop). Port 0 binds an ephemeral port in tests.
     grpc_server_enabled: bool = Field(

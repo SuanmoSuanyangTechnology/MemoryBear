@@ -16,7 +16,14 @@ from fastapi import FastAPI
 from src import db
 from src import redis as iredis
 from src.config import settings
-from src.controllers import acl, api_key_verify, jwks, user_snapshot
+from src.controllers import (
+    acl,
+    api_key_verify,
+    jwks,
+    sso_provisioning,
+    tenant_admins,
+    user_snapshot,
+)
 from src.controllers.router import api_router
 from src.error_handlers import register_error_handlers
 from src.i18n import LanguageContextMiddleware, load_catalogs
@@ -81,6 +88,8 @@ app.include_router(jwks.router)
 app.include_router(user_snapshot.router)
 app.include_router(api_key_verify.router)
 app.include_router(acl.router)
+app.include_router(tenant_admins.router)
+app.include_router(sso_provisioning.router)
 app.include_router(api_router, prefix="/api")
 register_error_handlers(app)
 

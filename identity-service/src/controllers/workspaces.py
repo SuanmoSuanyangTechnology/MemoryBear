@@ -15,6 +15,7 @@ import uuid
 from collections.abc import Callable
 
 from fastapi import APIRouter, Depends, Header, Query, Request
+from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 
 from src.alert_metric_bridge import report_quota_change_sync
@@ -35,9 +36,14 @@ from src.models.workspace_model import InviteStatus, WorkspaceMember
 from src.schemas.response_schema import ApiResponse
 from src.schemas.workspace_schema import (
     WorkspaceCreate,
+    WorkspaceDefaultModelPresetResponse,
     WorkspaceInviteCreate,
     WorkspaceMemberItem,
     WorkspaceMemberUpdate,
+    WorkspaceModelOptionsResponse,
+    WorkspaceModelsResponse,
+    WorkspaceModelsUpdate,
+    WorkspaceModelsValidationResponse,
     WorkspaceResponse,
     WorkspaceRetentionPolicyResponse,
     WorkspaceRetentionPolicyUpdate,
@@ -48,7 +54,12 @@ from src.serializers import (
     WorkspaceMemberSerializer,
     WorkspaceSerializer,
 )
-from src.services import invite_service, quota, workspace_service
+from src.services import (
+    invite_service,
+    quota,
+    workspace_models_service,
+    workspace_service,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -487,3 +498,128 @@ def get_workspace_storage_type(
         data={"storage_type": storage_type},
         msg=t("workspace.storage.type_retrieved"),
     )
+
+
+@router.get("/default_models", response_model=ApiResponse)
+def get_default_workspace_models(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    language: str = Depends(get_request_language),
+):
+    """获取默认工作空间模型配置"""
+    logger.info("用户 %s 请求获取默认工作空间模型配置", current_user.username)
+    data = workspace_models_service.get_default_workspace_models(
+        db, actor=current_user, language=language
+    )
+    if not data:
+        return success(data={})
+    return success(data=WorkspaceDefaultModelPresetResponse.model_validate(data))
+
+
+@router.get("/model_options", response_model=ApiResponse)
+def get_workspace_model_options(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    language: str = Depends(get_request_language),
+):
+    """获取工作空间模型候选列表"""
+    logger.info("用户 %s 请求获取工作空间模型候选列表", current_user.username)
+    data = workspace_models_service.get_workspace_model_options(
+        actor=current_user, language=language
+    )
+    return success(data=WorkspaceModelOptionsResponse.model_validate(data))
+
+
+@router.get("/workspace_models", response_model=ApiResponse)
+@cur_workspace_access_guard()
+def workspace_models_configs(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    language: str = Depends(get_request_language),
+    t: Callable = Depends(get_translator),
+):
+    """获取当前工作空间的模型配置（llm, embedding, rerank）"""
+    workspace_id = current_user.current_workspace_id
+    logger.info(
+        "用户 %s 请求获取工作空间 %s 的模型配置", current_user.username, workspace_id
+    )
+
+    configs = workspace_models_service.get_workspace_models(
+        db, workspace_id=workspace_id, actor=current_user, locale=language
+    )
+    logger.info(
+        "成功获取工作空间 %s 的模型配置: llm=%s, embedding=%s, rerank=%s, "
+        "reembed_job_id=%s",
+        workspace_id,
+        configs.get("llm"),
+        configs.get("embedding"),
+        configs.get("rerank"),
+        configs.get("reembed_job_id"),
+    )
+    return success(
+        data=WorkspaceModelsResponse.model_validate(configs),
+        msg=t("workspace.models.config_retrieved"),
+    )
+
+
+@router.post("/workspace_models/validate", response_model=ApiResponse)
+@cur_workspace_access_guard()
+def validate_workspace_models_configs(
+    models_update: WorkspaceModelsUpdate | None = None,
+    language_type: str = Header(default="zh", alias="X-Language-Type"),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    t: Callable = Depends(get_translator),
+):
+    """校验当前工作空间模型配置"""
+    workspace_id = current_user.current_workspace_id
+    locale = get_language_from_header(language_type)
+    logger.info(
+        "用户 %s 请求校验工作空间 %s 的模型配置, language=%s",
+        current_user.username,
+        workspace_id,
+        locale,
+    )
+    result = workspace_models_service.validate_workspace_models(
+        db,
+        workspace_id=workspace_id,
+        actor=current_user,
+        models_update=models_update,
+        locale=locale,
+    )
+    return success(
+        data=WorkspaceModelsValidationResponse.model_validate(result),
+        msg=t("workspace.models.config_verified"),
+    )
+
+
+@router.put("/workspace_models", response_model=ApiResponse)
+@cur_workspace_access_guard()
+def update_workspace_models_configs(
+    models_update: WorkspaceModelsUpdate,
+    language_type: str = Header(default="zh", alias="X-Language-Type"),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """更新当前工作空间的模型配置（过渡期由老单体原子写，状态与体原样转发）"""
+    workspace_id = current_user.current_workspace_id
+    locale = get_language_from_header(language_type)
+    logger.info(
+        "用户 %s 请求更新工作空间 %s 的模型配置, language=%s",
+        current_user.username,
+        workspace_id,
+        locale,
+    )
+    status_code, body = workspace_models_service.update_workspace_models(
+        workspace_id=workspace_id,
+        actor=current_user,
+        models_update=models_update,
+        locale=locale,
+    )
+    logger.info(
+        "工作空间 %s 模型配置更新返回: status=%s, code=%s",
+        workspace_id,
+        status_code,
+        body.get("code"),
+    )
+    return JSONResponse(status_code=status_code, content=body)

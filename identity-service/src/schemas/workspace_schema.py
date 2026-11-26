@@ -142,3 +142,90 @@ class InviteValidateResponse(BaseModel):
 
 class InviteAcceptRequest(BaseModel):
     token: str = Field(..., description="邀请令牌")
+
+
+class WorkspaceModelsUpdate(BaseModel):
+    """工作空间模型配置更新请求（与老单体同形）。
+
+    ``model_fields_set`` is wire-significant: the host resolves the update
+    target from which slot keys the client actually sent, so the proxied
+    payload must preserve field presence (``exclude_unset=True``).
+    """
+
+    is_default_config: bool | None = Field(default=None, description="是否使用默认配置")
+    llm: uuid.UUID | None = Field(default=None, description="LLM模型ID")
+    embedding: uuid.UUID | None = Field(default=None, description="嵌入模型ID")
+    rerank: uuid.UUID | None = Field(default=None, description="重排序模型ID")
+    vision: uuid.UUID | None = Field(default=None, description="视觉模型")
+    audio: uuid.UUID | None = Field(default=None, description="音频模型")
+    video: uuid.UUID | None = Field(default=None, description="视频模型")
+
+
+class WorkspaceModelsConfig(BaseModel):
+    """工作空间模型配置响应"""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    llm: str | None = Field(default=None, description="LLM模型ID")
+    embedding: str | None = Field(default=None, description="嵌入模型ID")
+    rerank: str | None = Field(default=None, description="重排序模型ID")
+    vision: str | None = Field(default=None, description="视觉模型")
+    audio: str | None = Field(default=None, description="音频模型")
+    video: str | None = Field(default=None, description="视频模型")
+    is_default_config: bool = Field(default=False, description="是否使用默认配置")
+    default_config_updated: bool = Field(default=False, description="默认配置是否已更新")
+    default_config_notice: str | None = Field(default=None, description="默认配置更新提示")
+
+
+class WorkspaceModelsResponse(WorkspaceModelsConfig):
+    """模型配置 + embedding 切换状态（``reembed_job_id``）"""
+
+    reembed_job_id: str | None = Field(
+        default=None,
+        description=(
+            "正在切换 embedding 模型时的存量记忆向量重算任务 id，"
+            "null 表示未在切换；可拿去查 "
+            "GET /api/workspaces/workspace_reembed/{job_id} 的进度"
+        ),
+    )
+
+
+class WorkspaceModelOptionItem(BaseModel):
+    """候选/默认模型条目（契约 v2 三列能力载体）。"""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    name: str
+    provider: str
+    type: str
+    input_modalities: list[str] = Field(default_factory=list)
+    output_modalities: list[str] = Field(default_factory=list)
+    features: list[str] = Field(default_factory=list)
+    logo: str | None = None
+    is_public: bool = False
+    is_deprecated: bool = False
+
+
+class WorkspaceDefaultModelPresetResponse(BaseModel):
+    llm: WorkspaceModelOptionItem
+    embedding: WorkspaceModelOptionItem
+    rerank: WorkspaceModelOptionItem
+    vision: WorkspaceModelOptionItem
+    audio: WorkspaceModelOptionItem
+    video: WorkspaceModelOptionItem
+
+
+class WorkspaceModelOptionsResponse(BaseModel):
+    llm: list[WorkspaceModelOptionItem]
+    embedding: list[WorkspaceModelOptionItem]
+    rerank: list[WorkspaceModelOptionItem]
+    vision: list[WorkspaceModelOptionItem]
+    audio: list[WorkspaceModelOptionItem]
+    video: list[WorkspaceModelOptionItem]
+
+
+class WorkspaceModelsValidationResponse(BaseModel):
+    workspace: WorkspaceModelsConfig
+    valid: bool = Field(default=True, description="当前模型配置是否可用")
+    warnings: list[dict] = Field(default_factory=list, description="模型校验告警")

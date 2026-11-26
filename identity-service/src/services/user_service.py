@@ -23,7 +23,7 @@ from src.core.exceptions import BusinessException, PermissionDeniedException
 from src.core.permissions import Action, Resource, Subject, permission_service
 from src.core.security import get_password_hash, verify_password
 from src.i18n import translate
-from src.invalidation_notify import notify_user_sync
+from src.invalidation_notify import notify_tenant_sync, notify_user_sync
 from src.models.user_model import User
 from src.models.workspace_model import Workspace
 from src.redis import get_thread_safe_sync_redis
@@ -385,6 +385,162 @@ def get_tenant_superusers(
             f"获取租户超管列表失败: tenant_id={current_user.tenant_id} - {exc}",
             code=BizCode.DB_ERROR,
         ) from exc
+
+
+def email_exists(db: Session, email: str) -> bool:
+    """Global email lookup used by the ops tenant-create pre-check."""
+
+    return management.get_user_by_email(db, email) is not None
+
+
+def list_tenant_admins(db: Session, tenant_id: uuid.UUID) -> list[User] | None:
+    """Tenant superusers; ``None`` when the tenant does not exist."""
+
+    if management.get_tenant_by_id(db, tenant_id) is None:
+        return None
+    return management.get_tenant_admins(db, tenant_id)
+
+
+def list_tenant_users(
+    db: Session,
+    tenant_id: uuid.UUID,
+    *,
+    page: int,
+    size: int,
+    is_active: bool | None = None,
+    is_superuser: bool | None = None,
+) -> tuple[list[User], int] | None:
+    """One filtered page of tenant users; ``None`` when the tenant is unknown."""
+
+    if management.get_tenant_by_id(db, tenant_id) is None:
+        return None
+    return management.get_tenant_users_page(
+        db,
+        tenant_id,
+        page=page,
+        size=size,
+        is_active=is_active,
+        is_superuser=is_superuser,
+    )
+
+
+def _unique_username(db: Session, base: str) -> str:
+    """First free ``base`` / ``base_<n>`` in one lookup (global unique column)."""
+
+    existing = management.get_usernames_with_prefix(db, base)
+    if base not in existing:
+        return base
+    suffix = 1
+    while f"{base}_{suffix}" in existing:
+        suffix += 1
+    return f"{base}_{suffix}"
+
+
+def create_tenant_admin(
+    db: Session,
+    tenant_id: uuid.UUID,
+    *,
+    email: str,
+    username: str | None = None,
+    password: str | None = None,
+    preferred_language: str = "zh",
+) -> tuple[User, str] | None:
+    """Provision one tenant superuser; ``None`` when the tenant is unknown."""
+
+    if management.get_tenant_by_id(db, tenant_id) is None:
+        return None
+    if management.get_user_by_email(db, email) is not None:
+        raise BusinessException(
+            "邮箱已注册",
+            code=BizCode.USER_EMAIL_ALREADY_EXISTS,
+            context={"email": email, "tenant_id": str(tenant_id)},
+        )
+
+    base = (username or email.split("@")[0]).strip() or email.split("@")[0]
+    initial_password = password or generate_random_password()
+    try:
+        admin = management.create_user_row(
+            db,
+            username=_unique_username(db, base),
+            email=email,
+            hashed_password=get_password_hash(initial_password),
+            tenant_id=tenant_id,
+            is_superuser=True,
+            preferred_language=preferred_language,
+        )
+        db.commit()
+        db.refresh(admin)
+    except BusinessException:
+        db.rollback()
+        raise
+    except Exception as exc:
+        logger.error("创建租户管理员失败: tenant_id=%s - %s", tenant_id, exc)
+        db.rollback()
+        raise BusinessException(
+            f"创建租户管理员失败: {exc}",
+            code=BizCode.DB_ERROR,
+            context={"tenant_id": str(tenant_id), "email": email},
+            cause=exc,
+        ) from exc
+    notify_user_sync(str(admin.id))
+    return admin, initial_password
+
+
+def remove_tenant_admin(
+    db: Session, tenant_id: uuid.UUID, user_id: uuid.UUID
+) -> bool:
+    """Soft-deactivate one tenant admin; ``False`` when the tenant is unknown."""
+
+    if management.get_tenant_by_id(db, tenant_id) is None:
+        return False
+    admin = management.get_tenant_admin(db, tenant_id, user_id)
+    if admin is None:
+        raise BusinessException("管理员不存在", code=BizCode.NOT_FOUND)
+    if management.count_active_admins_excluding(db, tenant_id, user_id) == 0:
+        raise BusinessException("无法移除最后一个管理员", code=BizCode.STATE_CONFLICT)
+    try:
+        admin.is_active = False
+        db.commit()
+    except BusinessException:
+        db.rollback()
+        raise
+    except Exception as exc:
+        logger.error("移除租户管理员失败: user_id=%s - %s", user_id, exc)
+        db.rollback()
+        raise BusinessException(
+            f"移除租户管理员失败: {exc}", code=BizCode.DB_ERROR
+        ) from exc
+    notify_user_sync(str(user_id))
+    return True
+
+
+def set_tenant_users_active(
+    db: Session, tenant_id: uuid.UUID, is_active: bool
+) -> int | None:
+    """Bulk user activation for one tenant; ``None`` when the tenant is unknown.
+
+    Disabling deletes every tenant user snapshot without rebuilding (the
+    subscriber's tenant branch); enabling must rebuild per user because both
+    the subscriber and the reconcile loop are delete-only for this path.
+    """
+
+    if management.get_tenant_by_id(db, tenant_id) is None:
+        return None
+    try:
+        user_ids = management.set_tenant_users_active(db, tenant_id, is_active)
+        db.commit()
+    except Exception as exc:
+        logger.error("批量更新租户用户状态失败: tenant_id=%s - %s", tenant_id, exc)
+        db.rollback()
+        raise BusinessException(
+            f"批量更新租户用户状态失败: {exc}", code=BizCode.DB_ERROR
+        ) from exc
+    if is_active:
+        for user_id in user_ids:
+            notify_user_sync(str(user_id))
+    else:
+        notify_tenant_sync(str(tenant_id))
+    return len(user_ids)
 
 
 def change_password(
