@@ -141,6 +141,7 @@ export const home = {
       resources: '资源中心',
       communityMarket: '社区市场',
       personalityAnchor: '人格锚定引擎',
+      spatiotemporalEngine: '时空维度记忆锚定引擎',
     },
     dashboard: {
       activityTotal: '记忆活动总量',
