@@ -1016,10 +1016,9 @@ class AppService:
     ) -> None:
         """Write the app-ontology binding within the current transaction (no commit).
 
-        Only the in-process binder writes here; the remote (callback) binder is
-        invoked after the local commit by ``_bind_ontology_remote``. In the
-        community edition without any binder the input is ignored with a
-        warning (ontology module unavailable).
+        Only an in-process binder writes here. The memory-enterprise binder is
+        invoked after the local commit by ``_bind_ontology_remote``. Community
+        builds without an enterprise binder ignore the enterprise-only field.
         """
         binder = get_plugin(ONTOLOGY_BINDING_PLUGIN)
         if binder is None or not getattr(binder, "uses_local_db", True):
@@ -1039,10 +1038,10 @@ class AppService:
             tenant_id: uuid.UUID | None,
             ontology_id: uuid.UUID,
     ) -> None:
-        """Bind after the local commit; soft-delete the app when the callback fails.
+        """Bind after the local commit; soft-delete the app when memory-enterprise fails.
 
-        The monolith business code is passed through to the client (validation
-        codes like 4000/3001); transport failures surface as 10003.
+        The memory-enterprise business code is passed through to the client
+        (validation codes like 4000/3001); transport failures surface as 10003.
         """
         try:
             binder.bind_app(app.id, tenant_id, ontology_id)
@@ -1138,6 +1137,15 @@ class AppService:
         app = self._get_app_or_404(app_id)
         self._validate_workspace_access(app, workspace_id)
 
+        # memory-enterprise requires the tenant when removing the binding.
+        binder = get_plugin(ONTOLOGY_BINDING_PLUGIN)
+        remote_unbind = binder is not None and not getattr(binder, "uses_local_db", True)
+        unbind_tenant_id = None
+        if remote_unbind:
+            unbind_tenant_id = cross_domain_read.get_workspace_tenant_id(self.db, app.workspace_id)
+            if unbind_tenant_id is None:
+                raise BusinessException("应用所属工作空间不存在", BizCode.NOT_FOUND)
+
         # Soft-delete the app
         app.is_active = False
 
@@ -1197,18 +1205,13 @@ class AppService:
             .returning(ToolConfig.id)
         ).all())
 
-        # Bindings belong to the memory domain: only the remote callback binder
-        # can unbind them, after the local commit (no remote call inside a
-        # transaction). The in-process binder lives in the monolith and runs its
-        # own delete path, so this service never sees one.
-        binder = get_plugin(ONTOLOGY_BINDING_PLUGIN)
-        remote_unbind = binder is not None and not getattr(binder, "uses_local_db", True)
-
+        # Bindings belong to memory-enterprise. Unbind after the local commit so
+        # the HTTP call never runs inside a database transaction.
         self.db.commit()
 
         if remote_unbind:
             self._unbind_ontology_remote(
-                binder, app, share_ids, installation_ids, workflow_tool_ids
+                binder, app, share_ids, installation_ids, workflow_tool_ids, unbind_tenant_id
             )
 
         logger.info(
@@ -1227,6 +1230,7 @@ class AppService:
             share_ids: list[uuid.UUID],
             installation_ids: list[uuid.UUID],
             workflow_tool_ids: list[uuid.UUID],
+            tenant_id: uuid.UUID,
     ) -> None:
         """Unbind after the local commit; restore the app when the callback fails.
 
@@ -1237,7 +1241,7 @@ class AppService:
         the caller as a whole-delete failure it can retry.
         """
         try:
-            binder.unbind_app(app.id)
+            binder.unbind_app(app.id, tenant_id)
         except OntologyUpstreamError as exc:
             self._compensate_failed_delete(
                 app, share_ids, installation_ids, workflow_tool_ids

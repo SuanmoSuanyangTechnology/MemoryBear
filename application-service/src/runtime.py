@@ -7,7 +7,7 @@ import asyncio
 from .config import AppServiceSettings
 from .db import DatabaseManager
 from .infrastructure import RedisManager
-from .infrastructure.upstream import MonolithUpstream
+from .infrastructure.upstream import MemoryEnterpriseUpstream, MonolithUpstream
 from .integrations.memory_profile import MemoryProfileClient
 from .protocols.market_gateway import DisabledMarketGateway, MarketGateway
 from .services.readiness import ReadinessMonitor
@@ -23,22 +23,31 @@ class ProcessRuntime:
         self.readiness = ReadinessMonitor(settings)
         self.upstream = MonolithUpstream.from_settings(settings)
         self.memory_profile = MemoryProfileClient.from_settings(settings)
+        self.memory_enterprise = (
+            MemoryEnterpriseUpstream.from_settings(settings)
+            if settings.memory_enterprise_base_url else None
+        )
         self.market_gateway: MarketGateway = DisabledMarketGateway()
 
     def _close_sync_resources(self) -> None:
         self.memory_profile.close()
         self.upstream.close()
+        if self.memory_enterprise is not None:
+            self.memory_enterprise.close()
         self.redis.close_sync()
         self.database.close_sync()
 
     async def aclose(self) -> None:
         errors: list[Exception] = []
-        for close in (
+        async_closers = [
             self.redis.aclose,
             self.database.aclose_async,
             self.upstream.aclose,
             self.memory_profile.aclose,
-        ):
+        ]
+        if self.memory_enterprise is not None:
+            async_closers.append(self.memory_enterprise.aclose)
+        for close in async_closers:
             try:
                 await close()
             except Exception as exc:

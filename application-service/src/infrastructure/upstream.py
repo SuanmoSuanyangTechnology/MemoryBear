@@ -45,6 +45,8 @@ class MonolithUpstream:
     the identity advisory lock), and holding the same lock here would deadlock.
     """
 
+    credential_header = CALLBACK_SECRET_HEADER
+
     def __init__(
         self,
         base_url: str,
@@ -77,7 +79,7 @@ class MonolithUpstream:
                 base_url=self._base_url,
                 timeout=httpx.Timeout(self._timeout_seconds),
                 transport=self._transport,
-                headers={CALLBACK_SECRET_HEADER: self._callback_secret},
+                headers={self.credential_header: self._callback_secret},
             )
         return self._client
 
@@ -87,7 +89,7 @@ class MonolithUpstream:
                 base_url=self._base_url,
                 timeout=httpx.Timeout(self._timeout_seconds),
                 transport=self._transport,
-                headers={CALLBACK_SECRET_HEADER: self._callback_secret},
+                headers={self.credential_header: self._callback_secret},
             )
         return self._async_client
 
@@ -104,7 +106,7 @@ class MonolithUpstream:
         try:
             response = self._get_client().request(method, path, json=json_body, headers=headers)
         except httpx.HTTPError as error:
-            raise UpstreamUnavailableError(f"forward to monolith failed: {error}") from error
+            raise UpstreamUnavailableError(f"forward to upstream failed: {error}") from error
         return _to_upstream_response(response)
 
     async def forward_async(
@@ -122,7 +124,7 @@ class MonolithUpstream:
                 method, path, json=json_body, headers=headers
             )
         except httpx.HTTPError as error:
-            raise UpstreamUnavailableError(f"forward to monolith failed: {error}") from error
+            raise UpstreamUnavailableError(f"forward to upstream failed: {error}") from error
         return _to_upstream_response(response)
 
     def close(self) -> None:
@@ -134,6 +136,20 @@ class MonolithUpstream:
         if self._async_client is not None:
             await self._async_client.aclose()
             self._async_client = None
+
+
+class MemoryEnterpriseUpstream(MonolithUpstream):
+    """Direct application-to-memory transport using the scoped internal token."""
+
+    credential_header = "X-Internal-Token"
+
+    @classmethod
+    def from_settings(cls, settings: AppServiceSettings) -> MemoryEnterpriseUpstream:
+        return cls(
+            base_url=settings.memory_enterprise_base_url or "",
+            callback_secret=settings.memory_enterprise_application_service_token.get_secret_value(),
+            timeout_seconds=settings.application_service_upstream_timeout_seconds,
+        )
 
 
 def _to_upstream_response(response: httpx.Response) -> UpstreamResponse:
@@ -156,6 +172,7 @@ def get_monolith_upstream() -> MonolithUpstream | None:
 
 
 __all__ = [
+    "MemoryEnterpriseUpstream",
     "MonolithUpstream",
     "UpstreamResponse",
     "UpstreamUnavailableError",
