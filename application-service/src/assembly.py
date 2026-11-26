@@ -53,9 +53,7 @@ def register_enterprise_plugins(runtime: ProcessRuntime) -> None:
     except ImportError:
         return
     register_app_plugins(
-        runtime.upstream,
-        memory_enterprise=runtime.memory_enterprise,
-        deployment_mode=runtime.settings.deployment_mode,
+        runtime.upstream, deployment_mode=runtime.settings.deployment_mode
     )
 
 

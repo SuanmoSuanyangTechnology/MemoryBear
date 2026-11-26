@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from typing import Any, Literal
-from urllib.parse import quote_plus, urlparse
+from urllib.parse import quote_plus
 
 from pydantic import AliasChoices, Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, PydanticBaseSettingsSource, SettingsConfigDict
@@ -433,12 +433,6 @@ class AppServiceSettings(BaseSettings):
     memory_profile_write_timeout_seconds: float = Field(
         default=600.0, gt=0, validation_alias="MEMORY_PROFILE_WRITE_TIMEOUT_SECONDS"
     )
-    memory_enterprise_base_url: str | None = Field(
-        default=None, validation_alias="MEMORY_ENTERPRISE_BASE_URL"
-    )
-    memory_enterprise_application_service_token: SecretStr = Field(
-        default=SecretStr(""), validation_alias="MEMORY_ENTERPRISE_APPLICATION_SERVICE_TOKEN"
-    )
     # East-west direct dependency on model-service (annotation embeddings),
     # never routed through the gateway; same env name as the monolith's
     # outbound knob. Unset or unreachable degrades annotation writes to a
@@ -791,31 +785,6 @@ class AppServiceSettings(BaseSettings):
             raise ValueError(
                 "MODEL_SERVICE_INVOKE_GRPC_MARGIN_SECONDS must be smaller than "
                 "MODEL_SERVICE_INVOKE_MEDIA_CALL_BUDGET_SECONDS"
-            )
-        return self
-    @field_validator("memory_enterprise_base_url")
-    @classmethod
-    def validate_memory_enterprise_base_url(cls, value: str | None) -> str | None:
-        if value is None:
-            return None
-        normalized = value.strip().rstrip("/")
-        if not normalized:
-            return None
-        parsed = urlparse(normalized)
-        if parsed.scheme not in {"http", "https"} or not parsed.netloc:
-            raise ValueError("MEMORY_ENTERPRISE_BASE_URL must be an absolute HTTP(S) origin")
-        if parsed.path or parsed.params or parsed.query or parsed.fragment:
-            raise ValueError("MEMORY_ENTERPRISE_BASE_URL must not contain a path or query")
-        return normalized
-
-    @model_validator(mode="after")
-    def check_memory_enterprise_settings(self) -> AppServiceSettings:
-        if not self.memory_enterprise_base_url:
-            return self
-        if not self.memory_enterprise_application_service_token.get_secret_value().strip():
-            raise ValueError(
-                "MEMORY_ENTERPRISE_APPLICATION_SERVICE_TOKEN must be set when "
-                "MEMORY_ENTERPRISE_BASE_URL is configured"
             )
         return self
 

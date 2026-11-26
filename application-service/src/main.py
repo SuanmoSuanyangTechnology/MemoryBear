@@ -25,7 +25,6 @@ from .integrations.sandbox.runtime import (
     close_sandbox_integration,
     initialize_sandbox_integration,
 )
-from .protocols.market_gateway import DisabledMarketGateway, MarketGateway
 from .request_logging import RequestLoggingFastAPI
 from .runtime import ProcessRuntime
 from .services.batch_persist_queue import BatchPersistQueue
@@ -41,53 +40,6 @@ _LEGACY_ERROR_RESPONSES = {
     }
     for status_code in (400, 401, 404, 409, 422, 500)
 }
-
-
-def _register_enterprise_market() -> None:
-    """Register the community market's enterprise implementation.
-
-    Must run **before** ``ProcessRuntime`` is constructed: the market gateway is
-    resolved from the plugin registry by name (``MARKET_GATEWAY_FACTORY``), and
-    `http` mode without it is a startup error rather than a per-request 500.
-    Open-source builds cannot install the package, so the import failure is
-    expected and leaves the registry empty (switch 3 then fails closed with 6020).
-    """
-    try:
-        from enterprise_ext.app import register_app_market
-    except ImportError:
-        return
-    register_app_market()
-
-
-def _register_enterprise_plugins(runtime: ProcessRuntime) -> None:
-    """Register enterprise plugins when the private package is installed.
-
-    Open-source builds cannot install enterprise-extensions, so the import
-    failure is expected and leaves the community plugin registry empty.
-    """
-    try:
-        from enterprise_ext.app import register_app_plugins
-    except ImportError:
-        return
-    register_app_plugins(
-        runtime.upstream,
-        memory_enterprise=runtime.memory_enterprise,
-        deployment_mode=runtime.settings.deployment_mode,
-    )
-
-
-def load_market_gateway(runtime: ProcessRuntime) -> MarketGateway:
-    settings = runtime.settings
-    if settings.application_service_market_mode == "disabled":
-        return DisabledMarketGateway()
-    try:
-        from enterprise_ext.app_market import build_market_gateway
-    except ImportError as exc:
-        raise RuntimeError(
-            "APPLICATION_SERVICE_MARKET_MODE=gateway requires the private "
-            "'enterprise-extensions' package (not installed in open-source builds)"
-        ) from exc
-    return build_market_gateway(settings)
 
 
 def _seed_categories(runtime: ProcessRuntime) -> None:
