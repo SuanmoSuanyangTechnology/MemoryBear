@@ -1,9 +1,13 @@
-"""社区版工作空间容量检查。"""
+"""知识库写入前的工作空间容量检查。"""
 
+import asyncio
+import logging
 from decimal import Decimal
+from uuid import UUID
 
 from sqlalchemy import func, select
-from sqlalchemy.exc import OperationalError
+from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.requests import Request
 
 from ..errors import KnowledgeError
@@ -15,6 +19,7 @@ from .dependencies import Principal, is_manager_request
 
 # 兼容老单体 API 的 GB 口径。
 _BYTES_PER_GB = 1024 ** 3
+logger = logging.getLogger(__name__)
 
 
 class WorkspaceCapacityExceeded(Exception):
@@ -24,19 +29,23 @@ class WorkspaceCapacityExceeded(Exception):
         self.limit_gb = limit_gb
 
 
+async def _enterprise_capacity_limit(db: AsyncSession, tenant_id: UUID) -> Decimal | None:
+    from enterprise_ext.knowledge_capacity import get_capacity_limit_gb
+
+    return await get_capacity_limit_gb(db, tenant_id)
+
+
 async def check_workspace_capacity(
     request: Request,
     runtime: ProcessRuntime,
     principal: Principal,
 ) -> None:
+    if not is_manager_request(request):
+        return
     settings = runtime.settings
-    limit_gb = settings.knowledge_capacity_quota_gb
-    if (
-        limit_gb is None
-        or settings.deployment_mode.strip().lower() != "community"
-        or settings.kb_auth_mode != "direct"
-        or not is_manager_request(request)
-    ):
+    mode = settings.deployment_mode.strip().lower()
+    limit_gb = settings.knowledge_capacity_quota_gb if mode == "community" else None
+    if mode != "enterprise" and limit_gb is None:
         return
 
     stmt = (
@@ -51,9 +60,17 @@ async def check_workspace_capacity(
     )
     try:
         async with runtime.database.async_session() as db:
+            if mode == "enterprise":
+                async with asyncio.timeout(2.0):
+                    limit_gb = await _enterprise_capacity_limit(db, principal.tenant_id)
+            if limit_gb is None:
+                return
             used_bytes = await db.scalar(stmt)
-    except OperationalError as exc:
-        raise KnowledgeError.from_code("KB_DATABASE_UNAVAILABLE") from exc
+    except (ImportError, SQLAlchemyError, TimeoutError, ArithmeticError, ValueError) as exc:
+        logger.warning("知识库额度检查失败，模式=%s，类型=%s", mode, type(exc).__name__)
+        raise KnowledgeError.from_code(
+            "KB_DATABASE_UNAVAILABLE", status_code=503 if mode == "enterprise" else None,
+        ) from exc
 
     used_gb = Decimal(used_bytes or 0) / _BYTES_PER_GB
     if used_gb >= limit_gb:
