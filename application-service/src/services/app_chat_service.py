@@ -38,6 +38,7 @@ from ..integrations.knowledge.contracts import KnowledgeRetrievalSource
 from ..integrations.model.errors import ModelInvokeCancelledError
 from ..memory.emotion.emotion_resolver import (
     apply_detection as apply_emotion_detection,
+    cancel_detection as cancel_emotion_detection,
 )
 from ..memory.emotion.emotion_resolver import (
     start_detection as start_emotion_detection,
@@ -501,6 +502,40 @@ class AppChatService:
         except Exception as e:
             logger.warning(f"Failed to release DB connection: {e}")
 
+    async def _persist_non_streaming_failure(
+            self,
+            exc: Exception,
+            *,
+            conversation_id: uuid.UUID,
+            user_message_id: uuid.UUID,
+            message_id: uuid.UUID,
+            message: str,
+            start_time: float,
+            execution_id: uuid.UUID | None = None,
+    ) -> None:
+        try:
+            from .batch_persist_queue import persist_failed_chat_turn
+
+            trace_id = get_trace_id()
+            error = error_payload(exc, locale=get_current_locale(), trace_id=trace_id)
+            await self._release_db_connection()
+            await persist_failed_chat_turn(
+                conversation_id=conversation_id,
+                user_message_id=user_message_id,
+                message_id=message_id,
+                message=message,
+                error_code=error["code"],
+                error_message=error["msg"],
+                trace_id=trace_id,
+                started_at=parse_timestamp_to_utc_naive(start_time),
+                execution_id=execution_id,
+            )
+        except Exception:
+            logger.exception(
+                "Failed to persist non-streaming chat turn",
+                extra={"conversation_id": str(conversation_id), "message_id": str(message_id)},
+            )
+
     @staticmethod
     def _append_history_message(
             history: Optional[List[dict]],
@@ -814,23 +849,30 @@ class AppChatService:
         # Resolve model config id
         model_config_id = config.default_model_config_id
         tenant_id = await self._resolve_tenant_id_async(workspace_id)
-        api_key_obj = await ModelApiKeyService.resolve_runtime_api_key_bridge_or_raise_async(
-            self.db,
-            model_config_id,
-            tenant_id=tenant_id,
-        )
-        if not api_key_obj:
-            await ModelConfigService.raise_model_unavailable_bridge_async(
-                self.db, model_config_id, tenant_id=tenant_id
+        try:
+            api_key_obj = await ModelApiKeyService.resolve_runtime_api_key_bridge_or_raise_async(
+                self.db, model_config_id, tenant_id=tenant_id,
             )
-        # Remote mode: the non-decrypted view feeds the invoke seam and
-        # multimodal formatting; credentials on the key object still serve
-        # sandbox / usage consumers.
-        model_view = await ModelConfigService.get_runtime_model_view_bridge_async(
-            self.db,
-            model_config_id,
-            tenant_id=tenant_id,
-        )
+            if not api_key_obj:
+                await ModelConfigService.raise_model_unavailable_bridge_async(
+                    self.db, model_config_id, tenant_id=tenant_id,
+                )
+            # The non-decrypted model view feeds invoke and multimodal formatting.
+            model_view = await ModelConfigService.get_runtime_model_view_bridge_async(
+                self.db, model_config_id, tenant_id=tenant_id,
+            )
+        except BusinessException as exc:
+            cancel_emotion_detection(emotion_detection)
+            if not skip_save:
+                await self._persist_non_streaming_failure(
+                    exc,
+                    conversation_id=conversation_id,
+                    user_message_id=user_message_id,
+                    message_id=message_id,
+                    message=message,
+                    start_time=start_time,
+                )
+            raise
         # Render the system prompt (variable substitution supported)
         system_prompt = config.system_prompt
         if variables:
@@ -1073,6 +1115,9 @@ class AppChatService:
         except Exception as e:
             # Agent failed: mark the execution record failed
             elapsed_time = time.time() - start_time
+            failure_payload = error_payload(
+                e, locale=get_current_locale(), trace_id=get_trace_id()
+            )
             await self._update_agent_execution(
                 agent_exec_repo,
                 execution_id=agent_execution_id,
@@ -1081,6 +1126,23 @@ class AppChatService:
                 elapsed_time=elapsed_time,
                 error_message=str(e)[:2000],
             )
+            if not skip_save:
+                try:
+                    from .batch_persist_queue import BatchPersistQueue, PersistTask
+                    await BatchPersistQueue.enqueue(PersistTask(
+                        task_type="save_failed_message",
+                        args={
+                            "conversation_id": str(conversation_id),
+                            "user_message_id": str(user_message_id),
+                            "message_id": str(message_id),
+                            "user_message_content": message,
+                            "files_meta": [],
+                            "error_message": failure_payload["msg"],
+                            "error_detail": str(e)[:2000],
+                        },
+                    ))
+                except Exception:
+                    pass
             raise
 
         await self._record_api_key_usage(api_key_obj.id)
@@ -2020,35 +2082,41 @@ class AppChatService:
                 "elapsed_time": time.time() - start_time,
             }
 
-        # 2. Create the orchestrator
-        orchestrator = await MultiAgentOrchestrator.create(self.db, config)
-
-        # New-conversation opening statement (queries only when
-        # features.opening_statement is on; legacy clusters have empty features,
-        # zero cost)
-        opening_statement, opening_suggested_questions = await self._resolve_cluster_opening(
-            orchestrator, conversation_id, variables
-        )
-
-        # 3. Execute the task
-        result = await orchestrator.execute(
-            message=message,
-            conversation_id=conversation_id,
-            user_id=user_id,
-            variables=variables,
-            use_llm_routing=True,  # LLM routing enabled by default
-            web_search=web_search,  # web search switch
-            memory=memory,  # memory switch
-            # S5: these two arguments used to be dropped on the non-streaming
-            # entry (collaboration mode therefore lost storage/memory context)
-            storage_type=storage_type,
-            user_rag_memory_id=user_rag_memory_id,
-            message_id=message_id,
-            thinking=thinking,
-            opening_statement=opening_statement,
-            files=files or None,  # attachments (absent/empty = previous behavior)
-            user_message_id=user_message_id,  # emotion cache key (features.emotion_reply only)
-        )
+        orchestrator = None
+        try:
+            orchestrator = await MultiAgentOrchestrator.create(self.db, config)
+            opening_statement, opening_suggested_questions = await self._resolve_cluster_opening(
+                orchestrator, conversation_id, variables
+            )
+            result = await orchestrator.execute(
+                message=message,
+                conversation_id=conversation_id,
+                user_id=user_id,
+                variables=variables,
+                use_llm_routing=True,
+                web_search=web_search,
+                memory=memory,
+                storage_type=storage_type,
+                user_rag_memory_id=user_rag_memory_id,
+                message_id=message_id,
+                thinking=thinking,
+                opening_statement=opening_statement,
+                files=files or None,
+                user_message_id=user_message_id,
+            )
+        except ModelInvokeCancelledError:
+            raise
+        except Exception as exc:
+            await self._persist_non_streaming_failure(
+                exc,
+                conversation_id=conversation_id,
+                user_message_id=user_message_id,
+                message_id=message_id,
+                message=message,
+                start_time=start_time,
+                execution_id=getattr(orchestrator, "current_execution_id", None),
+            )
+            raise
 
         elapsed_time = time.time() - start_time
 
@@ -2249,6 +2317,14 @@ class AppChatService:
 
             full_content = ""
             total_tokens = 0
+            # The orchestrator catches exceptions internally and only emits an
+            # error frame: record the unified frame so this turn persists as
+            # failed (content=user-facing msg, meta.error=diagnostic) instead
+            # of an empty completed assistant row.
+            _stream_failure: Optional[Dict[str, Any]] = None
+            # Agent-owned error frames are remembered separately; they only
+            # escalate to a failed turn when the main bubble has no body at all.
+            _last_error_frame: Optional[Dict[str, Any]] = None
             # Conversation-capability extras (suggested questions / citations /
             # audio) carried by the end event; empty when features are off
             end_extras: Dict[str, Any] = {}
@@ -2316,6 +2392,13 @@ class AppChatService:
                 if event.startswith("event:"):
                     _event_name = event[6:].split("\n", 1)[0].strip()
 
+                # This layer already emits the unified start frame (with
+                # conversation_id/message_id/user_message_id; the annotation-hit
+                # branch has only that one). The orchestrator start adds only
+                # `mode`; forwarding it would hand the client two start frames.
+                if _event_name == "start":
+                    continue
+
                 if _event_name == "end" and "data:" in event:
                     try:
                         data_line = event.split("data: ", 1)[1].strip()
@@ -2328,6 +2411,27 @@ class AppChatService:
                                 end_extras[_k] = data[_k]
                     except Exception:
                         pass
+
+                if _event_name == "error" and "data:" in event:
+                    try:
+                        _error_payload = json.loads(event.split("data: ", 1)[1].strip())
+                    except Exception:
+                        _error_payload = None
+                    # Agent-owned error frames only mark the sub-agent block
+                    # failed (same rule as the frontend's hasAgentOwner); the
+                    # turn may still end normally. Only a cluster-level error
+                    # (no ownership keys) marks this turn failed.
+                    if _error_payload is not None:
+                        if any(
+                            _k in _error_payload
+                            for _k in (
+                                "execution_id", "parent_execution_id",
+                                "orchestration_mode", "agent_id", "agent_name",
+                            )
+                        ):
+                            _last_error_frame = _error_payload
+                        else:
+                            _stream_failure = _error_payload
 
                 if _event_name == "end":
                     held_end_event = event
@@ -2353,6 +2457,24 @@ class AppChatService:
                         pass
 
             elapsed_time = time.time() - start_time
+
+            # A sub-agent failed and the turn produced no main-bubble body at
+            # all (e.g. the first collaboration agent errored): persist the
+            # empty turn as failed with the error frame's msg as content.
+            if (
+                _stream_failure is None
+                and _last_error_frame is not None
+                and not full_content.strip()
+            ):
+                _stream_failure = _last_error_frame
+
+            if _stream_failure is not None:
+                from error_core.messages import user_message
+                full_content = (
+                    _stream_failure.get("msg")
+                    or user_message(BizCode.INTERNAL_ERROR.value, get_current_locale())
+                    or "服务内部错误，请稍后重试"
+                )
 
             # Enqueue async batch persist
             # S3 persistence convergence: this entry (the app-orchestration
@@ -2391,6 +2513,11 @@ class AppChatService:
                 ),
                 "should_memorize": orchestrator.cluster_memory_enabled(),
             }
+            if _stream_failure is not None:
+                # content=msg, meta.error=diagnostic — same contract as Agent
+                # and workflow failed turns.
+                _result.assistant_meta["error"] = _stream_failure.get("error") or ""
+                _persist_args["assistant_status"] = "failed"
             # This turn's variable values persist with the user message so
             # regeneration can read them back (no key when empty: legacy unchanged)
             if variables:
@@ -2476,6 +2603,9 @@ class AppChatService:
             )
         except Exception as e:
             logger.error(f"多 Agent 流式聊天失败: {str(e)}", exc_info=True)
+            failure_payload = error_payload(
+                e, locale=get_current_locale(), trace_id=get_trace_id()
+            )
             # Once save_messages is enqueued, do not enqueue
             # save_failed_message — the identical message_id would collide on
             # the messages primary key.
@@ -2490,16 +2620,14 @@ class AppChatService:
                             "message_id": str(message_id) if 'message_id' in locals() else str(uuid.uuid4()),
                             "user_message_content": message if 'message' in locals() else "",
                             "files_meta": [],
-                            "error_message": "An error occurred during generation.",
+                            "error_message": failure_payload["msg"],
                             "error_detail": str(e)[:2000],
                         },
                     ))
                 except Exception:
                     pass
             # Emit the error event
-            yield error_frame(error_payload(
-                e, locale=get_current_locale(), trace_id=get_trace_id()
-            ))
+            yield error_frame(failure_payload)
 
     async def workflow_chat(
             self,

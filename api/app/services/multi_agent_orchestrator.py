@@ -21,6 +21,7 @@ from app.core.exceptions import BusinessException, ResourceNotFoundException
 from app.core.error_codes import BizCode
 from app.core.logging_config import get_business_logger
 from app.core.utils.datetime_utils import utcnow_naive
+from app.core.workflow.error_info import workflow_error_info
 from app.repositories.tool_repository import ToolRepository
 from app.services.model_service import ModelApiKeyService, ModelConfigService
 from app.services.multi_agent_variable_contract import (
@@ -379,6 +380,54 @@ def _sse_event_name(event: str) -> Optional[str]:
         return event.split("event:", 1)[1].split("\n", 1)[0].strip() or None
     except Exception:
         return None
+
+
+def _normalize_error_frame(event: str) -> str:
+    """把子运行的旧形状 error 帧补齐为统一错误帧。
+
+    AgentRunService / handoffs 仍可能只带 ``error``（缺少 msg/code/time）；
+    集群对外只暴露统一形状，前端与日志才能拿到用户可读的 msg。
+    已是统一形状（带 msg）或解析失败的帧原样返回。
+    """
+    if _sse_event_name(event) != "error":
+        return event
+    try:
+        data = json.loads(event.split("data: ", 1)[1].strip())
+    except Exception:
+        return event
+    if not isinstance(data, dict) or "msg" in data:
+        return event
+    error = data.get("error")
+    nested = error if isinstance(error, dict) else {}
+    numeric = data.get("code")
+    if not isinstance(numeric, int):
+        numeric = nested.get("code")
+    if not isinstance(numeric, int) or numeric == BizCode.OK.value:
+        numeric = BizCode.INTERNAL_ERROR.value
+    from app.i18n.exceptions import get_current_locale
+    from error_core.messages import user_message
+
+    msg = (
+        nested.get("msg")
+        or nested.get("message")
+        or user_message(numeric, get_current_locale())
+        or "服务内部错误，请稍后重试"
+    )
+    detail = "" if not error else (
+        error if isinstance(error, str)
+        else str(nested.get("error") or nested.get("message") or "")
+    )
+    frame = {
+        "code": numeric,
+        "msg": msg,
+        "error": detail,
+        "message": detail,
+        "retryable": bool(nested.get("retryable", False)),
+        "time": int(time.time() * 1000),
+    }
+    for _k, _v in data.items():
+        frame.setdefault(_k, _v)
+    return f"event: error\ndata: {json.dumps(frame, ensure_ascii=False)}\n\n"
 
 
 class MultiAgentOrchestrator:
@@ -1441,11 +1490,8 @@ class MultiAgentOrchestrator:
                 elapsed_time=time.time() - start_time,
                 error_message=str(e)[:2000],
             )
-            # 发送错误事件
-            yield self._format_sse_event("error", {
-                "error": str(e),
-                "timestamp": time.time()
-            })
+            # 发送统一错误帧
+            yield self._error_event(e)
 
     async def execute(
         self,
@@ -3338,7 +3384,7 @@ class MultiAgentOrchestrator:
             # 再补上 Agent 归属（只补缺失字段，不覆盖事件自带同名字段），
             # 供运行中面板把事件分流到对应的子 Agent 区块。
             yield self._inject_agent_meta(
-                self._strip_conversation_id(event),
+                self._strip_conversation_id(_normalize_error_frame(event)),
                 self._sub_event_meta(agent_id, agent_info.get("name")),
             )
 
@@ -4187,6 +4233,8 @@ class MultiAgentOrchestrator:
                 #   下一轮带 null 会话 ID → 后端每轮新建会话（对话分裂成多个窗口）。
                 # 其余事件先剥离子运行 conversation_id（S3：防前端会话指针被
                 # handoffs 内部会话 ID 污染——集群会话 ID 只由 start/end 发布）。
+                if event_name == "error":
+                    event = _normalize_error_frame(event)
                 if event_name not in _SUB_RUN_LIFECYCLE_EVENTS:
                     yield self._strip_conversation_id(event)
 
@@ -4237,10 +4285,7 @@ class MultiAgentOrchestrator:
                     )
             except Exception:
                 pass
-            yield self._format_sse_event("error", {
-                "error": str(e),
-                "timestamp": time.time()
-            })
+            yield self._error_event(e)
 
     async def _execute_collaboration_mode(
         self,
@@ -4390,6 +4435,19 @@ class MultiAgentOrchestrator:
         """
         import json
         return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
+
+    def _error_event(self, exc: Exception) -> str:
+        """构建统一 SSE 错误帧：msg 给用户、error 给排障。"""
+        info = workflow_error_info(exc)
+        return self._format_sse_event("error", {
+            "code": info["code"],
+            "msg": info["msg"],
+            "error": info["error"],
+            "message": info["error"],
+            "retryable": info["retryable"],
+            "time": int(time.time() * 1000),
+            "timestamp": time.time(),
+        })
 
     @staticmethod
     def _strip_conversation_id(event: str) -> str:
