@@ -7,6 +7,7 @@ import re
 from collections import Counter, defaultdict
 from datetime import datetime
 from enum import Enum
+from functools import partial
 from io import BytesIO
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -1564,6 +1565,13 @@ class MemoryStorageService:
 
             config_workspace_id = memory_config.workspace_id
             config_tenant_id = memory_config.tenant_id
+            download_attachment = partial(
+                self.runtime.file_service.download,
+                workspace_id=config_workspace_id,
+                tenant_id=config_tenant_id,
+                actor_id=actor_id,
+                actor_kind=actor_kind,
+            )
 
             final_model_info = final_runtime
 
@@ -1590,7 +1598,11 @@ class MemoryStorageService:
 
                 model_info = runtime
                 # 附件在进入试运行前已经完成输入校验，加载与格式化异常不在这里转换为 LLM 错误。
-                multimodal_service = MultimodalService(self.repository, model_info, attachment_storage=self.runtime.attachment_storage)
+                multimodal_service = MultimodalService(
+                    self.repository, model_info,
+                    attachment_storage=self.runtime.attachment_storage,
+                    download_attachment=download_attachment,
+                )
                 parts = await self._process_trial_run_files(
                     [ref["file"] for ref in refs],
                     multimodal_service,
@@ -1656,7 +1668,11 @@ class MemoryStorageService:
                 refs = attachment_groups[FileType.DOCUMENT]
                 documents: list[str] = []
                 # 文档字节在短会话关闭后下载和解析，避免长时间占用连接。
-                multimodal_service = MultimodalService(None, final_model_info, attachment_storage=self.runtime.attachment_storage)
+                multimodal_service = MultimodalService(
+                    None, final_model_info,
+                    attachment_storage=self.runtime.attachment_storage,
+                    download_attachment=download_attachment,
+                )
                 for ref in refs:
                     file = ref["file"]
                     if file.transfer_method == TransferMethod.LOCAL_FILE:
@@ -1821,6 +1837,14 @@ class MemoryStorageService:
 
         from src.common.prompt.prompt_utils import prompt_env
 
+        download_attachment = partial(
+            self.runtime.file_service.download,
+            workspace_id=config.workspace_id,
+            tenant_id=config.tenant_id,
+            actor_id=actor_id,
+            actor_kind=actor_kind,
+        )
+
         async def one(index, message, file):
             try:
                 model_id = {
@@ -1833,7 +1857,11 @@ class MemoryStorageService:
                 if view is None:
                     return None
                 file = file.model_copy(deep=True)
-                media = MultimodalService(self.repository, view, attachment_storage=self.runtime.attachment_storage)
+                media = MultimodalService(
+                    self.repository, view,
+                    attachment_storage=self.runtime.attachment_storage,
+                    download_attachment=download_attachment,
+                )
                 if file.transfer_method == TransferMethod.LOCAL_FILE:
                     await self._load_trial_run_local_file(
                         file, config.workspace_id, config.tenant_id,

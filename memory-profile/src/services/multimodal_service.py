@@ -18,6 +18,7 @@ import struct
 import uuid
 import zipfile
 from abc import ABC, abstractmethod
+from collections.abc import Awaitable, Callable
 from ipaddress import ip_address
 from typing import Any
 from urllib.parse import urlparse
@@ -35,6 +36,7 @@ from src.bootstrap import get_settings
 from src.common.errors import BizCode, ProfileError
 from src.common.text_sanitize import sanitize_text
 from src.common.observability.logging import get_logger
+from src.infrastructure.file_service import FileServiceError
 from mem_storage import LocalStorage
 from src.services.file_content_service import extract_permanent_file_id
 from src.schemas.memory_storage import FileInput, FileType, FileUploadConfig, TransferMethod
@@ -540,9 +542,13 @@ class MultimodalService:
         input_modalities (list): Input modality configuration of the model.
     """
 
-    def __init__(self, repository, model_view=None, *, attachment_storage):
+    def __init__(
+        self, repository, model_view=None, *, attachment_storage,
+        download_attachment: Callable[[uuid.UUID], Awaitable[bytes]],
+    ):
         self.repository = repository
         self.attachment_storage = attachment_storage
+        self.download_attachment = download_attachment
         self.model_view = model_view
         self.provider = model_view.provider.lower() if model_view else "openai"
         self.input_modalities = list(model_view.input_modalities or []) if model_view else []
@@ -568,8 +574,8 @@ class MultimodalService:
     ) -> int:
         """读取模型侧不可达的附件字节，供出站适配器内联使用。
 
-        - 持 upload_file_id：走 workspace/tenant 受限查询 + 存储后端直读，
-          除字节外还回填文件名、大小与 MIME，供感知记忆等下游使用；
+        - With an upload_file_id, validate ownership and fetch bytes through file-service,
+          then populate the name, size and MIME type for downstream processing.
         - 否则仅识别本服务自铸的永久 URL，由本服务自己 HTTP 取回，
           不把该 URL 交给模型，也不接受任意远程 URL（避免 SSRF）。
         """
@@ -585,7 +591,10 @@ class MultimodalService:
             if file_size <= 0 or file_size > get_settings().max_file_size:
                 raise _file_error("文件大小不在允许范围内", BizCode.FILE_READ_ERROR)
 
-            content = await self.attachment_storage.backend.download(metadata.file_key)
+            try:
+                content = await self.download_attachment(file.upload_file_id)
+            except (FileServiceError, httpx.HTTPError) as exc:
+                raise _file_error("文件读取失败", BizCode.FILE_READ_ERROR) from exc
             if len(content) != file_size:
                 logger.error(
                     "本地文件大小与元数据不一致",
