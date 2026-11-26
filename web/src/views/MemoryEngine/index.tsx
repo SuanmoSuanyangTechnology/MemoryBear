@@ -3,7 +3,8 @@ import { useParams } from 'react-router-dom'
 import {
     DynamicWeightEngine, AssociationEngine,
     ConsolidationEvolutionEngine, PredictionEngineSettings, PredictionEngine,
-    PreferenceEngine, SceneCommunityEngine, PersonalityAnchorEngine
+    PreferenceEngine, SceneCommunityEngine, PersonalityAnchorEngine,
+    SpatiotemporalEngine,
 } from '@redbear/memory-brick'
 
 import { request } from '@/utils/request'
@@ -36,6 +37,9 @@ const MemoryEngine: FC = () => {
   }
   if (type === 'personality-anchor') {
       return <PrivateWrap>{() => <PersonalityAnchorEngine request={request} />}</PrivateWrap>
+  }
+  if (type === 'spatiotemporal-engine') {
+      return <PrivateWrap>{() => <SpatiotemporalEngine request={request} />}</PrivateWrap>
   }
 
   return null
