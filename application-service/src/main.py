@@ -68,7 +68,11 @@ def _register_enterprise_plugins(runtime: ProcessRuntime) -> None:
         from enterprise_ext.app import register_app_plugins
     except ImportError:
         return
-    register_app_plugins(runtime.upstream, memory_enterprise=runtime.memory_enterprise)
+    register_app_plugins(
+        runtime.upstream,
+        memory_enterprise=runtime.memory_enterprise,
+        deployment_mode=runtime.settings.deployment_mode,
+    )
 
 
 def load_market_gateway(runtime: ProcessRuntime) -> MarketGateway:
