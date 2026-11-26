@@ -31,6 +31,7 @@ from .knowledge_model_validation import (
 )
 
 MODEL_FIELDS = ("embedding", "reranker", "llm")
+MULTIMODAL_MODEL_FIELDS = ("image2text", "audio2text", "video2text")
 SUMMARY_FIELDS = (
     "id",
     "workspace_id",
@@ -105,7 +106,9 @@ async def project_knowledges(
     )
     workspace_names = {workspace.id: workspace.name for workspace in workspaces}
     model_ids = {
-        getattr(owner, f"{field}_id") for owner in effective.values() for field in MODEL_FIELDS
+        getattr(owner, f"{field}_id")
+        for owner in effective.values()
+        for field in MODEL_FIELDS + MULTIMODAL_MODEL_FIELDS
     }
     models = await ReferenceRepository.get_model_configs(db, list(model_ids - {None}))
     bases = await ReferenceRepository.get_model_bases(
@@ -165,6 +168,8 @@ async def project_knowledges(
             model_id = getattr(source, f"{field}_id")
             item[f"{field}_id"] = model_id
             item[field] = summaries.get(model_id)
+        for field in MULTIMODAL_MODEL_FIELDS:
+            item[field] = summaries.get(getattr(source, f"{field}_id"))
         result.append(item)
     return result
 
