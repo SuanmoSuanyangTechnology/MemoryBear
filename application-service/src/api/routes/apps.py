@@ -14,22 +14,24 @@ import io
 import logging
 from typing import Annotated, Any, Literal
 from urllib.parse import quote
-from uuid import UUID
+from uuid import UUID, uuid4
 
 import yaml
 from fastapi import APIRouter, Depends, File, Form, Header, Path, Query, Request, UploadFile
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import Response, StreamingResponse
-from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
+from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
-from ...db import end_read_transaction
 from ...errors import BizCode, BusinessException, ResourceNotFoundException
 from ...guards.workspace_access import require_workspace_access
+from ...integrations.knowledge.contracts import (
+    KnowledgeCallContext,
+    KnowledgeConfigurationError,
+    KnowledgeRetrievalSource,
+)
+from ...integrations.knowledge.errors import KnowledgeServiceError
+from ...integrations.knowledge.runtime import get_knowledge_service_client
 from ...models.app_model import App, AppType
-from ...models.document_model import Document
-from ...models.file_model import File as FileModel
 from ...plugins import get_plugin
 from ...protocols.market_gateway import MARKET_SUBMISSION_FACTORY
 from ...quota.alerts import report_quota_change_sync
@@ -45,19 +47,16 @@ from ...services.app_statistics_service import AppStatisticsService
 from ...services.asset_release_resolver import app_cache_key
 from ...services.asset_service import AssetService
 from ...services.external_status_service import apply_external_status
-from ...services.file_storage_service import FileStorageService, get_file_storage_service
 from ...services.my_shares_service import MySharesService
 from ...services.tool_service import ToolService
 from ...services.workflow_import_service import WorkflowImportService
 from ...services.workflow_service import WorkflowService
 from ...services.workflow_tool_publish_service import WorkflowToolPublishService
-from ...storage.exceptions import StorageError
 from ...utils.redis_cache import delete_json
 from ..dependencies import (
     API_KEY_ID_HEADER,
     Principal,
     SyncRedis,
-    get_async_db,
     get_principal,
     get_runtime,
     get_sync_db,
@@ -1296,44 +1295,41 @@ def import_app(
 
 @router.get("/citations/{document_id}/download", summary="下载引用文档原始文件")
 async def download_citation_file(
+        request: Request,
         document_id: Annotated[UUID, Path(description="引用文档ID")],
-        db: Annotated[AsyncSession, Depends(get_async_db)],
-        storage_service: Annotated[FileStorageService, Depends(get_file_storage_service)],
 ):
     """Stream the original file of a cited document.
 
     Host parity: no permission check here — the document UUID is the capability,
     and the console only renders the link when the app enables
-    ``citation.allow_download``.
+    ``citation.allow_download``. The document and its file row belong to the
+    knowledge service; this service no longer reads those tables directly.
     """
-    doc = (
-        await db.execute(select(Document).where(Document.id == document_id))
-    ).scalar_one_or_none()
-    if doc is None:
-        raise BusinessException("文档不存在", BizCode.NOT_FOUND)
-
-    file_record = (
-        await db.execute(select(FileModel).where(FileModel.id == doc.file_id))
-    ).scalar_one_or_none()
-    if file_record is None:
-        raise BusinessException("原始文件不存在", BizCode.NOT_FOUND)
-
-    # Release the pooled connection before the storage read: a large download
-    # must not hold an idle-in-transaction connection.
-    await end_read_transaction(db, "apps.citation_download")
-
     try:
-        content = await storage_service.download_file(file_record.file_key)
-    except (FileNotFoundError, StorageError) as exc:
-        logger.error(f"Storage download failed: {exc}")
-        raise BusinessException("文件未找到", BizCode.NOT_FOUND) from exc
+        client = get_knowledge_service_client()
+    except KnowledgeConfigurationError as exc:
+        raise BusinessException(
+            "知识库服务未启用", BizCode.SERVICE_UNAVAILABLE
+        ) from exc
 
-    encoded_name = quote(doc.file_name)
-    return Response(
-        content=content,
-        media_type="application/octet-stream",
-        headers={"Content-Disposition": f"attachment; filename*=UTF-8''{encoded_name}"},
+    context = KnowledgeCallContext(
+        principal=None,
+        source=KnowledgeRetrievalSource.MANAGER_API,
+        trace_id=getattr(request.state, "trace_id", "") or uuid4().hex,
     )
+    try:
+        return await client.download_document(str(document_id), context)
+    except KnowledgeServiceError as exc:
+        # The integration handler would surface any knowledge failure as a 500
+        # envelope; a missing document/file must stay the capability's 404.
+        if exc.status_code != 404:
+            raise
+        message = (
+            "文档不存在"
+            if exc.code == BizCode.DOCUMENT_NOT_FOUND
+            else "文件未找到"
+        )
+        raise BusinessException(message, BizCode.NOT_FOUND) from exc
 
 
 __all__ = ["router"]

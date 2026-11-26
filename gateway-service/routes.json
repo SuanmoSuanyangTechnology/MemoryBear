@@ -52,7 +52,6 @@
     {"path_prefix": "/api/tenant/orders", "service": "ops-service", "base_url": "http://ops-service:8080", "aud": "ops-service"},
     {"path_prefix": "/api/tenant/resource-packs", "service": "ops-service", "base_url": "http://ops-service:8080", "aud": "ops-service"},
     {"path_prefix": "/api/sso", "service": "ops-service", "base_url": "http://ops-service:8080", "aud": "ops-service", "auth_mode": "passthrough", "path_mode": "preserve"},
-    {"path_prefix": "/sys/sso/sources", "service": "api", "base_url": "http://api:8000", "aud": "api", "auth_mode": "passthrough"},
     {"path_prefix": "/sys", "service": "ops-service", "base_url": "http://ops-service:8080", "aud": "ops-service", "auth_mode": "passthrough"},
     {"path_prefix": "/api/storage", "service": "file-service", "base_url": "http://file-service:8080", "aud": "file-service"}
   ]

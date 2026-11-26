@@ -413,6 +413,26 @@ class AppServiceSettings(BaseSettings):
         gt=0,
         validation_alias="APPLICATION_SERVICE_UPSTREAM_TIMEOUT_SECONDS",
     )
+    # East-west write face of memory-profile (end-user merge). The merge owns
+    # the memory write locks and every derived memory artifact, so it must run
+    # there; same env names and defaults as the monolith's outbound client. An
+    # empty base URL fails the merge path closed at call time.
+    memory_profile_base_url: str = Field(
+        default="",
+        validation_alias="MEMORY_PROFILE_BASE_URL",
+    )
+    memory_profile_connect_timeout_seconds: float = Field(
+        default=5.0, gt=0, validation_alias="MEMORY_PROFILE_CONNECT_TIMEOUT_SECONDS"
+    )
+    memory_profile_pool_timeout_seconds: float = Field(
+        default=5.0, gt=0, validation_alias="MEMORY_PROFILE_POOL_TIMEOUT_SECONDS"
+    )
+    memory_profile_read_timeout_seconds: float = Field(
+        default=120.0, gt=0, validation_alias="MEMORY_PROFILE_READ_TIMEOUT_SECONDS"
+    )
+    memory_profile_write_timeout_seconds: float = Field(
+        default=600.0, gt=0, validation_alias="MEMORY_PROFILE_WRITE_TIMEOUT_SECONDS"
+    )
     # East-west direct dependency on model-service (annotation embeddings),
     # never routed through the gateway; same env name as the monolith's
     # outbound knob. Unset or unreachable degrades annotation writes to a

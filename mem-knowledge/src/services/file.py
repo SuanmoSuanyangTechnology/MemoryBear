@@ -62,6 +62,12 @@ class QAExportFile:
 
 
 @dataclass(frozen=True)
+class DocumentFileSnapshot:
+    file_key: str
+    file_name: str
+
+
+@dataclass(frozen=True)
 class UploadPlan:
     file_id: uuid.UUID
     file_key: str
@@ -130,6 +136,43 @@ async def get_public_file(db: AsyncSession, file_id: uuid.UUID) -> File | None:
     """Load the legacy public download record without workspace authorization."""
 
     return await file_repository.get_file_by_id_async(db, file_id)
+
+
+async def get_document_file_snapshot(
+    db: AsyncSession,
+    document_id: uuid.UUID,
+    *,
+    workspace_id: uuid.UUID | None = None,
+) -> DocumentFileSnapshot:
+    """Resolve the original file behind a document for the citation download.
+
+    Without ``workspace_id`` the lookup is capability-based (the app citation
+    download is public); a principal-scoped caller passes its workspace so the
+    private download semantics stay unchanged. Missing rows map to 404 on the
+    wire, matching the single-file download endpoint.
+    """
+
+    stmt = (
+        select(
+            Document.file_name,
+            File.id.label("file_row_id"),
+            File.file_key,
+        )
+        .outerjoin(File, File.id == Document.file_id)
+        .where(Document.id == document_id)
+    )
+    if workspace_id is not None:
+        stmt = stmt.join(Knowledge, Knowledge.id == Document.kb_id).where(
+            Knowledge.workspace_id == workspace_id
+        )
+    row = (await db.execute(stmt)).first()
+    if row is None:
+        raise KnowledgeError.from_code("KB_DOCUMENT_NOT_FOUND", http_status_override=404)
+    if row.file_row_id is None:
+        raise KnowledgeError.from_code("KB_FILE_NOT_FOUND", http_status_override=404)
+    if not row.file_key:
+        raise KnowledgeError.from_code("KB_FILE_STORAGE_KEY_MISSING", http_status_override=404)
+    return DocumentFileSnapshot(file_key=row.file_key, file_name=row.file_name)
 
 
 async def require_parent_folder(

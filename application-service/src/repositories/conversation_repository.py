@@ -335,6 +335,62 @@ class MessageRepository:
 
         return messages, total
 
+    async def get_messages_since_async(
+        self,
+        conversation_id: uuid.UUID,
+        since_at: datetime | None = None,
+        current_only: bool = True,
+    ) -> list[Message]:
+        """Messages from the time boundary onward, in ascending time order."""
+
+        stmt = select(Message).where(
+            Message.conversation_id == conversation_id,
+            Message.is_deleted.is_not(True),
+        )
+        if current_only:
+            stmt = stmt.where(Message.is_current.is_not(False))
+        if since_at is not None:
+            stmt = stmt.where(Message.created_at >= since_at)
+        stmt = stmt.order_by(Message.created_at)
+
+        result = await self.db.execute(stmt)
+        return list(result.scalars().all())
+
+    async def get_recent_messages_from_other_conversations_async(
+        self,
+        *,
+        app_id: uuid.UUID,
+        user_id: str,
+        exclude_conversation_id: uuid.UUID,
+        limit: int,
+        current_only: bool = True,
+    ) -> list[Message]:
+        """Recent messages of the same app/user across other conversations,
+        in ascending time order."""
+
+        if not user_id or limit <= 0:
+            return []
+
+        stmt = (
+            select(Message)
+            .join(Conversation, Conversation.id == Message.conversation_id)
+            .where(
+                Conversation.app_id == app_id,
+                Conversation.user_id == user_id,
+                Conversation.id != exclude_conversation_id,
+                Message.is_deleted.is_not(True),
+            )
+            .order_by(Message.created_at.desc())
+            .limit(limit)
+        )
+        if current_only:
+            stmt = stmt.where(Message.is_current.is_not(False))
+
+        result = await self.db.execute(stmt)
+        messages = list(result.scalars().all())
+        messages.reverse()
+        return messages
+
     def get_messages_by_conversation(
         self,
         conversation_id: uuid.UUID,

@@ -46,6 +46,9 @@ async def test_deleting_catalog_source_retires_detail_and_reference(monkeypatch)
         "src.repositories.cross_domain_read.get_workspace_tenant_id",
         lambda db, workspace_id: tenant_id,
     )
+    # The ontology binder is a process-global plugin; keep this local
+    # catalog-retirement contract off the remote callback channel.
+    monkeypatch.setattr("src.services.app_service.get_plugin", lambda name: None)
     with Session(engine) as db:
         source = App(
             id=uuid4(),
