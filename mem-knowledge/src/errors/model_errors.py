@@ -2,7 +2,7 @@
 
 from enum import StrEnum
 
-from .definitions import ERROR_DEFINITIONS, KnowledgeError
+from . import ERROR_DEFINITIONS, KnowledgeError
 
 
 class ModelRole(StrEnum):

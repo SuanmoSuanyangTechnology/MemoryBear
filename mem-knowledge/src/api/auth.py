@@ -37,7 +37,7 @@ from ..observability.trace import TRACE_ID_HEADER
 from .dependencies import Principal, _principal_from_headers
 from .upload_contract import is_knowledge_upload
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("src.auth")
 
 _PUBLIC_PATHS = {
     "/internal/v1/health/live",

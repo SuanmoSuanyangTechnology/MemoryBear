@@ -19,7 +19,7 @@ from ..errors import KnowledgeError
 from .logging import redact_for_log
 from .trace import TRACE_ID_HEADER, normalize_trace_id
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("src.request_logging")
 
 
 def request_route_template(scope: Scope) -> str:

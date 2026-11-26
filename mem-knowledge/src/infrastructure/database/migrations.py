@@ -15,7 +15,7 @@ from ...application.runtime import ProcessRuntime
 from .manager import DatabaseManager
 from .migration_policy import VERSION_TABLE
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("src.database_migrations")
 _MIGRATION_LOCK_KEY = f"mem-knowledge:{VERSION_TABLE}"
 _LEGACY_TABLES_BASELINE = "0ab91df45c62"
 

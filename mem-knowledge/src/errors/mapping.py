@@ -37,7 +37,7 @@ from ..integrations.model.errors import (
     ModelInvokeTimeoutError,
     ModelInvokeUnavailableError,
 )
-from .definitions import TRANSIENT_DEPENDENCY_HTTP_STATUSES, KnowledgeError
+from . import TRANSIENT_DEPENDENCY_HTTP_STATUSES, KnowledgeError
 from .model_errors import ModelFailure, ModelRole, model_error
 
 if TYPE_CHECKING:
