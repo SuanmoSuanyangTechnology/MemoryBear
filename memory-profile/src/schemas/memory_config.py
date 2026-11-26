@@ -287,3 +287,9 @@ class ActiveConfigResult(BaseModel):
     config_id: UUID
     warnings: list[ConfigWarning]
     success: bool
+
+
+class WorkspaceActiveConfigData(BaseModel):
+    """The workspace's active memory configuration id (``workspace-config``)."""
+
+    config_id: str

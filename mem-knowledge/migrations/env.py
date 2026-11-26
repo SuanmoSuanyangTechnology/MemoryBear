@@ -1,4 +1,4 @@
-"""Wiki release migrations; existing knowledge tables remain on the API chain."""
+"""知识库 PostgreSQL 迁移入口。"""
 
 from alembic import context
 from sqlalchemy import create_engine, pool

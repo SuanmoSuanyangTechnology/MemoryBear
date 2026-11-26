@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import any_, bindparam, desc, func, select
+from sqlalchemy import any_, bindparam, desc, func, or_, select
 from sqlalchemy.dialects.postgresql import ARRAY
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
@@ -14,6 +14,25 @@ from app.models.conversation_model import ConversationDetail
 
 logger = get_db_logger()
 _EXCLUDED_APP_ID = uuid.UUID("00000000-0000-0000-0000-000000000001")
+
+
+def select_first_log_user_message(conversation_id):
+    """Select the first visible user message with a non-blank body."""
+    return (
+        select(Message.content)
+        .where(
+            Message.conversation_id == conversation_id,
+            Message.role == "user",
+            Message.is_deleted.is_not(True),
+            or_(
+                Message.is_current.is_not(False),
+                Message.meta_data["log_only"].as_string() == "true",
+            ),
+            Message.content.op("~")("[^[:space:]]"),
+        )
+        .order_by(Message.created_at.asc().nulls_last(), Message.id)
+        .limit(1)
+    )
 
 
 class ConversationRepository:

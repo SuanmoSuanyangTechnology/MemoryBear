@@ -10,9 +10,10 @@ Known gaps (documented for the migration report):
 
 * ``get_user_metadata`` is cached for 60s in the host (Redis); this port reads
   through on every call so a stale profile cannot leak across requests.
-* scene names come from the read-only ``ontology_scene`` table. The host asks
-  the enterprise ``memory.ontology_query`` plugin; when it is unavailable the
-  host also degrades to ``{}``, which is what this port does on failure.
+* scene names resolve through memory-enterprise (the host's
+  ``memory.ontology_query`` plugin equivalent) and fall back to the read-only
+  ``ontology_scene`` table; either failure degrades to ``{}``, which keeps the
+  stored keys exactly like the host does without a plugin.
 """
 
 from __future__ import annotations
@@ -328,8 +329,18 @@ class RetrievalQueries:
             meta_data = (await session.execute(statement)).scalars().first()
         return meta_data if isinstance(meta_data, dict) else {}
 
-    async def scene_names(self, record: dict, workspace_id: Any) -> dict[str, str]:
-        """Map scene type ids in ``domain_specific_info`` to scene names."""
+    async def scene_names(
+        self, record: dict, workspace_id: Any, tenant_id: Any | None = None
+    ) -> dict[str, str]:
+        """Map scene type ids in ``domain_specific_info`` to scene names.
+
+        The enterprise build resolves names through the ``memory.ontology_query``
+        plugin, whose data lives in the enterprise-owned ontology tables.
+        memory-profile reaches the same capability through memory-enterprise's
+        tenant-scoped scene-names endpoint; the read-only ``ontology_scene``
+        table stays as the fallback so a deployment without the service (or a
+        failed call) keeps the stored keys instead of losing the profile.
+        """
 
         domains = record.get("domain_specific_info") if isinstance(record, dict) else None
         if not isinstance(domains, dict):
@@ -340,10 +351,32 @@ class RetrievalQueries:
                 scene_ids.append(uuid.UUID(str(key)))
         if not scene_ids:
             return {}
+        unique_ids = list(dict.fromkeys(scene_ids))
+
+        enterprise = self._enterprise
+        if (
+            enterprise is not None
+            and tenant_id is not None
+            and getattr(enterprise, "enabled", False)
+        ):
+            try:
+                return dict(
+                    await enterprise.scene_names(
+                        tenant_id=tenant_id,
+                        scene_ids=[str(scene_id) for scene_id in unique_ids],
+                    )
+                )
+            except Exception:
+                logger.warning(
+                    "[Retrieval] enterprise scene name lookup failed; "
+                    "falling back to the read-only table",
+                    exc_info=True,
+                )
+
         statement = select(
             OntologySceneRow.scene_id, OntologySceneRow.scene_name
         ).where(
-            OntologySceneRow.scene_id.in_(list(set(scene_ids))),
+            OntologySceneRow.scene_id.in_(unique_ids),
             OntologySceneRow.workspace_id == workspace_id,
         )
         try:
@@ -444,17 +477,25 @@ async def _resolve_metadata_scope(
     self: RetrievalQueries,
     end_user_id: str,
     app_id: uuid.UUID | None = None,
+    *,
+    tenant_id: uuid.UUID | None = None,
+    workspace_id: uuid.UUID | None = None,
 ) -> dict[str, Any] | None:
     """Resolve the caller app's ontology boundary through memory-enterprise.
 
     The read wire contract does not carry a caller app yet, so a read without
-    one uses the documented ``default_only`` projection. The conditional keeps
-    the enterprise lookup ready for the future app-aware calls. Any failure
-    (service disabled, transport error, no binding) degrades to
+    one uses the documented ``default_only`` projection. The call acts for the
+    read's tenant, which the enterprise client signs into its internal JWT.
+    Any failure (service disabled, transport error, no binding) degrades to
     ``default_only``.
     """
 
-    if app_id is None or self._enterprise is None or not self._enterprise.enabled:
+    if (
+        app_id is None
+        or tenant_id is None
+        or self._enterprise is None
+        or not self._enterprise.enabled
+    ):
         return None
     try:
         user_uuid = uuid.UUID(str(end_user_id))
@@ -462,7 +503,10 @@ async def _resolve_metadata_scope(
         return None
     try:
         return await self._enterprise.metadata_scope(
-            app_id=app_id, end_user_id=user_uuid
+            tenant_id=tenant_id,
+            app_id=app_id,
+            end_user_id=user_uuid,
+            workspace_id=workspace_id,
         )
     except Exception:
         logger.warning(

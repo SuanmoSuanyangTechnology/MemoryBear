@@ -13,7 +13,8 @@ import uuid
 from datetime import datetime, timedelta
 from typing import Any
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import case, cast, func, or_, select
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Session
 
 from ..models.agent_execution_model import AgentExecution
@@ -22,10 +23,15 @@ from ..models.conversation_model import Conversation, Message
 from ..models.file_metadata_model import FileMetadata
 from ..models.workflow_model import WorkflowExecution
 from ..repositories.agent_execution_repository import AgentExecutionRepository
-from ..repositories.conversation_repository import ConversationRepository, MessageRepository
+from ..repositories.conversation_repository import (
+    ConversationRepository,
+    MessageRepository,
+    select_first_log_user_message,
+)
 from ..repositories.workflow_repository import WorkflowExecutionRepository
 from ..schemas.app_log_schema import (
     AppLogAgentSummary,
+    AppLogConversation,
     AppLogConversationDetail,
     AppLogMessage,
     AppLogNodeExecution,
@@ -35,6 +41,18 @@ from ..utils.datetime_utils import parse_iso_to_utc_naive, to_timestamp_ms, utcn
 from ..utils.file_urls import build_permanent_file_url
 
 logger = logging.getLogger(__name__)
+
+
+_WORKFLOW_TEXT_FIELDS = ("message", "text", "content", "output", "result", "answer")
+
+
+def _workflow_opening_candidates(conversation_id):
+    return (
+        select(Message)
+        .where(Message.conversation_id == conversation_id, Message.role == "assistant")
+        .order_by(Message.created_at.asc(), Message.id)
+        .limit(10)
+    )
 
 
 def _to_ms(iso_str: str | None) -> int | None:
@@ -62,6 +80,79 @@ class AppLogService:
         self.conversation_repository = ConversationRepository(db)
         self.message_repository = MessageRepository(db)
         self.workflow_execution_repository = WorkflowExecutionRepository(db)
+
+    def build_conversation_summaries(
+        self, conversations: list[Conversation], app_type: str,
+    ) -> list[AppLogConversation]:
+        """Build log summaries from the same sources as the displayed messages."""
+        if not conversations:
+            return []
+
+        first_message = select_first_log_user_message(Conversation.id).scalar_subquery()
+        title_source = first_message
+        message_count_source = Conversation.message_count
+        if app_type in (AppType.WORKFLOW, AppType.PURE_WORKFLOW):
+            # Each visible execution with user input is shown as two messages.
+            input_fields = {
+                key: WorkflowExecution.input_data[key] for key in _WORKFLOW_TEXT_FIELDS
+            }
+            workflow_input = func.coalesce(*(
+                field.as_string() if key == "output" else
+                case((func.jsonb_typeof(field) == "string", field.as_string()))
+                for key, field in input_fields.items()
+            ))
+            execution_filters = (
+                WorkflowExecution.conversation_id == Conversation.id,
+                WorkflowExecution.status.in_(self._WF_VISIBLE_STATUSES),
+            )
+            first_input = (
+                select(workflow_input)
+                .where(*execution_filters, workflow_input.op("~")("[^[:space:]]"))
+                .order_by(WorkflowExecution.started_at, WorkflowExecution.id)
+                .limit(1)
+                .scalar_subquery()
+            )
+            title_source = func.coalesce(first_input, first_message)
+
+            opening_candidates = (
+                _workflow_opening_candidates(Conversation.id)
+                .with_only_columns(Message.meta_data)
+                .correlate(Conversation)
+                .subquery()
+            )
+            opening_meta = cast(opening_candidates.c.meta_data, JSONB)
+            has_opening = select(opening_candidates.c.meta_data).where(
+                func.jsonb_typeof(opening_meta) == "object",
+                opening_meta.has_key("suggested_questions"),
+            ).exists()
+            opening_count = case((has_opening, 1), else_=0)
+            message_count_source = (
+                select(
+                    2 * func.count().filter(workflow_input != "")
+                    + case((func.count() > 0, opening_count), else_=0)
+                )
+                .where(*execution_filters)
+                .correlate(Conversation)
+                .scalar_subquery()
+            )
+
+        ids = [conversation.id for conversation in conversations]
+        stats = {
+            conversation_id: (content, message_count)
+            for conversation_id, content, message_count in self.db.execute(
+                select(Conversation.id, title_source, message_count_source)
+                .where(Conversation.id.in_(ids))
+            )
+        }
+        items = []
+        for conversation in conversations:
+            item = AppLogConversation.model_validate(conversation)
+            content, message_count = stats.get(conversation.id, (None, item.message_count))
+            item.message_count = message_count
+            if content and (title := content.strip()):
+                item.title = title[:50] + ("..." if len(title) > 50 else "")
+            items.append(item)
+        return items
 
     def list_conversations(
         self,
@@ -538,16 +629,7 @@ class AppLogService:
         opening_msg = None
         suggested_questions: list = []
         if executions and not has_earlier:
-            opening_stmt = (
-                select(Message)
-                .where(
-                    Message.conversation_id == conversation_id,
-                    Message.role == "assistant",
-                )
-                .order_by(Message.created_at.asc())
-                .limit(10)
-            )
-            for m in self.db.scalars(opening_stmt).all():
+            for m in self.db.scalars(_workflow_opening_candidates(conversation_id)):
                 if isinstance(m.meta_data, dict) and "suggested_questions" in m.meta_data:
                     opening_msg = m
                     suggested_questions = m.meta_data.get("suggested_questions") or []
@@ -1277,7 +1359,7 @@ def _extract_text(data: dict | None) -> str:
 
     if not data:
         return ""
-    for key in ("message", "text", "content", "output", "result", "answer"):
+    for key in _WORKFLOW_TEXT_FIELDS:
         val = data.get(key)
         if val is None:
             continue

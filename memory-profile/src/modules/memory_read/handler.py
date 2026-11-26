@@ -34,6 +34,7 @@ from src.core.composition import MemoryReadModule, build_memory_read_module
 from src.core.domain.enums import MemorySource, SearchStrategy, StorageType
 from src.core.domain.errors import ReadError, ReadErrorCode
 from src.core.domain.models import (
+    ReadContextOverrides,
     ReadOptions,
     ReadOutcome,
     ReadPrincipal,
@@ -43,6 +44,7 @@ from src.core.domain.models import (
 from src.i18n import get_request_language
 from src.middleware.auth import MemoryPrincipal
 from src.modules.memory_read.schemas import (
+    AppServiceReadBody,
     PredictionStatementReadBody,
     ReadInternalBody,
     ReadStreamBody,
@@ -279,9 +281,11 @@ class MemoryReadHandler:
                 ),
                 _principal(context),
                 language="zh",
-                config_id=body.config_id,
-                draft=True,
-                storage_type=StorageType.NEO4J,
+                overrides=ReadContextOverrides(
+                    config_id=body.config_id,
+                    storage_type=StorageType.NEO4J.value,
+                    draft=True,
+                ),
                 options=ReadOptions(
                     limit=body.limit,
                     includes=(MemorySource.STATEMENT.value,),
@@ -309,6 +313,91 @@ class MemoryReadHandler:
             ][:body.limit],
             "execution_trace": trace.model_dump() if trace is not None else None,
         })
+
+    async def read_app_service(
+        self,
+        request: Request,
+        context: MemoryPrincipal,
+        body: AppServiceReadBody,
+    ) -> ApiResponse[dict[str, Any]]:
+        """Run the application-service callback read.
+
+        Replaces the host endpoint the application service calls back into. The
+        host returned the memory items themselves (``content`` / ``memories``,
+        not the V1 ``answer`` / ``intermediate_outputs`` shape) and honoured the
+        caller's configuration, draft flag, display-card switch, history and
+        storage backend, so every one of those travels through instead of being
+        fixed by the face.
+        """
+
+        language = body.language or get_request_language(request)
+        principal = _principal(context)
+
+        try:
+            command = SyncReadCommand(
+                message=body.query,
+                search_switch=_parse_strategy(body.search_switch),
+                end_user_ids=(body.end_user_id,),
+                enable_rerank=body.enable_rerank,
+            )
+        except ValueError as error:
+            return failure(
+                _code_int(ReadErrorCode.INVALID_PARAMETER.value),
+                _error_message(
+                    ReadError(
+                        "Invalid search strategy",
+                        code=ReadErrorCode.INVALID_PARAMETER,
+                        reason="invalid_search_switch",
+                    ),
+                    language,
+                ),
+                str(error),
+            )
+
+        options = ReadOptions(
+            limit=body.limit,
+            includes=tuple(body.includes) if body.includes else None,
+            skip_summary=body.skip_summary,
+            enable_rerank=body.enable_rerank,
+            record_display=body.record_display,
+        )
+        overrides = ReadContextOverrides(
+            config_id=body.config_id,
+            storage_type=body.storage_type,
+            draft=body.draft,
+            conversation_id=body.conversation_id,
+            app_id=body.app_id,
+            user_rag_memory_id=body.user_rag_memory_id or None,
+        )
+
+        try:
+            outcome = await self.module(request).read_memory.execute(
+                command,
+                principal,
+                language=language,
+                options=options,
+                history=body.history,
+                overrides=overrides,
+            )
+        except ReadError as error:
+            logger.warning(
+                "application-service memory read failed: code=%s reason=%s workspace=%s",
+                error.code.value,
+                error.reason,
+                principal.workspace_id,
+            )
+            return _read_failure(error, language)
+
+        if isinstance(outcome, dict):
+            # One requested host can only ever produce a single outcome; a map
+            # here would mean the use case changed shape under this face.
+            outcome = next(iter(outcome.values()))
+        return success(
+            data={
+                "content": outcome.answer,
+                "memories": outcome.intermediate_outputs,
+            }
+        )
 
     async def stream_frames(
         self,

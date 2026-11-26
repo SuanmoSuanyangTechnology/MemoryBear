@@ -61,6 +61,7 @@ from ..dependencies import (
     require_knowledge_copy_principal,
 )
 from ..error_handlers import render_error
+from ..knowledge_capacity import check_workspace_capacity
 from ..query_validation import localized_query_validation
 from ..schemas.chunk import KnowledgeRetrievalSource
 from ..schemas.common import SERVICE_UNAVAILABLE_RESPONSE, SuccessEnvelope, success
@@ -282,6 +283,7 @@ async def create_knowledge(
     runtime: Annotated[ProcessRuntime, Depends(get_runtime)],
     source: Annotated[KnowledgeRetrievalSource, Depends(get_source)],
 ) -> SuccessEnvelope[dict[str, Any]]:
+    await check_workspace_capacity(request, runtime, principal)
     await validate_requested_knowledge_model_availability(
         create_data.model_dump(exclude_unset=True), principal, runtime.model_runtime
     )
@@ -312,6 +314,7 @@ async def copy_knowledge(
         str | None, Body(embed=True, description="Optional copied knowledge name")
     ] = None,
 ) -> SuccessEnvelope[dict[str, Any]]:
+    await check_workspace_capacity(request, runtime, principal)
     async with runtime.database.async_session() as db:
         data = await knowledge_copy_service.copy_knowledge_configuration(
             db,

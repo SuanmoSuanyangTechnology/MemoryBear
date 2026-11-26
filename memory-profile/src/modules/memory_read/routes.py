@@ -1,12 +1,13 @@
 """Internal memory-read routes.
 
-Four interfaces, one core:
+Five interfaces, one core:
 
 * ``POST /memory/read/sync`` — JSON, API-key reachable (``@external_api``);
 * ``POST /memory/read/internal`` — JSON with retrieval options, API-key
   reachable (``@external_api``);
 * ``POST /memory/read/stream`` — SSE, management face only.
 * ``POST /memory/read/prediction-statements`` — JSON, prediction recall.
+* ``POST /memory/read/app-service`` — JSON, application-service callback.
 
 All call the same application use cases through ``src.core.composition``; the
 transport layer never touches retrieval, storage or model code.
@@ -25,6 +26,7 @@ from src.middleware.auth import SOURCE_INTERNAL, MemoryPrincipal
 from src.middleware.identity import require_memory_context
 from src.modules.memory_read.handler import MemoryReadHandler
 from src.modules.memory_read.schemas import (
+    AppServiceReadBody,
     PredictionStatementReadBody,
     ReadInternalBody,
     ReadStreamBody,
@@ -95,6 +97,27 @@ async def read_memory_stream(
     body: ReadStreamBody = Body(...),  # noqa: B008
 ) -> StreamingResponse:
     return await _handler(request).read_stream(request, context, body)
+
+
+@router.post(
+    "/app-service",
+    response_model=SyncResponse,
+    summary="Read memory for the application-service callback",
+)
+async def app_service_memory_read(
+    request: Request,
+    context: Context,
+    body: AppServiceReadBody = Body(...),  # noqa: B008
+) -> SyncResponse:
+    """The callback face the application service already calls.
+
+    Authenticated like every other internal face: the caller presents the
+    internal token and the workspace/tenant come from its principal —
+    deliberately **not** ``@external_api``, because no tenant-visible API key
+    may reach it.
+    """
+
+    return await _handler(request).read_app_service(request, context, body)
 
 
 __all__ = ["router"]

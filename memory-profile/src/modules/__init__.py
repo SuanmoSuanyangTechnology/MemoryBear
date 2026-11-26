@@ -9,6 +9,7 @@ from src.modules.dashboard import router as dashboard_router
 from src.modules.display import router as display_router
 from src.modules.emotion_analytics import router as emotion_analytics_router
 from src.modules.emotion_reply import router as emotion_reply_router
+from src.modules.end_user import router as end_user_router
 from src.modules.episodic_memory import router as episodic_memory_router
 from src.modules.explicit_memory import router as explicit_memory_router
 from src.modules.files import router as files_router
@@ -45,6 +46,7 @@ router.include_router(reflection_router)
 router.include_router(implicit_memory_router)
 router.include_router(working_memory_router)
 router.include_router(write_router)
+router.include_router(end_user_router)
 router.include_router(explicit_memory_router)
 router.include_router(files_router)
 router.include_router(episodic_memory_router)

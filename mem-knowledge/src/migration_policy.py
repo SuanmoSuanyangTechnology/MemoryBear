@@ -1,4 +1,4 @@
-"""Only newly introduced knowledge tables belong to the knowledge migration chain."""
+"""知识库迁移链拥有的表及 Alembic 自动生成范围。"""
 
 WIKI_TABLE_NAMES = frozenset(
     {
@@ -13,12 +13,26 @@ WIKI_TABLE_NAMES = frozenset(
         "wiki_document_page_tasks",
     }
 )
-KNOWLEDGE_TABLE_NAMES = WIKI_TABLE_NAMES | {"knowledge_upload_fingerprints", "wiki_faq_import_jobs"}
+LEGACY_KNOWLEDGE_TABLE_NAMES = frozenset(
+    {
+        "knowledges",
+        "documents",
+        "files",
+        "knowledge_metadatas",
+        "knowledge_metadata_bindings",
+        "knowledge_shares",
+    }
+)
+KNOWLEDGE_TABLE_NAMES = (
+    WIKI_TABLE_NAMES
+    | LEGACY_KNOWLEDGE_TABLE_NAMES
+    | {"knowledge_upload_fingerprints", "wiki_faq_import_jobs"}
+)
 VERSION_TABLE = "alembic_version_knowledge"
 
 
 def include_name(name, type_, parent_names):
-    """Avoid reflecting unrelated services and the API-owned knowledge tables."""
+    """只反射知识库自身管理的表。"""
     if type_ == "table":
         return name in KNOWLEDGE_TABLE_NAMES
     return True

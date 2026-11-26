@@ -8,6 +8,8 @@ from sqlalchemy.orm import relationship
 
 from ...db import KnowledgeBase
 from ...utils.datetime_utils import utcnow_naive
+from ..references.user import User
+from ..references.workspace import Workspace
 
 
 class KnowledgeShare(KnowledgeBase):
@@ -28,10 +30,16 @@ class KnowledgeShare(KnowledgeBase):
     )
     target_workspace_id = Column(
         UUID(as_uuid=True),
+        ForeignKey(Workspace.__table__.c.id),
         nullable=False,
         comment="target workspaces.id",
     )
-    shared_by = Column(UUID(as_uuid=True), nullable=False, comment="shared users.id")
+    shared_by = Column(
+        UUID(as_uuid=True),
+        ForeignKey(User.__table__.c.id),
+        nullable=False,
+        comment="shared users.id",
+    )
     created_at = Column(DateTime, default=utcnow_naive)
     updated_at = Column(DateTime, default=utcnow_naive)
 
