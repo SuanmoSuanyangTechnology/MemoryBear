@@ -25,7 +25,7 @@ class EmotionBackfillMutationRepository:
                 )
             )
 
-    async def backfill(self, user_id: UUID, start: datetime, end: datetime) -> None:
+    async def backfill(self, user_id: UUID, start: datetime, end: datetime) -> int:
         rows = await self.neo4j.read_query(
             """
             MATCH (d:Dialogue)
@@ -39,7 +39,7 @@ class EmotionBackfillMutationRepository:
             end_dt=end,
         )
         if not rows:
-            return
+            return 0
         # Use the same IDs and UTC timestamps as the API's scheduled sync.
         values = []
         for row in rows:
@@ -72,3 +72,4 @@ class EmotionBackfillMutationRepository:
                     )
                 )
             await session.commit()
+        return len(values)

@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
-from typing import Literal
+from datetime import datetime, timedelta
+from typing import Literal, Self
 from uuid import UUID
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
+
+from src.common.normalization import as_utc_naive
 
 
 class EmotionTagsRequest(BaseModel):
@@ -32,3 +35,23 @@ class EmotionSuggestionsRequest(BaseModel):
 
 class GenerateSuggestionsRequest(BaseModel):
     end_user_id: str
+
+
+class EmotionSyncRequest(BaseModel):
+    end_user_id: UUID
+    start_time: datetime
+    end_time: datetime
+
+    @model_validator(mode="after")
+    def validate_window(self) -> Self:
+        try:
+            self.start_time = as_utc_naive(self.start_time)
+            self.end_time = as_utc_naive(self.end_time)
+        except OverflowError as exc:
+            raise ValueError("同步时间超出 UTC 可表示范围") from exc
+
+        if self.start_time >= self.end_time:
+            raise ValueError("start_time 必须早于 end_time")
+        if self.end_time - self.start_time > timedelta(days=7):
+            raise ValueError("同步时间窗口不能超过 7 天")
+        return self

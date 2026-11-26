@@ -6,9 +6,10 @@
 3. /health - 情绪健康指数
 4. /query_emotion_overview - 情绪数据概览（最近2个活跃日 + 数据质量 + 核心结论）
 5. /query_emotion_timeline - 情绪时间轴（分页返回全部活跃日）
+6. /sync - 在请求内同步指定用户最多 7 天的情绪明细到 PostgreSQL
 
-五个接口由 v1 Controller 独立处理公开协议，直接复用 /api 使用的 Service、
-Repository、数据源和计算逻辑，并补充 API Key 鉴权与 workspace 隔离。
+查询接口支持 memory-profile 代理；/sync 由 memory-profile 写入原始明细。
+所有端点均校验 API Key 和用户 workspace 归属。
 tags、wordcloud、health 使用 POST JSON Body；overview、timeline 使用 GET Query，
 切日基准由必传 X-Timezone 请求头指定；
 慢于 UTC+8 的时区查询前触发实时补数（失败降级不阻塞）。
@@ -36,6 +37,7 @@ from app.core.logging_config import get_business_logger
 from app.db import get_async_db_context, get_db_context
 from app.schemas.emotion_schema import (
     EmotionHealthRequest,
+    EmotionSyncRequest,
     EmotionTagsRequest,
     EmotionWordcloudRequest,
 )
@@ -186,6 +188,13 @@ async def get_emotion_health(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             content=fail(BizCode.INTERNAL_ERROR, "获取情绪健康指数失败"),
         )
+
+
+@router.post("/sync", response_model=ApiResponse)
+@require_api_key_self_db(scopes=["memory"])
+@memory_profile_proxy(raw_body=True, source=MemoryProfileAuthSource.APIKEY, preserve_status=True)
+async def sync_emotion_details(request: Request, payload: EmotionSyncRequest):
+    """同步指定 UTC 窗口内的情绪明细，提交后返回。"""
 
 
 @router.get("/query_emotion_overview", response_model=ApiResponse)
