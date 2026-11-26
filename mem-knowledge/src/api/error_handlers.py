@@ -7,7 +7,8 @@ from collections.abc import Mapping
 from error_core.codes import BizCode
 from error_core.diagnostics import format_diagnostics
 from error_core.knowledge import knowledge_message, validation_diagnostic
-from error_core.knowledge_upload import is_versioned_upload, upload_error_response
+from error_core.knowledge_upload import upload_error_response
+from error_core.messages import user_message
 from fastapi import FastAPI, Request
 from fastapi.exception_handlers import request_validation_exception_handler
 from fastapi.exceptions import RequestValidationError
@@ -23,7 +24,9 @@ from ..integrations.model.errors import ModelInvokeProtocolError
 from ..request_logging import log_request_failure
 from ..services.upload_deduplication import DuplicateUploadError
 from ..trace import TRACE_ID_HEADER, get_trace_id, normalize_trace_id
+from .knowledge_capacity import WorkspaceCapacityExceeded
 from .schemas.common import fail
+from .upload_contract import is_knowledge_upload
 
 _HTTP_ERRORS = {
     400: "KB_REQUEST_MALFORMED",
@@ -258,6 +261,31 @@ def render_upload_error(
 
 
 def register_error_handlers(application: FastAPI) -> None:
+    @application.exception_handler(WorkspaceCapacityExceeded)
+    async def capacity_error_handler(request: Request, exc: WorkspaceCapacityExceeded):
+        if is_knowledge_upload(request):
+            return render_upload_error(
+                request, exc, status=402, cause="QUOTA_EXCEEDED", code=BizCode.QUOTA_EXCEEDED,
+            )
+        language = request_locale(request)
+        message = user_message(BizCode.QUOTA_EXCEEDED, language) or "Quota exceeded"
+        body = fail(
+            code=BizCode.QUOTA_EXCEEDED, msg=message, error=message,
+            data={
+                "resource": "知识库容量" if language == "zh" else "knowledge base capacity",
+                "current_usage": float(exc.used_gb),
+                "quota_limit": float(exc.limit_gb),
+            },
+        )
+        return JSONResponse(
+            status_code=402,
+            content={"success": False, "message": message, "error_code": "QUOTA_EXCEEDED", **body},
+            headers={
+                TRACE_ID_HEADER: getattr(request.state, "trace_id", get_trace_id()),
+                "Content-Language": language,
+            },
+        )
+
     @application.exception_handler(DuplicateUploadError)
     async def duplicate_upload_handler(request: Request, exc: DuplicateUploadError):
         return render_upload_error(
@@ -268,7 +296,7 @@ def register_error_handlers(application: FastAPI) -> None:
     @application.exception_handler(StorageError)
     async def storage_error_handler(request: Request, exc: StorageError):
         mapped = map_storage_error(exc)
-        if is_versioned_upload(request, internal=True):
+        if is_knowledge_upload(request):
             return render_upload_error(
                 request, exc, status=_UPLOAD_ERROR_STATUSES.get(mapped.code, 500),
                 cause=mapped.code,
@@ -277,7 +305,7 @@ def register_error_handlers(application: FastAPI) -> None:
 
     @application.exception_handler(RequestValidationError)
     async def validation_error_handler(request: Request, exc: RequestValidationError):
-        if is_versioned_upload(request, internal=True):
+        if is_knowledge_upload(request):
             return render_upload_error(
                 request, exc, status=422, cause="VALIDATION_FAILED", validation_errors=exc.errors(),
             )
@@ -313,14 +341,14 @@ def register_error_handlers(application: FastAPI) -> None:
 
     @application.exception_handler(KnowledgeError)
     async def knowledge_error_handler(request: Request, exc: KnowledgeError):
-        if is_versioned_upload(request, internal=True):
+        if is_knowledge_upload(request):
             status = _UPLOAD_ERROR_STATUSES.get(exc.code, exc.status_code)
             return render_upload_error(request, exc, status=status, cause=exc.code)
         return render_error(request, exc)
 
     @application.exception_handler(HTTPException)
     async def http_error_handler(request: Request, exc: HTTPException):
-        if is_versioned_upload(request, internal=True):
+        if is_knowledge_upload(request):
             return render_upload_error(
                 request, exc, status=exc.status_code,
                 cause=_HTTP_ERRORS.get(exc.status_code, "KB_UPLOAD_HTTP_ERROR"),
@@ -333,7 +361,7 @@ def register_error_handlers(application: FastAPI) -> None:
 
     @application.exception_handler(Exception)
     async def unhandled_error_handler(request: Request, exc: Exception):
-        if is_versioned_upload(request, internal=True):
+        if is_knowledge_upload(request):
             if isinstance(exc, OperationalError):
                 return render_upload_error(
                     request, exc, status=503, cause="KB_DATABASE_UNAVAILABLE",

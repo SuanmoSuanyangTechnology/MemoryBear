@@ -2,10 +2,9 @@
 
 from __future__ import annotations
 
-from typing import Annotated
 from uuid import UUID
 
-from fastapi import Header, Request
+from fastapi import Request
 from pydantic import BaseModel, ValidationError
 
 from ..errors import KnowledgeError
@@ -76,22 +75,33 @@ async def get_optional_principal(request: Request) -> Principal | None:
 
 
 async def require_knowledge_copy_principal(request: Request) -> Principal:
-    """Require the legacy manager proxy trust boundary for configuration copy."""
+    """配置复制仅接受管理端来源和知识库认证中间件确认的身份。"""
 
-    if getattr(request.state, "kb_legacy_proxy_authenticated", False) is not True:
+    if not is_manager_request(request):
         raise KnowledgeError.from_code("KB_HTTP_FORBIDDEN")
-    if request.headers.get("X-KB-Source") != KnowledgeRetrievalSource.MANAGER_API.value:
-        raise KnowledgeError.from_code("KB_HTTP_FORBIDDEN")
-    if "authorization" in request.headers or "x-api-key" in request.headers:
-        raise KnowledgeError.from_code("KB_HTTP_FORBIDDEN")
-    return await get_principal(request)
+    principal = getattr(request.state, "principal", None)
+    if isinstance(principal, Principal):
+        return principal
+    if getattr(request.state, "kb_legacy_proxy_authenticated", False) is True:
+        return _principal_from_headers(request)
+    raise KnowledgeError.from_code("KB_HTTP_FORBIDDEN")
 
 
-async def get_source(
-    value: Annotated[str | None, Header(alias="X-KB-Source")] = None,
-) -> KnowledgeRetrievalSource:
-    """Parse the API-asserted business source."""
+def _resolve_source_value(request: Request) -> str | None:
+    """从两种传输方言解析调用方断言的来源。
 
+    网关终止凭据后以通用 ``x-source`` 头注入面标识；单体代理与东西向内部调用方
+    送 kb 专属 ``X-KB-Source``（还携带 workflow/agent 等业务来源）。优先网关面
+    标识，回落到 kb 头。
+    """
+
+    return request.headers.get("X-Source") or request.headers.get("X-KB-Source")
+
+
+async def get_source(request: Request) -> KnowledgeRetrievalSource:
+    """解析调用方断言的业务来源（网关面标识或 kb 头）。"""
+
+    value = _resolve_source_value(request)
     try:
         return KnowledgeRetrievalSource(value or KnowledgeRetrievalSource.GENERAL)
     except ValueError as exc:
@@ -101,9 +111,7 @@ async def get_source(
 
 
 def is_manager_request(request: Request) -> bool:
-    # The gateway and monolith proxy forward the source in different headers.
-    source = request.headers.get("X-Source") or request.headers.get("X-KB-Source")
-    return source == KnowledgeRetrievalSource.MANAGER_API
+    return _resolve_source_value(request) == KnowledgeRetrievalSource.MANAGER_API
 
 
 __all__ = [
