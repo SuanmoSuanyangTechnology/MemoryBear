@@ -84,7 +84,7 @@ async def app_emotion_policy(
         except (httpx.HTTPError, TimeoutError, ValueError) as exc:
             logger.warning(
                 "app emotion policy failed: request_id=%s fault=%s",
-                request.state.trace_id, type(exc).__name__,
+                context.trace_id, type(exc).__name__,
             )
     return error_response(
         request, 503, failure(BizCode.SERVICE_UNAVAILABLE, "情绪回应策略能力不可用")

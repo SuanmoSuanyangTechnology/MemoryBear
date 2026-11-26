@@ -6,7 +6,7 @@ import logging
 from collections.abc import Awaitable, Callable
 from uuid import UUID
 
-from src.common.vocabulary import EMOTION_CODES
+from src.common.vocabulary import normalize_emotion_type
 from src.schemas.emotion_reply import EmotionPolicy, EmotionReplyData
 
 logger = logging.getLogger(__name__)
@@ -45,9 +45,10 @@ async def resolve_app_emotion_policy[Strategy](
     emotion_code: str,
 ) -> Strategy | None:
     """Look up a detected emotion through an app- and tenant-scoped policy reader."""
-    if emotion_code not in EMOTION_CODES:
+    normalized_code = normalize_emotion_type(emotion_code)
+    if normalized_code is None:
         return None
-    return await load_policy(app_id, tenant_id, workspace_id, emotion_code)
+    return await load_policy(app_id, tenant_id, workspace_id, normalized_code)
 
 
 class EmotionReplyService:
