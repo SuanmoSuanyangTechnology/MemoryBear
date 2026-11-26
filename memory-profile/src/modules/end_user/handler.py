@@ -18,7 +18,11 @@ from src.repositories.end_user_info import EndUserInfoReadRepository
 from src.repositories.end_user_info_mutation import EndUserInfoMutationRepository
 from src.repositories.outbox import OutboxRepository
 from src.runtime import ProfileRuntime
-from src.services.end_user_domain import project_domains, resolve_scene_names
+from src.services.end_user_domain import (
+    project_domains,
+    resolve_field_labels,
+    resolve_scene_names,
+)
 from src.services.end_user_info import (
     EndUserInfoInvalidIdError,
     EndUserInfoNotFoundError,
