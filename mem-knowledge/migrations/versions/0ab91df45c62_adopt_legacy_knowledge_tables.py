@@ -212,6 +212,15 @@ _INDEX_COLUMNS = {
 }
 _TABLE_NAMES = ", ".join(f"'{name}'" for name in _COLUMNS)
 _PLATFORM_TABLES = {"users", "workspaces", "model_configs"}
+# 核心迁移链管理的可选扩展；不加入空库创建时使用的冻结基线。
+_CORE_KNOWLEDGE_COLUMNS = {
+    ("knowledges", "source"): ("character varying(16)", False, None),
+    ("knowledges", "index_strategy"): ("character varying(16)", False, None),
+}
+_CORE_KNOWLEDGE_CHECKS = {
+    ("knowledges", "ck_knowledges_source_type"),
+    ("knowledges", "ck_knowledges_index_strategy"),
+}
 _STATS_FUNCTION = """
 CREATE FUNCTION public.update_knowledge_stats()
 RETURNS TRIGGER AS $$
@@ -393,22 +402,21 @@ def _verify_schema(connection: sa.Connection) -> None:
           AND a.attnum > 0 AND NOT a.attisdropped
     """)
     # timestamp 和 timestamp(6) 都使用 PostgreSQL 默认的微秒精度。
-    _compare(
-        {
-            (table, col.name): (
-                col.type.replace("timestamp(6)", "timestamp"),
-                col.not_null,
-                col.default,
-            )
-            for table, definitions in _COLUMNS.items()
-            for col in definitions
-        },
-        {
-            (table, name): (type_.replace("timestamp(6)", "timestamp"), required, default)
-            for table, name, type_, required, default in columns
-        },
-        "列",
-    )
+    expected_columns = {
+        (table, col.name): (
+            col.type.replace("timestamp(6)", "timestamp"), col.not_null, col.default,
+        )
+        for table, definitions in _COLUMNS.items()
+        for col in definitions
+    }
+    actual_columns = {
+        (table, name): (type_.replace("timestamp(6)", "timestamp"), required, default)
+        for table, name, type_, required, default in columns
+    }
+    if actual_columns.keys() & _CORE_KNOWLEDGE_COLUMNS.keys():
+        # 已应用核心扩展时，两个列都必须存在且属性一致；未知列仍然拒绝。
+        expected_columns.update(_CORE_KNOWLEDGE_COLUMNS)
+    _compare(expected_columns, actual_columns, "列")
     constraints = connection.exec_driver_sql(f"""
         SELECT c.relname, x.conname, pg_get_constraintdef(x.oid)
         FROM pg_constraint x
@@ -418,7 +426,13 @@ def _verify_schema(connection: sa.Connection) -> None:
           AND x.convalidated AND x.contype <> 'n'
     """)
     _compare(
-        _CONSTRAINTS, {(table, name): definition for table, name, definition in constraints}, "约束"
+        _CONSTRAINTS,
+        {
+            (table, name): definition for table, name, definition in constraints
+            # 这两个 CHECK 由核心链管理，VALIDATE 前后都不属于旧表接管基线。
+            if (table, name) not in _CORE_KNOWLEDGE_CHECKS or not definition.startswith("CHECK (")
+        },
+        "约束",
     )
     indexes = connection.exec_driver_sql(f"""
         SELECT c.relname, idx.relname, pg_get_indexdef(idx.oid)

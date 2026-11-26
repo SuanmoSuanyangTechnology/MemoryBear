@@ -92,17 +92,9 @@ async def _persist_upload(
             inherit_parser_config=inherit_parser_config,
             record_fingerprint=record_fingerprint,
         )
-    await storage.upload(plan.file_key, content, content_type)
-    persistence_succeeded = False
-    try:
-        async with runtime.database.async_session() as db:
-            outcome = await file_service.persist_uploaded_content(db, plan, principal)
-            persistence_succeeded = True
-    except Exception:
-        if not persistence_succeeded:
-            await file_service.compensate_storage_upload(storage, plan.file_key)
-        raise
-    return outcome
+    return await file_service.save_upload(
+        runtime, storage, plan, principal, content, content_type
+    )
 
 
 @router.get(
@@ -120,6 +112,9 @@ async def get_files(
     orderby: Annotated[str | None, Query()] = None,
     desc: Annotated[bool, Query()] = False,
     keywords: Annotated[str | None, Query()] = None,
+    file_ext: Annotated[
+        str | None, Query(description="Exact value of the file_ext field, such as .pdf or folder.")
+    ] = None,
 ) -> SuccessEnvelope[dict[str, Any]]:
     async with runtime.database.async_session() as db:
         total, items = await file_service.list_files(
@@ -132,6 +127,7 @@ async def get_files(
             orderby=orderby,
             desc=desc,
             keywords=keywords,
+            file_ext=file_ext,
         )
     return _success(
         request,

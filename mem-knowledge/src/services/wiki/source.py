@@ -6,7 +6,9 @@ import asyncio
 import logging
 
 from ...models.owned import Document, Knowledge, WikiDocumentState
+from ...parser_configuration import to_runtime
 from ...rag.wiki.config import WikiError, WikiSuperseded, read_wiki_config
+from ...repositories.parser_configuration import knowledge_configuration
 from ...repositories.wiki import state as repository
 from ...repositories.wiki.common import append_log, as_uuid, lock_document, lock_knowledge
 from ...tasks.observability import current_parent_task_id
@@ -25,7 +27,9 @@ def _source_start(session, document_id, source_task_id, *, replace=False):
         return None
     knowledge = session.get(Knowledge, document.kb_id)
     state = session.get(WikiDocumentState, document.id)
-    if state is None and not read_wiki_config(knowledge.parser_config).enabled:
+    if state is None and not read_wiki_config(
+        to_runtime(knowledge_configuration(knowledge))
+    ).enabled:
         return None
     result = repository.source_started(
         session, document.kb_id, document.id, source_task_id, replace=replace
@@ -55,7 +59,8 @@ def _incomplete_source(session, document_id, source_task_id):
     for task in current_tasks(session, state):
         task.status, task.error_code, task.error_stage = "failed", state.error_code, "source"
     document.run = 0
-    document.progress = -1.0 if read_wiki_config(knowledge.parser_config).enabled else 1.0
+    enabled = read_wiki_config(to_runtime(knowledge_configuration(knowledge))).enabled
+    document.progress = -1.0 if enabled else 1.0
     state.last_progress = document.progress
     append_log(
         document, "问答数据未完整导入，Wiki 生成已停止；请完成导入后重新发起 Wiki 处理。"
@@ -148,7 +153,9 @@ def _source_verification(session, document_id, source_task_id):
     if state and state.source_ready:
         return None
     knowledge = session.get(Knowledge, document.kb_id)
-    if state is None and not read_wiki_config(knowledge.parser_config).enabled:
+    if state is None and not read_wiki_config(
+        to_runtime(knowledge_configuration(knowledge))
+    ).enabled:
         return None
     return {
         "kb_id": str(document.kb_id), "chunk_count": document.chunk_num,

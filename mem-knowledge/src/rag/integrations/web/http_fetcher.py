@@ -16,7 +16,10 @@ class HTTPFetcher:
     """Handle HTTP requests with retries, error handling, and response validation."""
 
     def __init__(
-        self, timeout: int = 10, max_retries: int = 3, user_agent: str = "KnowledgeBaseCrawler/1.0"
+        self,
+        timeout: float = 10,
+        max_retries: int = 3,
+        user_agent: str = "KnowledgeBaseCrawler/1.0",
     ):
         """
         Initialize HTTP fetcher.

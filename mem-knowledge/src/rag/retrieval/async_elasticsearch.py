@@ -85,6 +85,7 @@ class AsyncChunkStore:
         client: Any,
         knowledge_id: uuid.UUID | str,
         *,
+        vectorize: bool = True,
         embed: EmbedFunction | None = None,
         embed_chunks: EmbedChunksFunction | None = None,
         embed_unit_contents: Callable[[list[Any]], Awaitable[Any]] | None = None,
@@ -102,6 +103,7 @@ class AsyncChunkStore:
         self.index = index_name or collection_name_for_knowledge(knowledge_id)
         self.document_id_field = document_id_field
         self.embed = embed
+        self.vectorize = vectorize
         self.embed_chunks = embed_chunks
         self.embed_unit_contents = embed_unit_contents
         self.image_resolver = image_resolver
@@ -110,7 +112,7 @@ class AsyncChunkStore:
         self._mutation_context = mutation_context or nullcontext
         # Unit-layout index marker. Read-only callers (chunk list) set this
         # without wiring embedders so they still collapse/filter units correctly.
-        self.multimodal = (
+        self.multimodal = vectorize and (
             multimodal if multimodal is not None else embed_unit_contents is not None
         )
 
@@ -314,8 +316,9 @@ class AsyncChunkStore:
             source: dict[str, Any] = {
                 Field.CONTENT_KEY.value: chunk.page_content,
                 Field.METADATA_KEY.value: metadata,
-                Field.VECTOR.value: vector,
             }
+            if self.vectorize:
+                source[Field.VECTOR.value] = vector
             for field, key in (
                 (Field.CHUNK_TYPE, "chunk_type"),
                 (Field.QUESTION, "question"),
@@ -338,7 +341,7 @@ class AsyncChunkStore:
         if mutation is None:
             await async_bulk(self.client, actions, **kwargs)
             return
-        # 与 async_bulk 一样遇到批次错误即抛出；先记录已成功的项，避免部分写入后漏撤旧 Wiki。
+        # Record successful items even when a later item in the batch fails.
         async for ok, _ in async_streaming_bulk(self.client, actions, **kwargs):
             if ok:
                 mutation.record(1)
@@ -351,13 +354,11 @@ class AsyncChunkStore:
         vector = None
         if chunk_type not in {"source", "parent"}:
             vector = (await self._embed_chunks([chunk]))[0]
-        source = (
-            "ctx._source.page_content = params.new_content; ctx._source.vector = params.new_vector;"
-        )
-        params: dict[str, Any] = {
-            "new_content": chunk.page_content,
-            "new_vector": vector,
-        }
+        source = "ctx._source.page_content = params.new_content;"
+        params: dict[str, Any] = {"new_content": chunk.page_content}
+        if self.vectorize:
+            source += " ctx._source.vector = params.new_vector;"
+            params["new_vector"] = vector
         if chunk_type == "qa":
             source += (
                 " ctx._source.question = params.new_question;"
@@ -490,6 +491,8 @@ class AsyncChunkStore:
             return int(response.get("deleted", 0))
 
     async def _embed_chunks(self, chunks: list[DocumentChunk]) -> list[list[float] | None]:
+        if not self.vectorize:
+            return [None] * len(chunks)
         if self.embed_chunks is not None:
             embedded = await self.embed_chunks(chunks)
             if len(embedded) != len(chunks):
@@ -516,6 +519,10 @@ class AsyncChunkStore:
 
     async def _create_index(self, embeddings: list[list[float] | None]) -> None:
         sample = next((embedding for embedding in embeddings if embedding is not None), None)
+        if sample is None and self.vectorize and self.embedding_dimension is None:
+            # A first parent/source chunk has no vector. Resolve the model's dimension
+            # before creating the index, without storing a vector on that chunk.
+            sample = (await self._embed_chunks([DocumentChunk(page_content="dimension probe")]))[0]
         dimensions = (
             len(sample)
             if sample is not None

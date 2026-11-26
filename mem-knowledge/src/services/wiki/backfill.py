@@ -5,7 +5,9 @@ from datetime import UTC, datetime
 from sqlalchemy import and_, or_, select
 
 from ...models.owned import Document, Knowledge, WikiDocumentState
+from ...parser_configuration import to_runtime
 from ...rag.wiki.config import ACTIVE_STATUSES, read_wiki_config
+from ...repositories.parser_configuration import knowledge_configuration
 from ...repositories.wiki.common import as_uuid, lock_knowledge, state_delivery
 from ...repositories.wiki.state import admit, record_publish_failure
 from .execution import publish_map
@@ -14,7 +16,9 @@ from .runtime import transaction
 
 def _batch(session, kb_id, upper_at_ms, cursor, limit, *, only_candidates=False):
     knowledge = session.get(Knowledge, as_uuid(kb_id))
-    if knowledge is None or not read_wiki_config(knowledge.parser_config).enabled:
+    if knowledge is None or not read_wiki_config(
+        to_runtime(knowledge_configuration(knowledge))
+    ).enabled:
         return []
     upper = datetime.fromtimestamp(upper_at_ms / 1000, UTC).replace(tzinfo=None)
     query = select(Document.id, Document.created_at).where(

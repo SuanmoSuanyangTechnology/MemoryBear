@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import uuid
-from copy import deepcopy
 from datetime import datetime
 from typing import Any
 
@@ -19,13 +18,10 @@ from ..errors import KnowledgeError, public_text
 from ..model_errors import MODEL_FIELD_ROLES, ModelFailure, model_error
 from ..models.owned import Knowledge, KnowledgeType, PermissionType
 from ..models.references import ModelConfig
-from ..rag.knowledge_graph import (
-    GraphPipeline,
-    require_graph_mapping,
-    resolve_graph_pipeline,
-)
+from ..rag.knowledge_graph import GraphPipeline
 from ..repositories import knowledge as knowledge_repository
 from ..repositories.knowledge_metadata import KnowledgeMetadataRepository
+from ..repositories.parser_configuration import AsyncParserConfigurationRepository
 from ..repositories.reference import ReferenceRepository
 from ..utils.datetime_utils import utcnow_naive
 from . import knowledge as knowledge_service
@@ -57,19 +53,6 @@ def choose_copy_name(source_name: str, occupied_names: set[str]) -> str:
     while f"{base}{suffix}" in occupied_names:
         suffix += 1
     return f"{base}{suffix}"
-
-
-def copy_parser_config(source_config: dict[str, Any]) -> dict[str, Any]:
-    """Deep-copy parser settings while selecting the current graph pipeline."""
-    if not isinstance(source_config, dict):
-        raise ValueError("Source parser_config must be an object")
-
-    resolve_graph_pipeline(source_config)
-    result = deepcopy(source_config)
-    graph = dict(require_graph_mapping(result))
-    graph["pipeline"] = GraphPipeline.EVIDENCE.value
-    result["graphrag"] = graph
-    return result
 
 
 def _validation(
@@ -202,7 +185,6 @@ def _build_knowledge_values(
     knowledge_id: uuid.UUID,
     name: str,
     parent_id: uuid.UUID,
-    parser_config: dict[str, Any],
     now: datetime,
 ) -> dict[str, Any]:
     return {
@@ -225,7 +207,6 @@ def _build_knowledge_values(
         "doc_num": 0,
         "chunk_num": 0,
         "parser_id": source["parser_id"],
-        "parser_config": parser_config,
         "status": 1,
         "builtin_metadata_enabled": source["builtin_metadata_enabled"],
         "created_at": now,
@@ -287,11 +268,6 @@ async def copy_knowledge_configuration(
         )
         _validate_metadata_fields(metadata_fields, principal.tenant_id)
         await _validate_model_references(db, source, principal.tenant_id)
-        try:
-            parser_config = copy_parser_config(source["parser_config"])
-        except ValueError as exc:
-            raise _validation("KB_KNOWLEDGE_COPY_PARSER_CONFIG_INVALID") from exc
-
         copy_name = (name or "").strip()
         if copy_name:
             if await knowledge_repository.get_knowledge_by_name_async(
@@ -313,7 +289,6 @@ async def copy_knowledge_configuration(
             knowledge_id=copied_id,
             name=copy_name,
             parent_id=parent_id,
-            parser_config=parser_config,
             now=now,
         )
         metadata_values = _build_metadata_values(
@@ -324,6 +299,11 @@ async def copy_knowledge_configuration(
         )
 
         copied: Knowledge = knowledge_repository.stage_knowledge_copy(db, values)
+        await AsyncParserConfigurationRepository(db).write_knowledge(
+            copied, lambda _: source["configuration"].model_copy(
+                update={"graph_pipeline": GraphPipeline.EVIDENCE.value}
+            ),
+        )
         KnowledgeMetadataRepository.stage_copy_fields(db, metadata_values)
         await db.flush()
         if source["parser_id"] is None:

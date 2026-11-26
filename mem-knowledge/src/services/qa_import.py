@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import logging
 import uuid
-from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -22,12 +21,6 @@ logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from ..runtime import ProcessRuntime
-
-
-@dataclass(frozen=True)
-class QAImportResources:
-    document_id: uuid.UUID
-    file_id: uuid.UUID
 
 
 def validate_qa_upload(
@@ -132,21 +125,7 @@ async def prepare_qa_import_resources(
     )
 
 
-async def create_qa_import_resources(
-    db: AsyncSession,
-    plan: file_service.UploadPlan,
-    principal: Principal,
-) -> QAImportResources:
-    outcome = await file_service.persist_uploaded_content(db, plan, principal)
-    return QAImportResources(
-        document_id=outcome.document_id,
-        file_id=outcome.file_id,
-    )
-
-
 __all__ = [
-    "QAImportResources",
-    "create_qa_import_resources",
     "dispatch_qa_import",
     "prepare_qa_import_resources",
     "validate_qa_upload",
