@@ -61,8 +61,23 @@ from app.core.memory.retrieval_trace.message_trace import (
     strip_memory_trace_transients,
 )
 from app.core.memory.retrieval_trace.stage_events import capture_memory_stage_stream, memory_stage_capture
+from app.core.memory.retrieval_trace.tool_steps import (
+    ToolStepCollector,
+    apply_agent_event,
+    apply_text_event,
+    apply_tool_event,
+    merge_tool_steps,
+)
 
 logger = get_business_logger()
+
+# Tool-call events whose payload carries (or gains) an ordering `seq`. Shared by
+# the Agent loop and the cluster forwarder so a future event name is added once.
+_TOOL_EVENT_NAMES = frozenset({"tool_start", "tool_end", "tool_error"})
+# Supervisor→sub-agent dispatch events. They take a `seq` too, because the
+# supervisor narrates → dispatches an agent → narrates again, and the agent card
+# has to sit between those two paragraphs.
+_AGENT_STEP_EVENTS = frozenset({"agent_dispatch", "agent_complete"})
 
 
 class StreamConcurrencyGate:
@@ -1189,6 +1204,7 @@ class AppChatService:
 
         try:
             memory_trace = MessageTrace()
+            tool_steps = ToolStepCollector()
             start_time = time.time()
             message_id = uuid.uuid4()
             user_message_id = uuid.uuid4()
@@ -1225,7 +1241,7 @@ class AppChatService:
                 )
                 yield f"event: start\ndata: {json.dumps({'conversation_id': str(conversation_id), 'message_id': str(message_id), 'user_message_id': str(user_message_id)}, ensure_ascii=False)}\n\n"
                 yield f"event: message\ndata: {json.dumps({'content': annotation_match['answer'], 'conversation_id': str(conversation_id)}, ensure_ascii=False)}\n\n"
-                yield f"event: end\ndata: {json.dumps({'elapsed_time': time.time() - start_time, 'message_length': len(annotation_match['answer']), 'usage': {'prompt_tokens': 0, 'completion_tokens': 0, 'total_tokens': 0}}, ensure_ascii=False)}\n\n"
+                yield f"event: end\ndata: {json.dumps({'elapsed_time': time.time() - start_time, 'message_length': len(annotation_match['answer']), 'usage': {'prompt_tokens': 0, 'completion_tokens': 0, 'total_tokens': 0}, 'last_seq': tool_steps.last_seq(), 'last_message': {'seq': None, 'content': annotation_match['answer']}}, ensure_ascii=False)}\n\n"
                 return
 
             # 应用 features 配置
@@ -1439,7 +1455,20 @@ class AppChatService:
                     memory_stages = []
                     if step.get("node_name") == "long_term_memory":
                         memory_stages = memory_trace.record_weak_tool(step)
-                    yield f"event: tool_start\ndata: {json.dumps({'step_id': step.get('step_id'), 'name': step.get('node_name'), 'input': step.get('input'), 'meta': step.get('meta')}, cls=CustomJsonEncoder, ensure_ascii=False)}\n\n"
+                    # 重放的步骤在本 collector 存在之前就已经结束，因此不启动计时
+                    # （否则耗时会被算成 ~0ms）。
+                    start_payload = apply_tool_event(
+                        tool_steps,
+                        "tool_start",
+                        {
+                            "step_id": step.get("step_id"),
+                            "name": step.get("node_name"),
+                            "input": step.get("input"),
+                            "meta": step.get("meta"),
+                        },
+                        replay=True,
+                    )
+                    yield f"event: tool_start\ndata: {json.dumps(start_payload, cls=CustomJsonEncoder, ensure_ascii=False)}\n\n"
                     for stage in memory_stages:
                         stage_event = {
                             "step_id": step.get("step_id"),
@@ -1447,8 +1476,25 @@ class AppChatService:
                             "status": stage.get("status", "completed"),
                             "data": stage.get("data") or {},
                         }
+                        # Stages share the seq of the memory tool call they belong
+                        # to: they are sub-steps of one card, so allocating fresh
+                        # numbers would shift every later text segment.
+                        stage_seq = start_payload.get("seq")
+                        if stage_seq is not None:
+                            stage_event["seq"] = stage_seq
                         yield f"event: memory_stage\ndata: {json.dumps(stage_event, cls=CustomJsonEncoder, ensure_ascii=False)}\n\n"
-                    yield f"event: {event_type}\ndata: {json.dumps({'step_id': step.get('step_id'), 'name': step.get('node_name'), 'output': step.get('output'), 'error': step.get('error'), 'meta': step.get('meta')}, cls=CustomJsonEncoder, ensure_ascii=False)}\n\n"
+                    end_payload = apply_tool_event(
+                        tool_steps,
+                        event_type,
+                        {
+                            "step_id": step.get("step_id"),
+                            "name": step.get("node_name"),
+                            "output": step.get("output"),
+                            "error": step.get("error"),
+                            "meta": step.get("meta"),
+                        },
+                    )
+                    yield f"event: {event_type}\ndata: {json.dumps(end_payload, cls=CustomJsonEncoder, ensure_ascii=False)}\n\n"
                 tools = []
 
             # 创建 LangChain Agent（远端模式：身份/能力事实取非解密视图，凭据不上送）
@@ -1527,6 +1573,7 @@ class AppChatService:
                     node_executions = chunk.get("data", [])
                     if capture_memory_stages:
                         memory_trace.reconcile_tools(node_executions)
+                    tool_steps.reconcile(node_executions)
                 elif isinstance(chunk, dict) and chunk.get("type") == "tool_start":
                     if capture_memory_stages:
                         memory_trace.start_tool(
@@ -1534,7 +1581,13 @@ class AppChatService:
                             name=chunk.get("name", ""),
                             input_value=chunk.get("input"),
                         )
-                    yield f"event: tool_start\ndata: {json.dumps({'step_id': chunk.get('step_id'), 'name': chunk['name'], 'input': chunk.get('input'), 'meta': chunk.get('meta')}, cls=CustomJsonEncoder, ensure_ascii=False)}\n\n"
+                    start_payload = apply_tool_event(tool_steps, "tool_start", {
+                        "step_id": chunk.get("step_id"),
+                        "name": chunk["name"],
+                        "input": chunk.get("input"),
+                        "meta": chunk.get("meta"),
+                    })
+                    yield f"event: tool_start\ndata: {json.dumps(start_payload, cls=CustomJsonEncoder, ensure_ascii=False)}\n\n"
                 elif (
                     capture_memory_stages
                     and isinstance(chunk, dict)
@@ -1544,11 +1597,22 @@ class AppChatService:
                     if payload is None:
                         continue
                     stage_event = {"step_id": chunk.get("step_id"), **payload}
+                    # Same seq as the memory tool call: stages are sub-steps of
+                    # one card, so they must not consume fresh numbers.
+                    stage_seq = tool_steps.seq_of(chunk.get("step_id"))
+                    if stage_seq is not None:
+                        stage_event["seq"] = stage_seq
                     yield f"event: memory_stage\ndata: {json.dumps(stage_event, cls=CustomJsonEncoder, ensure_ascii=False)}\n\n"
                 elif isinstance(chunk, dict) and chunk.get("type") == "tool_end":
                     if capture_memory_stages:
                         memory_trace.finish_tool(step_id=chunk.get("step_id"), status="completed")
-                    yield f"event: tool_end\ndata: {json.dumps({'step_id': chunk.get('step_id'), 'name': chunk['name'], 'output': chunk.get('output'), 'meta': chunk.get('meta')}, cls=CustomJsonEncoder, ensure_ascii=False)}\n\n"
+                    end_payload = apply_tool_event(tool_steps, "tool_end", {
+                        "step_id": chunk.get("step_id"),
+                        "name": chunk["name"],
+                        "output": chunk.get("output"),
+                        "meta": chunk.get("meta"),
+                    })
+                    yield f"event: tool_end\ndata: {json.dumps(end_payload, cls=CustomJsonEncoder, ensure_ascii=False)}\n\n"
                 elif isinstance(chunk, dict) and chunk.get("type") == "tool_error":
                     if capture_memory_stages:
                         memory_trace.finish_tool(
@@ -1556,12 +1620,21 @@ class AppChatService:
                             status="failed",
                             error=chunk.get("error"),
                         )
-                    yield f"event: tool_error\ndata: {json.dumps({'step_id': chunk.get('step_id'), 'name': chunk['name'], 'error': chunk.get('error')}, cls=CustomJsonEncoder, ensure_ascii=False)}\n\n"
+                    tool_error_payload = apply_tool_event(tool_steps, "tool_error", {
+                        "step_id": chunk.get("step_id"),
+                        "name": chunk["name"],
+                        "error": chunk.get("error"),
+                    })
+                    yield f"event: tool_error\ndata: {json.dumps(tool_error_payload, cls=CustomJsonEncoder, ensure_ascii=False)}\n\n"
                 elif isinstance(chunk, dict) and chunk.get("type") == "agent_log":
                     yield f"event: agent_log\ndata: {json.dumps(chunk, cls=CustomJsonEncoder, ensure_ascii=False)}\n\n"
                 elif isinstance(chunk, str):
                     full_content += chunk
-                    yield f"event: message\ndata: {json.dumps({'content': chunk}, ensure_ascii=False)}\n\n"
+                    # `seq` = the text segment this chunk belongs to. Consecutive
+                    # chunks share one segment until a tool call interrupts them,
+                    # so a token-by-token reply stays a single step.
+                    _text_payload = apply_text_event(tool_steps, {"content": chunk})
+                    yield f"event: message\ndata: {json.dumps(_text_payload, ensure_ascii=False)}\n\n"
                     if tts_task is not None:
                         await text_queue.put(chunk)
                 elif isinstance(chunk, dict):
@@ -1575,7 +1648,16 @@ class AppChatService:
             await self._record_api_key_usage(_api_key_id)
 
             # 发送结束事件（包含 suggested_questions、tts、audio_status、citations）
-            end_data: dict = {"elapsed_time": elapsed_time, "message_length": len(full_content), "error": None}
+            end_data: dict = {
+                "elapsed_time": elapsed_time,
+                "message_length": len(full_content),
+                "error": None,
+                # 本轮时间线的最后一个 seq（含文本段），前端据此在 end 帧收尾，
+                # 不再等“1s 无新增”。
+                "last_seq": tool_steps.last_seq(),
+                # 最后一轮消息全文，前端可直接用它收尾，不必自己拼 chunk。
+                "last_message": tool_steps.last_message(),
+            }
             sq_config = features_config.get("suggested_questions_after_answer", {})
             suggested_questions = []
             if isinstance(sq_config, dict) and sq_config.get("enabled"):
@@ -1612,7 +1694,10 @@ class AppChatService:
                 "suggested_questions": suggested_questions,
                 "reasoning_content": full_reasoning or None
             }
-            assistant_meta = merge_memory_trace(assistant_meta, memory_trace)
+            assistant_meta = merge_memory_trace(
+                assistant_meta, memory_trace, tool_steps.seq_of
+            )
+            assistant_meta = merge_tool_steps(assistant_meta, tool_steps)
 
             # 长期记忆写入由 conversation_service.add_message → MemoryWriteDispatcher 统一接管，
             # 这里不再触发老的 write_long_term 路径。
@@ -2110,6 +2195,9 @@ class AppChatService:
             # end 事件先扣住，等落库入队完成后再下发：客户端收到 end 即断开会取消本生成器，
             # 取消态下的 DB 查询/入队会被反复打断，连接以脏状态留在池里、消息也会丢。
             held_end_event: Optional[str] = None
+            # 主管自身的工具调用（子 Agent 的工具到不了这条流），按到达顺序收集，
+            # 保证刷新后时间线与流式时一致。
+            tool_steps = ToolStepCollector()
 
             # 标注命中（未配置/未启用标注返回 None，老集群无影响）；命中则不进编排器，
             # 直接落库并下发 message/end（与 Agent 应用一致）。
@@ -2120,7 +2208,7 @@ class AppChatService:
             if _annotation_hit is not None:
                 _answer = _annotation_hit["answer"]
                 yield f"event: message\ndata: {json.dumps({'content': _answer, 'conversation_id': str(conversation_id)}, ensure_ascii=False)}\n\n"
-                yield f"event: end\ndata: {json.dumps({'elapsed_time': time.time() - start_time, 'conversation_id': str(conversation_id), 'message_id': str(message_id), 'message_length': len(_answer), 'usage': {'prompt_tokens': 0, 'completion_tokens': 0, 'total_tokens': 0}}, ensure_ascii=False)}\n\n"
+                yield f"event: end\ndata: {json.dumps({'elapsed_time': time.time() - start_time, 'conversation_id': str(conversation_id), 'message_id': str(message_id), 'message_length': len(_answer), 'usage': {'prompt_tokens': 0, 'completion_tokens': 0, 'total_tokens': 0}, 'last_seq': tool_steps.last_seq(), 'last_message': {'seq': None, 'content': _answer}}, ensure_ascii=False)}\n\n"
                 return
 
             # 2. 创建编排器
@@ -2174,24 +2262,46 @@ class AppChatService:
 
                 if _event_name == "end":
                     held_end_event = event
+                elif _event_name in _TOOL_EVENT_NAMES and "data:" in event:
+                    # 解析 → 归约 → 重发：payload 必须先带上 `seq`（终态事件还有
+                    # `duration_ms`）才能离开本层，所以这里是重组帧而不是直接转发。
+                    try:
+                        _payload = json.loads(event.split("data: ", 1)[1].strip())
+                    except Exception:
+                        yield event
+                    else:
+                        _reduced = apply_tool_event(tool_steps, _event_name, _payload)
+                        yield f"event: {_event_name}\ndata: {json.dumps(_reduced, cls=CustomJsonEncoder, ensure_ascii=False)}\n\n"
+                elif _event_name == "message" and "data:" in event:
+                    # 正文同样重组帧：`seq` 标记本 chunk 所属的文本段，客户端据此把
+                    # 正文与工具步骤交错排布。正文只在这里累加，且只认集群级的
+                    # `message` 事件：子 Agent 的正文走 `sub_agent_message`（已在各自
+                    # 区块展示），若一并累加，落库正文会比界面多一份，刷新后主气泡
+                    # 变长。本层收集口径与 orchestrator 的 message 事件发布一一对应
+                    #（supervisor=merge 输出，supervisor_loop=主管 ReAct 正文，
+                    # collaboration=handoffs 主回复）。
+                    try:
+                        _payload = json.loads(event.split("data: ", 1)[1].strip())
+                    except Exception:
+                        yield event
+                    else:
+                        _reduced = apply_text_event(tool_steps, _payload)
+                        if "content" in _reduced:
+                            full_content += _reduced["content"]
+                        yield f"event: message\ndata: {json.dumps(_reduced, cls=CustomJsonEncoder, ensure_ascii=False)}\n\n"
+                elif _event_name in _AGENT_STEP_EVENTS and "data:" in event:
+                    # 主管派发子 Agent 是本轮的一个步骤，与工具调用同构：带上 `seq`
+                    # 后客户端才能把这张 Agent 卡片卡在前后两段正文之间，而不是把
+                    # 所有卡片堆到正文上方。只改这两帧，子 Agent 自己的事件不动。
+                    try:
+                        _payload = json.loads(event.split("data: ", 1)[1].strip())
+                    except Exception:
+                        yield event
+                    else:
+                        _reduced = apply_agent_event(tool_steps, _event_name, _payload)
+                        yield f"event: {_event_name}\ndata: {json.dumps(_reduced, cls=CustomJsonEncoder, ensure_ascii=False)}\n\n"
                 else:
                     yield event
-                # 累加主气泡正文：只认集群级的 `message` 事件。
-                # 子 Agent 的正文走 `sub_agent_message`（已在各自区块展示），
-                # 若一并累加，落库的 assistant 正文会比界面显示多出一份重复内容，
-                # 刷新后主气泡会变长。
-                # 注意：S3 之后子 Agent 事件已剥离子会话 conversation_id，
-                # 本层收集口径与 orchestrator 的 message 事件发布口径一一对应
-                #（supervisor=merge 输出，supervisor_loop=主管 ReAct 正文，
-                # collaboration=handoffs 主回复）。
-                if _event_name == "message" and "data:" in event:
-                    try:
-                        data_line = event.split("data: ", 1)[1].strip()
-                        data = json.loads(data_line)
-                        if "content" in data:
-                            full_content += data["content"]
-                    except:
-                        pass
 
             elapsed_time = time.time() - start_time
 
@@ -2209,12 +2319,12 @@ class AppChatService:
             _result.user_message_id = user_message_id
             _result.full_content = full_content
             _result.total_tokens = total_tokens
-            _result.assistant_meta = {
+            _result.assistant_meta = merge_tool_steps({
                 "elapsed_time": elapsed_time,
                 "mode": getattr(orchestrator, "_normalized_mode", None),
                 "merge_mode_actual": getattr(orchestrator, "_merge_mode_actual", None),
                 "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": total_tokens},
-            }
+            }, tool_steps)
             _persist_args = {
                 "conversation_id": str(conversation_id),
                 "result": _result,
@@ -2283,8 +2393,16 @@ class AppChatService:
             )
 
             # 落库已入队，最后再下发 end
+            # `last_seq` 在释放时才补齐：这个值只有整轮消费完才是最终值。
             if held_end_event is not None:
-                yield held_end_event
+                try:
+                    _held_data = json.loads(held_end_event.split("data: ", 1)[1].strip())
+                except Exception:
+                    yield held_end_event
+                else:
+                    _held_data["last_seq"] = tool_steps.last_seq()
+                    _held_data["last_message"] = tool_steps.last_message()
+                    yield f"event: end\ndata: {json.dumps(_held_data, ensure_ascii=False)}\n\n"
 
         except (GeneratorExit, asyncio.CancelledError):
             # 生成器被关闭或任务被取消，正常退出

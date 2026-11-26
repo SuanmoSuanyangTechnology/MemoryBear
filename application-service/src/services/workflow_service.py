@@ -72,6 +72,7 @@ from .annotation_service import AnnotationService
 from .asset_release_resolver import AssetReleaseResolver
 from .conversation_service import ConversationService
 from .multi_agent_service import convert_uuids_to_str
+from ..memory.retrieval_trace.tool_steps import hydrate_message_meta
 from ..models.annotation_model import HitLogSource
 from .multimodal_service import MultimodalService
 from .workspace_service import get_workspace_storage_type_without_auth
@@ -6299,7 +6300,10 @@ class WorkflowService:
 
         def serialize(m: MessageModel) -> dict:
             fb_type, fb_content = feedback_map.get(m.id, (None, None))
-            meta_out = m.meta_data
+            # Same slicing as the log detail and share detail reads: a switched
+            # version arrives with its text steps already cut, exactly like the
+            # initial load.
+            meta_out = hydrate_message_meta(m.meta_data, m.content)
             # audio_status is persisted as a snapshot taken at the end event (usually
             # "pending"; TTS has not finished yet) and never written back. Override it
             # with the live FileMetadata status, same convention as the conversation

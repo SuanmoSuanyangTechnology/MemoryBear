@@ -7,7 +7,7 @@ import logging
 import uuid
 from datetime import datetime
 
-from sqlalchemy import desc, func, select
+from sqlalchemy import case, desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
@@ -380,9 +380,9 @@ class MessageRepository:
         Page 1 holds the newest ``pagesize`` rows; ``page`` grows towards
         older history. Returns ``(messages, has_earlier)`` where messages are
         in ascending time order (the query orders DESC for paging, then the
-        page is reversed). ``pagesize + 1`` rows decide ``has_earlier``
-        without a separate count query. The query rides
-        ``idx_messages_conv_created``.
+        page is reversed). Tied assistant replies follow user messages, and
+        IDs stabilize ties within the same role rank. ``pagesize + 1`` rows
+        decide ``has_earlier`` without a separate count query.
         """
 
         filters = [
@@ -393,10 +393,11 @@ class MessageRepository:
             filters.append(Message.is_current.is_not(False))
 
         offset = (page - 1) * pagesize
+        assistant_rank = case((Message.role == "assistant", 1), else_=0)
         rows = list(self.db.scalars(
             select(Message)
             .where(*filters)
-            .order_by(Message.created_at.desc(), Message.id.desc())
+            .order_by(Message.created_at.desc(), assistant_rank.desc(), Message.id.desc())
             .offset(offset)
             .limit(pagesize + 1)
         ).all())

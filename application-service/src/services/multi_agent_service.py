@@ -24,6 +24,13 @@ from ..errors import (
     SubAgentValidationError,
 )
 from ..integrations.model.errors import ModelInvokeCancelledError
+from ..memory.retrieval_trace.tool_steps import (
+    ToolStepCollector,
+    apply_agent_event,
+    apply_text_event,
+    apply_tool_event,
+    merge_tool_steps,
+)
 from ..models import App, AppRelease
 from ..models.annotation_model import HitLogSource
 from ..models.multi_agent_model import MultiAgentConfig
@@ -34,6 +41,13 @@ from .model_ref_gate import raise_model_unavailable, resolve_invoke_ref
 from .multi_agent_orchestrator import MultiAgentOrchestrator
 from .multi_agent_release_resolver import describe_release_state, resolve_release_for_save
 from .tool_service import ToolService
+
+# Tool-call events whose payload carries (or gains) an ordering `seq`.
+_TOOL_EVENT_NAMES = frozenset({"tool_start", "tool_end", "tool_error"})
+# Supervisor→sub-agent dispatch events. They take a `seq` too, because the
+# supervisor narrates → dispatches an agent → narrates again, and the agent card
+# has to sit between those two paragraphs.
+_AGENT_STEP_EVENTS = frozenset({"agent_dispatch", "agent_complete"})
 
 logger = logging.getLogger(__name__)
 
@@ -763,6 +777,9 @@ class MultiAgentService:
 
         full_content = ""
         total_tokens = 0
+        # Supervisor's own tool calls (sub-agent tools never reach this stream),
+        # kept in arrival order so the timeline survives a refresh.
+        tool_steps = ToolStepCollector()
         # Pre-generate the assistant message ID and hand it to the orchestrator:
         # the master execution record gets its message_id by backfill, and log
         # details attach nodes by message instead of "closest in time" (which
@@ -792,6 +809,9 @@ class MultiAgentService:
                 "message_id": str(message_id),
                 "message_length": len(_answer),
                 "usage": _zero_usage,
+                # Nothing was streamed through the collector, so no seq exists;
+                # the answer is still the turn's last message.
+                "last_message": {"seq": None, "content": _answer},
             }
             yield f"event: start\ndata: {json.dumps(_start_data, ensure_ascii=False)}\n\n"
             yield f"event: message\ndata: {json.dumps(_message_data, ensure_ascii=False)}\n\n"
@@ -848,22 +868,66 @@ class MultiAgentService:
                     for _k in ("suggested_questions", "citations", "audio_url", "audio_status"):
                         if _k in data:
                             end_extras[_k] = data[_k]
+                    # Stamp the turn's last seq: this layer owns the collector
+                    # that assigned them, so the client can close the reply from
+                    # the end frame instead of waiting for the stream to go quiet.
+                    data["last_seq"] = tool_steps.last_seq()
+                    # Same frame carries the last body segment's full text.
+                    data["last_message"] = tool_steps.last_message()
+                    yield f"event: end\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
+                    continue
                 except Exception:
                     pass
 
-            yield event
-            # Persist only the cluster-level `message` events (decided by event
-            # name). Sub-agent bodies arrive as `sub_agent_message`; counting
-            # them too would give the persisted assistant body one extra copy
-            # versus the UI (bubble grows after refresh).
-            if _event_name == "message" and "data:" in event:
+            if _event_name in _TOOL_EVENT_NAMES and "data:" in event:
+                # Parse → reduce → re-emit: the payload must carry `seq` (and
+                # `duration_ms` on terminal events) before it leaves this layer,
+                # so the frame is rebuilt instead of forwarded verbatim.
                 try:
-                    data_line = event.split("data: ", 1)[1].strip()
-                    data = json.loads(data_line)
-                    if "content" in data:
-                        full_content += data["content"]
+                    _payload = json.loads(event.split("data: ", 1)[1].strip())
                 except Exception:
-                    pass
+                    yield event
+                else:
+                    _reduced = apply_tool_event(tool_steps, _event_name, _payload)
+                    _reduced_json = json.dumps(_reduced, ensure_ascii=False)
+                    yield f"event: {_event_name}\ndata: {_reduced_json}\n\n"
+                    continue
+
+            if _event_name == "message" and "data:" in event:
+                # Same rebuild for the body: `seq` marks the text segment this
+                # chunk belongs to, so the client can interleave body text with
+                # the tool steps. Only cluster-level `message` counts — sub-agent
+                # bodies arrive as `sub_agent_message`, and counting them too
+                # would give the persisted body one extra copy versus the UI
+                # (bubble grows after refresh).
+                try:
+                    _payload = json.loads(event.split("data: ", 1)[1].strip())
+                except Exception:
+                    _payload = None
+                if _payload is not None:
+                    _reduced = apply_text_event(tool_steps, _payload)
+                    if "content" in _reduced:
+                        full_content += _reduced["content"]
+                    _reduced_json = json.dumps(_reduced, ensure_ascii=False)
+                    yield f"event: message\ndata: {_reduced_json}\n\n"
+                    continue
+
+            if _event_name in _AGENT_STEP_EVENTS and "data:" in event:
+                # A supervisor calling a sub-agent is a step of this turn, just
+                # like a tool call: `seq` places the agent card between the two
+                # paragraphs around it. Only these two frames are touched — the
+                # sub-agent's own events keep their existing channel and shape.
+                try:
+                    _payload = json.loads(event.split("data: ", 1)[1].strip())
+                except Exception:
+                    yield event
+                else:
+                    _reduced = apply_agent_event(tool_steps, _event_name, _payload)
+                    _frame = json.dumps(_reduced, ensure_ascii=False)
+                    yield f"event: {_event_name}\ndata: {_frame}\n\n"
+                    continue
+
+            yield event
 
         # Persistence closure: this service (draft/API scenario) is the single
         # persistence layer for the multi-agent stream — writes go through
@@ -881,12 +945,12 @@ class MultiAgentService:
         _result.user_message_id = user_message_id
         _result.full_content = full_content
         _result.total_tokens = total_tokens
-        _result.assistant_meta = {
+        _result.assistant_meta = merge_tool_steps({
             "elapsed_time": elapsed_time,
             "mode": getattr(orchestrator, "_normalized_mode", None),
             "merge_mode_actual": getattr(orchestrator, "_merge_mode_actual", None),
             "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": total_tokens},
-        }
+        }, tool_steps)
         # Suggested questions / citations / voice persist like an Agent app;
         # empty end_extras writes no field.
         if end_extras:
@@ -1498,6 +1562,9 @@ class MultiAgentService:
                 "message_id": str(new_message_id),
                 "message_length": len(_answer),
                 "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
+                # Annotation hits skip the orchestrator, so no seq was allocated.
+                "last_seq": None,
+                "last_message": {"seq": None, "content": _answer},
             })
             yield _sse("regenerate_end", {
                 "message_id": str(new_message_id),
@@ -1511,6 +1578,7 @@ class MultiAgentService:
         full_content = ""
         usage: dict[str, Any] = {}
         end_extras: dict[str, Any] = {}
+        tool_steps = ToolStepCollector()
         stream_failed = False
         error_emitted = False
         failure_error: str | None = None
@@ -1569,6 +1637,11 @@ class MultiAgentService:
 
                 if _ev == "message" and "content" in _data:
                     full_content += _data["content"]
+                    event = _sse(_ev, apply_text_event(tool_steps, _data))
+                elif _data and _ev in _TOOL_EVENT_NAMES:
+                    event = _sse(_ev, apply_tool_event(tool_steps, _ev, _data))
+                elif _data and _ev in _AGENT_STEP_EVENTS:
+                    event = _sse(_ev, apply_agent_event(tool_steps, _ev, _data))
                 yield event
         except (GeneratorExit, _asyncio.CancelledError):
             # Consumer disconnected mid-stream (GeneratorExit / task cancellation are
@@ -1615,7 +1688,10 @@ class MultiAgentService:
             content=full_content,
             version=new_version,
             parent_message_id=parent_msg_id,
-            meta_data=self._build_regenerate_meta(message_id, usage=usage, extra=end_extras),
+            meta_data=merge_tool_steps(
+                self._build_regenerate_meta(message_id, usage=usage, extra=end_extras),
+                tool_steps,
+            ),
             message_id=new_message_id,
         )
 
@@ -1655,6 +1731,8 @@ class MultiAgentService:
             "message_id": str(new_message_id),
             "message_length": len(full_content),
             "usage": usage or {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
+            "last_seq": tool_steps.last_seq(),
+            "last_message": tool_steps.last_message(),
             **end_extras,
         })
         yield _sse("regenerate_end", {

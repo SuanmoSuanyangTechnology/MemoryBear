@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import any_, bindparam, desc, func, select
+from sqlalchemy import any_, bindparam, case, desc, func, select
 from sqlalchemy.dialects.postgresql import ARRAY
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
@@ -621,7 +621,8 @@ class MessageRepository:
         if current_only:
             stmt = stmt.where(Message.is_current.is_not(False))
 
-        stmt = stmt.order_by(Message.created_at)
+        assistant_rank = case((Message.role == "assistant", 1), else_=0)
+        stmt = stmt.order_by(Message.created_at, assistant_rank, Message.id)
 
         messages = list(self.db.scalars(stmt).all())
 
