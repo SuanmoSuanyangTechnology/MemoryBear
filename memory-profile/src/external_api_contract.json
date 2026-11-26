@@ -6059,12 +6059,6 @@
               ],
               "default": null,
               "required": true
-            },
-            "scene_label_vocabulary": {
-              "annotation": "list[str]",
-              "constraints": [],
-              "default": null,
-              "required": true
             }
           },
           "in": "body",

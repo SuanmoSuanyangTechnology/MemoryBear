@@ -7,29 +7,39 @@ import logging
 
 from alembic import command
 from alembic.config import Config
-from sqlalchemy import text
+from sqlalchemy import Connection, text
 
-from .bootstrap import resolve_bootstrap_paths
+from .bootstrap import get_settings, resolve_bootstrap_paths
+from .config import KnowledgeSettings
+from .db import DatabaseManager
 from .migration_policy import VERSION_TABLE
 from .runtime import ProcessRuntime
 
 logger = logging.getLogger(__name__)
 _MIGRATION_LOCK_KEY = f"mem-knowledge:{VERSION_TABLE}"
+_LEGACY_TABLES_BASELINE = "0ab91df45c62"
 
 
-def _upgrade_database(runtime: ProcessRuntime) -> None:
+def _upgrade_schema(connection: Connection, settings: KnowledgeSettings) -> None:
     service_root = resolve_bootstrap_paths().service_root
     config = Config(str(service_root / "alembic.ini"))
     config.set_main_option("script_location", str(service_root / "migrations"))
-    config.attributes["settings"] = runtime.settings
-    # The lock, DDL and version update share one transaction and one connection.
-    with runtime.database.sync_connection() as connection, connection.begin():
+    config.attributes["settings"] = settings
+    # 两段迁移在同一个连接、事务和锁下执行。
+    with connection.begin():
         connection.execute(
             text("SELECT pg_advisory_xact_lock(hashtextextended(:key, 0))"),
             {"key": _MIGRATION_LOCK_KEY},
         )
         config.attributes["connection"] = connection
+        # 空库先创建 Wiki 迁移依赖的表。已有 Wiki 版本的库仍要核对这批存量表。
+        command.upgrade(config, _LEGACY_TABLES_BASELINE)
         command.upgrade(config, "head")
+
+
+def _upgrade_database(runtime: ProcessRuntime) -> None:
+    with runtime.database.sync_connection() as connection:
+        _upgrade_schema(connection, runtime.settings)
 
 
 async def upgrade_database_on_startup(runtime: ProcessRuntime) -> None:
@@ -47,3 +57,18 @@ async def upgrade_database_on_startup(runtime: ProcessRuntime) -> None:
         )
         raise
     logger.info("Automatic knowledge database upgrade completed version_table=%s", VERSION_TABLE)
+
+
+def main() -> None:
+    """发布任务使用和服务启动相同的迁移入口。"""
+    settings = get_settings()
+    database = DatabaseManager(settings)
+    try:
+        with database.sync_connection() as connection:
+            _upgrade_schema(connection, settings)
+    finally:
+        database.close_sync()
+
+
+if __name__ == "__main__":
+    main()

@@ -14,7 +14,6 @@ class SpatiotemporalAnchorSettings(BaseModel):
     temporal_chain_enabled: StrictBool
     temporal_chain_interval_minutes: int = Field(strict=True, ge=15, le=1440)
     temporal_chain_rebuild_limit: int = Field(strict=True, ge=50, le=1000)
-    scene_label_vocabulary: list[str]
 
 
 class SpatiotemporalAnchorUpdate(SpatiotemporalAnchorSettings):
