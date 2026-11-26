@@ -8,8 +8,7 @@ import type { NodeData } from './type'
 type ChatList = Array<ChatItem | ChatItem[]>
 
 // Shared version-array helpers (single source of truth).
-import { mapLastVersion, flattenChatList } from '@/components/Chat/utils/messageVersions'
-export { mapLastVersion, flattenChatList }
+import { mapLastVersion } from '@/components/Chat/utils/messageVersions'
 
 /**
  * Builds the draft-run request payload from the current message and attachments.

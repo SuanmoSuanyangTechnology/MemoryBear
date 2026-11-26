@@ -1,10 +1,4 @@
 /*
- * @Author: ZhaoYing 
- * @Date: 2026-02-24 17:57:08 
- * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-06-05 20:06:06
- */
-/*
  * Runtime Component
  * 
  * This component displays the execution runtime details of workflow nodes in a chat interface.
@@ -18,16 +12,13 @@
 import { type FC, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import clsx from 'clsx'
-import { App, Button, Collapse, Flex } from 'antd'
-import { CheckCircleFilled, CloseCircleFilled, LoadingOutlined, RightOutlined, ArrowLeftOutlined, PauseCircleFilled } from '@ant-design/icons'
-import copy from 'copy-to-clipboard'
+import { Flex } from 'antd'
+import { CheckCircleFilled, CloseCircleFilled, LoadingOutlined, PauseCircleFilled } from '@ant-design/icons'
 
-import styles from './chat.module.css'
 import type { ChatItem } from '@/components/Chat/types'
 import Markdown from '@/components/Markdown'
-import CodeBlock from '@/components/Markdown/CodeBlock'
 import RbAlert from '@/components/RbAlert'
-import { hasProcessNodes } from '../../constant'
+import RuntimeNodeList, { getRuntimeNodeStatus } from './RuntimeNodeList'
 
 /**
  * Runtime component props
@@ -40,237 +31,7 @@ const Runtime: FC<{ source: string; item: ChatItem; index: number;}> = ({
   index
 }) => {
   const { t } = useTranslation()
-  const { message } = App.useApp()
-  // Stores the currently selected detail view (for nested loop/iteration exploration)
-  const [detail, setDetail] = useState<any>(null)
-  // Tracks whether the current detail view is for a loop (true) or iteration (false)
-  const [loop, setLoop] = useState<boolean | null>(null)
   const [expanded, setExpanded] = useState(false)
-
-  /**
-   * Handles navigation into nested loop/iteration details
-   * @param vo - The node object containing subContent to display
-   * @param isLoop - Whether this is a loop node (true) or iteration node (false)
-   */
-  const handleViewDetail = (vo: any, isLoop: boolean) => {
-    setDetail(vo)
-    setLoop(isLoop)
-  }
-
-  /**
-   * Returns CSS class for status-based text color
-   * @param status - Node execution status: 'completed', 'failed', or other
-   * @returns Tailwind CSS class for appropriate color
-   */
-  const getStatus = (status?: string) => {
-    return status === 'completed'
-      ? 'rb:text-[#369F21]!'
-      : status === 'failed'
-      ? 'rb:text-[#FF5D34]!'
-      : status === 'waiting_human'
-      ? 'rb:text-[#FF5D34]!'
-      : 'rb:text-[#5B6167]!'
-  }
-
-  /**
-   * Renders child nodes grouped by cycle index (for loop/iteration nodes)
-   * Groups nodes by their cycle_idx and displays them in separate collapsible sections
-   * @param list - Array of child node execution data
-   */
-  const renderDetailChild = (list: any, node_type: string) => {
-    // Group nodes by cycle_idx to organize loop/iteration cycles
-    const groupedByCycle = list.reduce((acc: any, item: any, index: number) => {
-      const idx = item.cycle_idx ?? index ?? 0
-      if (!acc[idx]) acc[idx] = []
-      acc[idx].push(item)
-      return acc
-    }, {})
-
-    return (
-      <Flex gap={8} vertical>
-        {Object.entries(groupedByCycle).map(([cycleIdx, items]: [string, any]) => {
-          return (
-            <Collapse
-              key={cycleIdx}
-              items={[{
-                key: cycleIdx,
-                label: (
-                  <Flex align="center" gap={4}>
-                    <span>{node_type === 'agent' ? 'ROUND': t(`workflow.runtime.${loop ? 'loop' : 'iteration'}`)} {Number(cycleIdx) + 1}</span>
-                  </Flex>
-                ),
-                className: styles.collapseItem,
-                children: node_type !== 'agent'
-                  ? renderChild(items, node_type)
-                  : (
-                    <Flex gap={8} vertical className="rb:mt-3!">
-                      {/* Display input and output data as JSON code blocks */}
-                      {['llm', 'tool_calls'].map(key => {
-                        const data = items[0][key]
-                        return (
-                          <div key={key} className="rb:bg-[#EBEBEB] rb:rounded-lg">
-                            <Flex align="center" justify="space-between" className="rb:py-2! rb:px-3! rb:text-[12px]">
-                              <span>{key === 'llm' ? data.model : 'TOOL CALLS'}</span>
-                              <Button
-                                className="rb:py-0! rb:px-1! rb:text-[12px]!"
-                                size="small"
-                                onClick={() => handleCopy(typeof data === 'object' && data ? JSON.stringify(data, null, 2) : '{}')}
-                              >{t('common.copy')}</Button>
-                            </Flex>
-                            <div className="rb:max-h-40 rb:overflow-auto">
-                              <CodeBlock
-                                size="small"
-                                value={typeof data === 'object' && data ? JSON.stringify(data, null, 2) : '{}'}
-                                needCopy={false}
-                                showLineNumbers={true}
-                                background="#EBEBEB"
-                              />
-                            </div>
-                          </div>
-                        )
-                      })}
-                    </Flex>
-                  )
-              }]}
-            />
-          )
-        })}
-      </Flex>
-    )
-  }
-
-  /**
-   * Renders detailed view of child nodes with their execution information
-   * Displays node status, input/output data, errors, and nested cycles
-   * @param list - Array of node execution data or error message string
-   */
-  const renderChild = (list: any, node_type?: string) => {
-    if (Array.isArray(list) && node_type !== 'agent') {
-      return <Flex gap={8} vertical>
-        {list?.map(vo => {
-          const isLoop = vo.node_type === 'loop';
-          // Render cycle variables for loop nodes without node_name
-          if (typeof vo.cycle_idx === 'number' && isLoop && !vo.node_name) {
-            return (
-              <div className="rb:bg-[#F0F3F8] rb:rounded-md">
-                <Flex align="center" justify="space-between" className="rb:py-2! rb:px-3! rb:text-[12px]">
-                  {t(`workflow.config.loop.cycle_vars`)}
-                  <Button
-                    className="rb:py-0! rb:px-1! rb:text-[12px]!"
-                    size="small"
-                    onClick={() => handleCopy(typeof vo.content === 'object' && vo.content?.input ? JSON.stringify(vo.content.input, null, 2) : '{}')}
-                  >{t('common.copy')}</Button>
-                </Flex>
-                <div className="rb:max-h-40 rb:overflow-auto">
-                  <CodeBlock
-                    size="small"
-                    value={typeof vo.content === 'object' && vo.content?.input ? JSON.stringify(vo.content.input, null, 2) : '{}'}
-                    needCopy={false}
-                    showLineNumbers={true}
-                  />
-                </div>
-              </div>
-            )
-          }
-
-          // Skip rendering if no node_name is present and not an agent_log iteration
-          if (!vo.node_name && node_type !== 'agent') return null
-          // Render collapsible node with status, timing, and execution details
-          return (
-            <Collapse
-              key={vo.node_id}
-              bordered={false}
-              className="rb:bg-[#F6F6F6]"
-              items={[{
-                key: vo.node_id,
-                label: (
-                  <Flex align="center" justify="space-between">
-                    <Flex gap={6} align="center" className="rb:flex-1!">
-                      {vo.icon && source !== 'agent' && <div className={`rb:size-6 rb:bg-cover ${vo.icon}`} />}
-                      <div className="rb:wrap-break-word rb:line-clamp-1 rb:font-medium">{vo.node_name}</div>
-                    </Flex>
-                    <Flex align="center" gap={8} className="rb:text-[12px]">
-                      {typeof vo.elapsed_time == 'number' && <>{vo.elapsed_time?.toFixed(3)}ms</>}
-                      {vo.status === 'completed'
-                        ? <CheckCircleFilled className={`rb:mr-1 ${getStatus(vo.status)}`} />
-                        : vo.status === 'failed'
-                        ? <CloseCircleFilled className={`rb:mr-1 ${getStatus(vo.status)}`} />
-                        : vo.status === 'waiting_human'
-                        ? <PauseCircleFilled className={`rb:mr-1 ${getStatus(vo.status)}`} />
-                        : <LoadingOutlined className={`rb:mr-1 ${getStatus(vo.status)}`} />
-                      }
-                    </Flex>
-                  </Flex>
-                ),
-                className: styles.collapseItem,
-                children: (
-                  <Flex gap={8} vertical>
-                    {/* Display error message for failed nodes */}
-                    {vo.content?.error && vo.content?.error !== '' &&
-                      <RbAlert color="orange" className="rb:pb-0!">
-                        <Flex vertical className="rb:w-full!">
-                          <Flex align="center" justify="space-between">
-                            {t(`workflow.error`)}
-                            <Button
-                              className="rb:py-0! rb:px-1! rb:text-[12px]!"
-                              size="small"
-                              onClick={() => handleCopy(vo.content?.error || '')}
-                            >{t('common.copy')}</Button>
-                          </Flex>
-                          <Markdown content={vo.content?.error || ''} />
-                        </Flex>
-                      </RbAlert>
-                    }
-                    {/* Display navigation to nested cycles if subContent exists */}
-                    {(vo.subContent?.length > 0 || vo.agent_log?.iterations?.length > 0) && (
-                      <Flex justify="space-between" className="rb:bg-[#F0F3F8] rb:rounded-md rb:py-2! rb:px-3! rb:cursor-pointer" onClick={() => handleViewDetail(vo, vo.node_type === 'loop')}>
-                        <span>{vo.agent_log?.iterations?.length || Math.max(...vo.subContent.map((itemVo: any) => itemVo.cycle_idx + 1))} {t(`workflow.${isLoop ? 'loopNum' : 'iterationNum'}`)}</span>
-                        <RightOutlined />
-                      </Flex>
-                    )}
-                    {/* Display input and output data as JSON code blocks */}
-                    {['input', 'process', 'output'].map(key => {
-                      if ((source === 'agent' || !hasProcessNodes.includes(vo.node_type)) && key === 'process') return null
-                      return (
-                        <div key={key} className="rb:bg-[#EBEBEB] rb:rounded-lg">
-                          <Flex align="center" justify="space-between" className="rb:py-2! rb:px-3! rb:text-[12px]">
-                            {isLoop ? t(`workflow.runtime.${key}_cycle_vars`) : t(`workflow.${key}_result`)}
-                            <Button
-                              className="rb:py-0! rb:px-1! rb:text-[12px]!"
-                              size="small"
-                              onClick={() => handleCopy(typeof vo.content === 'object' && vo.content?.[key] ? JSON.stringify(vo.content[key], null, 2) : '{}')}
-                            >{t('common.copy')}</Button>
-                          </Flex>
-                          <div className="rb:max-h-40 rb:overflow-auto">
-                            <CodeBlock
-                              size="small"
-                              value={typeof vo.content === 'object' && vo.content?.[key] ? JSON.stringify(vo.content[key], null, 2) : '{}'}
-                              needCopy={false}
-                              showLineNumbers={true}
-                              background="#EBEBEB"
-                            />
-                          </div>
-                        </div>
-                      )
-                    })}
-                  </Flex>
-                )
-              }]}
-            />
-          )
-        })}
-      </Flex>
-    }
-    return <div className={clsx("rb:bg-[#FBFDFF] rb:rounded-md rb:py-2 rb:px-3 ", getStatus('failed'))}>
-      <Markdown content={list || ''} />
-    </div>
-  }
-
-  /** Copy value to clipboard and show success message */
-  const handleCopy = (value: string) => {
-    copy(value)
-    message.success(t('common.copySuccess'))
-  }
 
   return (
     <div
@@ -282,12 +43,12 @@ const Runtime: FC<{ source: string; item: ChatItem; index: number;}> = ({
       <Flex align="center" justify="space-between" className="rb:font-medium rb:pb-3!">
         <span className="rb:font-medium rb:leading-5">
           {item.status === 'completed'
-            ? <CheckCircleFilled className={`rb:mr-1 ${getStatus(item.status)}`} />
+            ? <CheckCircleFilled className={`rb:mr-1 ${getRuntimeNodeStatus(item.status)}`} />
             : item.status === 'failed'
-            ? <CloseCircleFilled className={`rb:mr-1 ${getStatus(item.status)}`} />
+            ? <CloseCircleFilled className={`rb:mr-1 ${getRuntimeNodeStatus(item.status)}`} />
             : item.status === 'waiting_human'
-            ? <PauseCircleFilled className={`rb:mr-1 ${getStatus(item.status)}`} />
-            : <LoadingOutlined className={`rb:mr-1 ${getStatus(item.status)}`} />
+            ? <PauseCircleFilled className={`rb:mr-1 ${getRuntimeNodeStatus(item.status)}`} />
+            : <LoadingOutlined className={`rb:mr-1 ${getRuntimeNodeStatus(item.status)}`} />
           }
           {t(`application.${source}`)}
         </span>
@@ -297,7 +58,7 @@ const Runtime: FC<{ source: string; item: ChatItem; index: number;}> = ({
           className={clsx("rb:size-6.5 rb:cursor-pointer rb-border rb:rounded-lg", {
             'rb:hover:bg-[#F6F6F6]!': expanded
           })}
-          onClick={() => { setExpanded(v => !v); setDetail(null) }}
+          onClick={() => setExpanded(v => !v)}
         >
           <div
             className={clsx("rb:size-4 rb:bg-cover", {
@@ -308,21 +69,12 @@ const Runtime: FC<{ source: string; item: ChatItem; index: number;}> = ({
         </Flex>
       </Flex>
       {expanded && (
-        detail
-          ? (
-            <div className="rb:bg-[#FBFDFF] rb:rounded-md rb:mb-4">
-              <Button type="link" icon={<ArrowLeftOutlined />} onClick={() => setDetail(null)} className="rb:px-0! rb:text-[12px]!">
-                {t('common.return')}
-              </Button>
-              {renderDetailChild(detail.subContent || detail.agent_log?.iterations || [], detail.node_type)}
-            </div>
-          )
-          : <div className="rb:mb-4">
-            {item.error && item.error !== '' &&
-              <RbAlert color="orange" className="rb:pb-0! rb:mb-2!"><Markdown content={item.error} /></RbAlert>
-            }
-            {renderChild(item.subContent)}
-          </div>
+        <>
+          {item.error && item.error !== '' &&
+            <RbAlert color="orange" className="rb:pb-0! rb:mb-2!"><Markdown content={item.error} /></RbAlert>
+          }
+          <RuntimeNodeList source={source} list={item.subContent || []} />
+        </>
       )}
     </div>
   )

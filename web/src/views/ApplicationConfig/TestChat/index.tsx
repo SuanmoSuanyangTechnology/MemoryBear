@@ -55,6 +55,7 @@ import {
   createTestClusterStreamHandler,
   createWorkflowStreamHandler,
 } from './streamHandlers'
+import { createTimelineAwareStreamHandler } from '@/components/Chat/utils/timelineStream'
 
 const TestChat: FC<TestChatProps> = ({
   application,
@@ -160,6 +161,28 @@ const TestChat: FC<TestChatProps> = ({
       config,
     })(data)
 
+  /** Agent / cluster runs get a timeline-aware wrapper; workflows keep their own handler. */
+  const createStreamHandler = (mode: 'agent' | 'cluster' | 'workflow' | 'pure_workflow') => {
+    if (mode === 'workflow' || mode === 'pure_workflow') return handleWorkflowStreamMessage
+    const baseHandler = mode === 'cluster'
+      ? createTestClusterStreamHandler({
+        conversationId,
+        setConversationId,
+        setChatList,
+        setLoading,
+        setStreamLoading,
+        streamLoadingRef,
+        audioPollingRef,
+      })
+      : handleStreamMessage
+    return createTimelineAwareStreamHandler(baseHandler, {
+      setChatList,
+      setLoading,
+      setStreamLoading,
+      streamLoadingRef,
+    })
+  }
+
   /**
    * Clears the previous pure workflow runs and starts a fresh one: only the
    * opening statement (when configured) and a new assistant placeholder remain.
@@ -202,19 +225,7 @@ const TestChat: FC<TestChatProps> = ({
     setStreamLoading(true)
     setLoading(true)
 
-    const streamHandler = mode === 'workflow' || isRunMode
-      ? handleWorkflowStreamMessage
-      : mode === 'cluster'
-        ? createTestClusterStreamHandler({
-          conversationId,
-          setConversationId,
-          setChatList,
-          setLoading,
-          setStreamLoading,
-          streamLoadingRef,
-          audioPollingRef,
-        })
-        : handleStreamMessage
+    const streamHandler = createStreamHandler(mode)
 
     draftRun(
       application.id,
@@ -299,17 +310,7 @@ const TestChat: FC<TestChatProps> = ({
 
     const handler = isWorkflow
       ? handleWorkflowStreamMessage
-      : isCluster
-      ? createTestClusterStreamHandler({
-        conversationId,
-        setConversationId,
-        setChatList,
-        setLoading,
-        setStreamLoading,
-        streamLoadingRef,
-        audioPollingRef,
-      })
-      : handleStreamMessage
+      : createStreamHandler(isCluster ? 'cluster' : 'agent')
     draftRunRegenerate(application.id, vo.id, handler, (abort) => { abortRef.current = abort })
       .catch(() => {
         // Roll back to the state captured before appendRegenerateVersion.
@@ -416,6 +417,7 @@ const TestChat: FC<TestChatProps> = ({
   /** Message list props shared by the chat layout and the run-only (pure workflow) layout */
   const chatContentProps = {
     data: chatList,
+    source: application?.type,
     streamLoading,
     labelFormat: (item: ChatItem) => item.role === 'user' ? t('application.you') : dayjs(item.created_at).locale('en').format('MMMM D, YYYY [at] h:mm A'),
     // errorDesc={t('application.ReplyException')}
