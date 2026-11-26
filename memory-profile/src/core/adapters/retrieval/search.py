@@ -944,10 +944,15 @@ class Neo4jSearchSession(_BaseSearchSession):
             # The read wire contract has no caller app yet; the lookup stays
             # conditional so app-aware calls can supply one later.
             scope = await self.queries.metadata_scope(
-                self.ctx.end_user_id, self.ctx.app_id
+                self.ctx.end_user_id,
+                self.ctx.app_id,
+                tenant_id=self.ctx.tenant_id,
+                workspace_id=self.ctx.workspace_id,
             )
         record = scoped_metadata(record, scope)
-        scene_names = await self.queries.scene_names(record, self.ctx.workspace_id)
+        scene_names = await self.queries.scene_names(
+            record, self.ctx.workspace_id, tenant_id=self.ctx.tenant_id
+        )
         builder = MetadataBuilder(record, scene_names)
         return MemoryItem(
             score=1,
@@ -1096,6 +1101,39 @@ class RagSearchSession(_BaseSearchSession):
             )
             return False, ["rerank_failed"]
 
+    async def _embedding_search(
+        self,
+        node_filters: dict[str, NodeFilter],
+        projections: dict[str, NodeProjection],
+        query: str,
+        limit: int,
+    ) -> StorageReadResult:
+        """Vector recall; an empty query vector is a skipped branch, not a failure.
+
+        Host parity (``RagRetrieval._embedding``): a blank query makes the
+        embedder return an empty vector, which the storage provider rejects.
+        That means "nothing to look for", so it returns an empty result instead
+        of surfacing as ``semantic_search_failed``.
+
+        The embedder call lives here — and this coroutine is what the hybrid
+        path gathers — so an embedding transport error degrades the semantic
+        branch while the keyword hits still return.
+        """
+
+        embedder = self.deps.embedder
+        if embedder is None:
+            raise RuntimeError("embedding client unavailable")
+        embedding = await embedder.aembed_query(query)
+        if not embedding:
+            logger.info("[RAGSearch] skip embedding path: empty query vector")
+            return StorageReadResult()
+        return await self.storage.search_by_embedding(
+            node_filters,
+            embedding=embedding,
+            pre_limit=limit,
+            projections=projections,
+        )
+
     async def hybrid_search(
         self,
         query: str,
@@ -1121,11 +1159,8 @@ class RagSearchSession(_BaseSearchSession):
             embedding_results: Any = StorageReadResult()
             semantic_skipped = True
         else:
-            embedding_task = self.storage.search_by_embedding(
-                node_filters,
-                embedding=await self.deps.embedder.aembed_query(query),
-                pre_limit=limit,
-                projections=projections,
+            embedding_task = self._embedding_search(
+                node_filters, projections, query, limit
             )
             keyword_results, embedding_results = await asyncio.gather(
                 keyword_task, embedding_task, return_exceptions=True
