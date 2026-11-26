@@ -14,6 +14,7 @@ from typing import Any
 
 from sqlalchemy import select
 
+from ..application.runtime import ProcessRuntime
 from ..models.owned import (
     FILE_ROLE_DERIVED_IMAGE,
     FILE_ROLE_SOURCE,
@@ -27,7 +28,6 @@ from ..rag.integrations.web import WebCrawler
 from ..rag.integrations.yuque import YuqueAPIClient
 from ..rag.integrations.yuque.models import YuqueDocInfo
 from ..rag.vdb.vector_store import TaskVectorStore
-from ..runtime import ProcessRuntime
 from ..tasks.dispatch import TaskDispatcher
 from ..tasks.observability import BusinessOutcome, TaskRun
 from ..utils.datetime_utils import utcnow_naive

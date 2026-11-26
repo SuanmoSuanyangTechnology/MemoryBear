@@ -38,7 +38,7 @@ from redbear_model.contracts import (
 )
 from redbear_model.runtime.remote import InvokeRequest
 
-from ...trace import get_trace_id
+from ...observability.trace import get_trace_id
 from .errors import ModelInvokeProtocolError
 from .invoke import MODEL_SOURCE_MEM_KNOWLEDGE, ModelCallContext
 from .runtime import ModelInvokeRuntime

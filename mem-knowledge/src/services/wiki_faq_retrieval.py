@@ -11,9 +11,10 @@ from ..api.dependencies import Principal
 from ..api.schemas.chunk import ImageRetrievalQuery, RetrieveType
 from ..api.schemas.knowledge_metadata import MetadataFilterMode
 from ..api.schemas.knowledge_retrieval import KnowledgeRetrievalRequest
-from ..error_mapping import map_text_embedding_error, map_wiki_error
+from ..application.runtime import ProcessRuntime
 from ..errors import KnowledgeError
-from ..model_errors import ModelRole
+from ..errors.mapping import map_text_embedding_error, map_wiki_error
+from ..errors.model_errors import ModelRole
 from ..rag.faq.index import (
     FAQ_ID_BATCH_SIZE,
     FAQ_SYNC_CONCURRENCY,
@@ -31,7 +32,6 @@ from ..rag.retrieval.models import RetrievalSearchOptions
 from ..rag.wiki.config import WikiError
 from ..rag.wiki.diagnostics import diagnostic_json, exception_details
 from ..repositories.wiki_faq import retrieval as repository
-from ..runtime import ProcessRuntime
 from .knowledge_retrieval_preparation import KnowledgeRetrievalPreparation as Preparation
 from .wiki.runtime import transaction
 

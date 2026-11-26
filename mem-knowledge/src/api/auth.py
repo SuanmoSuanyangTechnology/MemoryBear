@@ -31,11 +31,11 @@ from sqlalchemy.exc import OperationalError
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse
 
-from .api.dependencies import Principal, _principal_from_headers
-from .api.upload_contract import is_knowledge_upload
-from .errors import TRANSIENT_DEPENDENCY_HTTP_STATUSES, KnowledgeError
-from .request_logging import log_request_failure, safe_failure_detail
-from .trace import TRACE_ID_HEADER
+from ..errors import TRANSIENT_DEPENDENCY_HTTP_STATUSES, KnowledgeError
+from ..observability.request_logging import log_request_failure, safe_failure_detail
+from ..observability.trace import TRACE_ID_HEADER
+from .dependencies import Principal, _principal_from_headers
+from .upload_contract import is_knowledge_upload
 
 logger = logging.getLogger(__name__)
 
@@ -116,7 +116,7 @@ def _auth_error(
 ) -> JSONResponse:
     """Record early rejections without changing authentication decisions."""
     if is_knowledge_upload(request):
-        from .api.error_handlers import render_upload_error
+        from .error_handlers import render_upload_error
 
         headers = dict(exception.headers or {}) if isinstance(exception, HTTPException) else {}
         if status_code == 401:

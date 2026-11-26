@@ -448,7 +448,7 @@ def evaluate_probe(
 def main(argv: Sequence[str] | None = None) -> int:
     """Run one worker probe and print a compact JSON result."""
 
-    from ..bootstrap import get_settings
+    from ..application.bootstrap import get_settings
 
     arguments = list(sys.argv[1:] if argv is None else argv)
     probe = arguments[0] if len(arguments) == 1 else ""

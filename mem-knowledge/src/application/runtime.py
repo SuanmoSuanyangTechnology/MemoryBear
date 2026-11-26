@@ -10,15 +10,15 @@ from concurrent.futures import ThreadPoolExecutor
 from contextvars import ContextVar
 from typing import TypeVar
 
-from .bootstrap import get_settings
-from .config import KnowledgeSettings
-from .db import DatabaseManager
-from .infrastructure import (
+from ..infrastructure import (
     ElasticsearchManager,
     RedisManager,
     StorageManager,
 )
-from .integrations.model.runtime import ModelInvokeRuntime
+from ..infrastructure.database.manager import DatabaseManager
+from ..integrations.model.runtime import ModelInvokeRuntime
+from .bootstrap import get_settings
+from .config import KnowledgeSettings
 
 T = TypeVar("T")
 

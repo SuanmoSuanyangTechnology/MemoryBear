@@ -23,7 +23,7 @@ from sqlalchemy import (
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import declared_attr
 
-from ...db import KnowledgeBase
+from ...infrastructure.database.manager import KnowledgeBase
 
 SCOPE = ("tenant_id", "workspace_id", "kb_id")
 

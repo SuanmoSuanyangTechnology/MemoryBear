@@ -20,6 +20,7 @@ from jinja2 import Environment
 from pypdf import PdfReader
 from redbear_model import QWEN3_VL_EMBEDDING_DIMENSION
 
+from ..application.runtime import ProcessRuntime
 from ..integrations.model.asr_video import (
     AudioTranscriptionChunkModel,
     VideoUnderstandingChunkModel,
@@ -46,7 +47,6 @@ from ..rag.knowledge_graph import GraphPipeline, is_graph_enabled, resolve_graph
 from ..rag.models.chunk import DocumentChunk
 from ..rag.models.task_runtime import TaskModelFactory
 from ..rag.vdb.vector_store import TaskVectorStore
-from ..runtime import ProcessRuntime
 from ..tasks.dispatch import TaskDispatcher
 from ..tasks.observability import BusinessOutcome, TaskRun
 from ..utils.datetime_utils import to_iso_z, to_timestamp_ms, utcnow, utcnow_naive

@@ -7,9 +7,9 @@ from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, File, Query, Request, UploadFile
 
-from ...error_mapping import map_storage_error
+from ...application.runtime import ProcessRuntime
 from ...errors import KnowledgeError
-from ...runtime import ProcessRuntime
+from ...errors.mapping import map_storage_error
 from ...services import chunk as chunk_service
 from ...services import file as file_service
 from ...services.knowledge_file_storage import KnowledgeFileStorage

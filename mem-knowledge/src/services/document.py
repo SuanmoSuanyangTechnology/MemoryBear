@@ -16,8 +16,8 @@ from ..api.dependencies import Principal
 from ..api.query_validation import parse_uuid_filter
 from ..api.schemas.document import Document as DocumentSchema
 from ..api.schemas.document import DocumentCreate, DocumentUpdate
-from ..error_mapping import map_storage_error
 from ..errors import KnowledgeError
+from ..errors.mapping import map_storage_error
 from ..models.owned import (
     FILE_ROLE_DERIVED_IMAGE,
     Document,
@@ -49,7 +49,7 @@ from .write_validation import validate_write_fields
 logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
-    from ..runtime import ProcessRuntime
+    from ..application.runtime import ProcessRuntime
 
 PARSE_TASK_KEY = "doc:{doc_id}:parse_task"
 PARSE_CANCEL_KEY = "doc:{doc_id}:parse_cancel"
@@ -280,7 +280,7 @@ async def apply_document_update(
 
         wiki_pages = await db.run_sync(lambda session: cancel(session, knowledge.id, document.id))
     elif plan.status_changed:
-        from ..bootstrap import get_settings
+        from ..application.bootstrap import get_settings
         from ..repositories.wiki.state import reenable, withdraw
 
         if get_settings().wiki_batch_enabled(knowledge.id):

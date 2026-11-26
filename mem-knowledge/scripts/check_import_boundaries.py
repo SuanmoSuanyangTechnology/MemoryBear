@@ -44,8 +44,9 @@ AUTHORIZED_TASKS_BY_MODULE = {
 REQUIRED_RUNTIME_ROOT_MODULES = frozenset(
     {
         "main.py",
+        "database_migrations.py",
         "api/router.py",
-        "migration_policy.py",  # Also loaded by the Alembic CLI outside src.
+        "infrastructure/database/migration_policy.py",  # Also loaded by the Alembic CLI outside src.
         "rag/chunk/router.py",
         "tasks/celery_worker.py",
         *AUTHORIZED_TASKS_BY_MODULE,
@@ -54,8 +55,9 @@ REQUIRED_RUNTIME_ROOT_MODULES = frozenset(
 RUNTIME_ROOT_MODULES = frozenset(
     {
         "main.py",
+        "database_migrations.py",
         "api/router.py",
-        "migration_policy.py",  # Also loaded by the Alembic CLI outside src.
+        "infrastructure/database/migration_policy.py",  # Also loaded by the Alembic CLI outside src.
         "services/wiki/taxonomy.py",  # scripts/replan_wiki_taxonomy.py 的显式运维入口。
         "rag/chunk/router.py",
         "tasks/celery_worker.py",
@@ -95,7 +97,7 @@ DUPLICATE_PUBLIC_CLASS_ALLOWLIST: dict[tuple[str, tuple[str, ...]], str] = {
     ): "Internal API transport contract and owned ORM model intentionally share the legacy name.",
     (
         "KnowledgeBase",
-        ("api/schemas/knowledge.py", "db.py"),
+        ("api/schemas/knowledge.py", "infrastructure/database/manager.py"),
     ): "API request contract base and SQLAlchemy metadata base are separate protocol boundaries.",
     (
         "KnowledgeShare",

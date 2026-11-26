@@ -16,14 +16,14 @@ from redbear_model.errors import (
     is_provider_rate_limit_error,
 )
 
-from ..bootstrap import get_settings
+from ..application.bootstrap import get_settings
+from ..application.runtime import get_worker_runtime
+from ..integrations.model.usage_context import bind_usage
 from ..rag.knowledge_graph.config import (
     GraphDocumentDeletionPending,
     GraphPipelineConfigError,
 )
 from ..rag.knowledge_graph.lock import KnowledgeGraphLockBusy
-from ..runtime import get_worker_runtime
-from ..usage_context import bind_usage
 from .celery_app import celery_app
 from .observability import (
     BusinessOutcome,

@@ -10,7 +10,7 @@ from typing import Annotated, Any
 from fastapi import APIRouter, Body, Depends, Query, Request
 from pydantic import WrapValidator
 
-from ...runtime import ProcessRuntime
+from ...application.runtime import ProcessRuntime
 from ...services import document as document_service
 from ...services import file as file_service
 from ...services.knowledge_file_storage import KnowledgeFileStorage

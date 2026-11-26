@@ -12,7 +12,7 @@ from dotenv import dotenv_values
 
 from .config import KnowledgeSettings
 
-_SOURCE_SERVICE_ROOT = Path(__file__).resolve().parents[1]
+_SOURCE_SERVICE_ROOT = Path(__file__).resolve().parents[2]
 _SOURCE_REPOSITORY_ROOT = _SOURCE_SERVICE_ROOT.parent
 
 

@@ -47,7 +47,7 @@ class WikiModel:
             try:
                 _ = runtime.model_runtime.invoke_sync_client
             except Exception as exc:
-                from ...error_mapping import map_model_error
+                from ...errors.mapping import map_model_error
 
                 mapped = map_model_error(exc)
                 raise WikiError(
@@ -85,7 +85,7 @@ class WikiModel:
         except WikiError:
             raise
         except Exception as exc:
-            from ...error_mapping import map_model_error
+            from ...errors.mapping import map_model_error
 
             mapped = map_model_error(exc)
             details = {

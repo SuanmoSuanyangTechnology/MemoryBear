@@ -5,7 +5,7 @@ import uuid
 from sqlalchemy import Column, DateTime, String, UniqueConstraint
 from sqlalchemy.dialects.postgresql import UUID
 
-from ...db import KnowledgeBase
+from ...infrastructure.database.manager import KnowledgeBase
 from ...utils.datetime_utils import utcnow_naive
 
 

@@ -12,9 +12,9 @@ from typing import Any
 
 from kombu.exceptions import OperationalError
 
-from ..bootstrap import get_settings
+from ..application.bootstrap import get_settings
 from ..errors import KnowledgeError
-from ..trace import get_trace_id
+from ..observability.trace import get_trace_id
 from .celery_app import PUBLISHABLE_KNOWLEDGE_TASK_ROUTES, celery_app
 from .observability import current_parent_task_id
 

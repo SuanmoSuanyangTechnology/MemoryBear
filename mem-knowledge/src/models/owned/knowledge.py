@@ -6,7 +6,7 @@ import uuid
 from sqlalchemy import JSON, Column, DateTime, ForeignKey, Integer, String
 from sqlalchemy.dialects.postgresql import UUID
 
-from ...db import KnowledgeBase
+from ...infrastructure.database.manager import KnowledgeBase
 from ...rag.parser_config import build_default_knowledge_parser_config
 from ...utils.datetime_utils import utcnow_naive
 from ..references.model_registry import ModelConfig

@@ -681,7 +681,7 @@ async def prepare_knowledge_update(
     if knowledge is None:
         raise _not_found()
     if {"parent_id", "status", "type"} & update_dict.keys():
-        from ..bootstrap import get_settings
+        from ..application.bootstrap import get_settings
 
         await db.run_sync(
             validate_knowledge_hierarchy, knowledge.workspace_id, update_dict,
@@ -755,7 +755,7 @@ async def apply_knowledge_update(
     if knowledge is None:
         raise _not_found()
     if {"parent_id", "status", "type"} & plan.update_fields.keys():
-        from ..bootstrap import get_settings
+        from ..application.bootstrap import get_settings
 
         await db.run_sync(
             validate_knowledge_hierarchy, knowledge.workspace_id, plan.update_fields,
@@ -809,7 +809,7 @@ async def apply_knowledge_update(
     registered = 0
     try:
         if wiki_enable_transition:
-            from ..bootstrap import get_settings
+            from ..application.bootstrap import get_settings
             from .wiki.backfill import register_backfill
 
             task_id = str(uuid.uuid4())

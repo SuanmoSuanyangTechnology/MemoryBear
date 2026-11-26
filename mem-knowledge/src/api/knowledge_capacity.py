@@ -10,11 +10,11 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.requests import Request
 
+from ..application.runtime import ProcessRuntime
 from ..errors import KnowledgeError
 from ..models.owned.document import Document
 from ..models.owned.knowledge import Knowledge
 from ..models.references.workspace import Workspace
-from ..runtime import ProcessRuntime
 from .dependencies import Principal, is_manager_request
 
 # 兼容老单体 API 的 GB 口径。

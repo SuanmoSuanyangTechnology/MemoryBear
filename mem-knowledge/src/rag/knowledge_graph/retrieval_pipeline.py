@@ -6,8 +6,8 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
-from ...error_mapping import map_model_error
-from ...model_errors import ModelRole
+from ...errors.mapping import map_model_error
+from ...errors.model_errors import ModelRole
 from ..models.chunk import DocumentChunk
 from ..retrieval.elasticsearch_queries import normalize_vector
 from .models import (

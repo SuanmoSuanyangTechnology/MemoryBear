@@ -15,9 +15,10 @@ from pydantic import WrapValidator
 from sqlalchemy import select
 from starlette.background import BackgroundTask
 
-from ...error_mapping import map_connector_check_error, map_model_error
+from ...application.runtime import ProcessRuntime
 from ...errors import KnowledgeError
-from ...model_errors import ModelRole
+from ...errors.mapping import map_connector_check_error, map_model_error
+from ...errors.model_errors import ModelRole
 from ...models.owned import FILE_ROLE_SOURCE, File, KnowledgeType, ParserType, PermissionType
 from ...rag.integrations.feishu import FeishuAPIClient
 from ...rag.integrations.yuque import YuqueAPIClient
@@ -28,7 +29,6 @@ from ...rag.knowledge_graph.config import (
 from ...rag.knowledge_graph.elasticsearch_store import GraphElasticsearchStore
 from ...rag.retrieval.async_elasticsearch import collection_name_for_knowledge
 from ...repositories.model_registry import AsyncSQLModelRegistry
-from ...runtime import ProcessRuntime
 from ...services import file as file_service
 from ...services import graph as graph_service
 from ...services import knowledge as knowledge_service

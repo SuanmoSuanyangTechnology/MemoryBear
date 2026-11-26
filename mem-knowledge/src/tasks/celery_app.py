@@ -5,8 +5,8 @@ from __future__ import annotations
 from celery import Celery
 from kombu import Exchange, Queue
 
-from ..bootstrap import get_settings
-from ..config import KnowledgeSettings
+from ..application.bootstrap import get_settings
+from ..application.config import KnowledgeSettings
 from ..rag.faq.contracts import FAQ_GENERATE_TASK, FAQ_QUEUE
 from ..rag.wiki.config import (
     BACKFILL_TASK,

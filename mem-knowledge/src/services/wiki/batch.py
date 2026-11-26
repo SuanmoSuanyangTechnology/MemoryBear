@@ -12,6 +12,7 @@ from uuid import uuid4
 
 from sqlalchemy import or_, select
 
+from ...integrations.model.usage_context import bind_usage_context
 from ...models.owned import Document, WikiDocumentState
 from ...models.owned.wiki import utcnow
 from ...rag.wiki.config import BATCH_TASK, MAP_QUEUE, WikiDeferred, WikiError, WikiSuperseded
@@ -21,7 +22,6 @@ from ...rag.wiki.planning import reconcile, reuse_qualified_legacy_pages, taxono
 from ...rag.wiki.resolution import resolve_candidates
 from ...repositories.wiki import deliveries, failures, pages
 from ...repositories.wiki.common import as_uuid, lock_document, lock_knowledge, state_delivery
-from ...usage_context import bind_usage_context
 from . import execution
 from .lease import map_batch_lease, map_lease, taxonomy_lease
 from .runtime import transaction

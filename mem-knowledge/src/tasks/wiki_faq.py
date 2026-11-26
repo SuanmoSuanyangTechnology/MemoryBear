@@ -5,12 +5,12 @@ import uuid
 from sqlalchemy.exc import InterfaceError, OperationalError
 from sqlalchemy.exc import TimeoutError as DatabaseTimeoutError
 
+from ..application.runtime import get_worker_runtime
+from ..integrations.model.usage_context import bind_usage
 from ..rag.faq.contracts import FAQ_QUEUE
 from ..rag.faq.generation import generate
 from ..rag.wiki.config import WikiDeferred, WikiError, WikiSuperseded
 from ..repositories.wiki_faq import jobs
-from ..runtime import get_worker_runtime
-from ..usage_context import bind_usage
 from .celery_app import celery_app
 from .observability import (
     BusinessOutcome,

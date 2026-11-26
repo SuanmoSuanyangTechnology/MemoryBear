@@ -21,7 +21,7 @@ QA_EXTENSIONS = {".csv", ".xlsx", ".xls"}
 logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
-    from ..runtime import ProcessRuntime
+    from ..application.runtime import ProcessRuntime
 
 
 @dataclass(frozen=True)

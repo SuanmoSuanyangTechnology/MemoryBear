@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 import uuid
 
-from ..bootstrap import get_settings
+from ..application.bootstrap import get_settings
 from .celery_app import celery_app
 from .observability import (
     BusinessOutcome,

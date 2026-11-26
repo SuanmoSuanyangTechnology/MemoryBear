@@ -8,10 +8,10 @@ import time
 from sqlalchemy.exc import InterfaceError, OperationalError
 from sqlalchemy.exc import TimeoutError as DatabaseTimeoutError
 
+from ..application.runtime import get_worker_runtime
+from ..integrations.model.usage_context import bind_usage
 from ..rag.wiki.config import WikiDeferred, WikiError
 from ..rag.wiki.diagnostics import diagnostic_json, exception_details
-from ..runtime import get_worker_runtime
-from ..usage_context import bind_usage
 from .celery_app import celery_app
 from .observability import (
     BusinessOutcome,

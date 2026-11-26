@@ -9,7 +9,7 @@ import threading
 import redis as redis_sync
 import redis.asyncio as redis_async
 
-from ..config import KnowledgeSettings
+from ..application.config import KnowledgeSettings
 
 
 class RedisManager:

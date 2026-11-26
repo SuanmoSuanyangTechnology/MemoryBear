@@ -6,7 +6,7 @@ from typing import Any
 from sqlalchemy import JSON, Column, DateTime, Float, Integer, String
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 
-from ...db import KnowledgeBase
+from ...infrastructure.database.manager import KnowledgeBase
 from ...rag.parser_config import build_default_document_parser_config
 from ...utils.datetime_utils import utcnow_naive
 

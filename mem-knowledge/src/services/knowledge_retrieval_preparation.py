@@ -29,13 +29,13 @@ from ..api.schemas.chunk import (
 from ..api.schemas.knowledge_metadata import MetadataFilterMode
 from ..api.schemas.knowledge_retrieval import KnowledgeRetrievalRequest
 from ..api.schemas.rerank import RerankMode, RerankWeights
-from ..error_mapping import map_model_error
 from ..errors import KnowledgeError
+from ..errors.mapping import map_model_error
+from ..errors.model_errors import ModelRole
 from ..integrations.model.views import (
     is_qwen3_vl_embedding_view,
     is_qwen3_vl_rerank_view,
 )
-from ..model_errors import ModelRole
 from ..models.owned import Knowledge, KnowledgeShare, PermissionType
 from ..rag.knowledge_graph.config import (
     GraphPipeline,

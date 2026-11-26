@@ -379,7 +379,7 @@ def source_started(session, kb_id, document_id, source_task_id, *, replace=False
         }
     if state and not replace:
         raise WikiSuperseded("WIKI_SOURCE_TASK_SUPERSEDED", retryable=False)
-    from ...bootstrap import get_settings
+    from ...application.bootstrap import get_settings
 
     resume_pages = bool(state and replace and state.stage == "reducing"
                         and get_settings().wiki_batch_enabled(kb_id))
@@ -503,7 +503,7 @@ def cancel(session, kb_id, document_id):
     return []
 
 def page_handoffs(session, kb_id, page_ids):
-    from ...bootstrap import get_settings
+    from ...application.bootstrap import get_settings
     from .deliveries import register
 
     if get_settings().wiki_batch_enabled(kb_id):

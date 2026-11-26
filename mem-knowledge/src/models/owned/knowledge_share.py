@@ -6,7 +6,7 @@ from sqlalchemy import Column, DateTime, ForeignKey
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 
-from ...db import KnowledgeBase
+from ...infrastructure.database.manager import KnowledgeBase
 from ...utils.datetime_utils import utcnow_naive
 from ..references.user import User
 from ..references.workspace import Workspace

@@ -30,12 +30,14 @@ from ..api.schemas.knowledge_retrieval import (
     KnowledgeRetrievalResult,
 )
 from ..api.schemas.rerank import RerankMode
-from ..error_mapping import map_multimodal_error, map_text_embedding_error
+from ..application.runtime import ProcessRuntime
 from ..errors import KnowledgeError
+from ..errors.mapping import map_multimodal_error, map_text_embedding_error
 from ..integrations.model.chat import RedBearChatModel
 from ..integrations.model.embedding import RedBearEmbeddings
 from ..integrations.model.invoke_backend import ref_from_view
 from ..integrations.model.rerank import RedBearRerank
+from ..integrations.model.usage_context import bind_usage
 from ..integrations.model.views import (
     is_qwen3_vl_embedding_view,
     is_qwen3_vl_rerank_view,
@@ -84,8 +86,6 @@ from ..rag.retrieval.unit_collapse import (
     collapse_units_to_chunks,
     select_units_for_rerank,
 )
-from ..runtime import ProcessRuntime
-from ..usage_context import bind_usage
 from . import wiki_faq_retrieval
 from .knowledge_retrieval_preparation import KnowledgeRetrievalPreparation
 from .multimodal_image import resolve_storage_images_async, validate_image_data_uri

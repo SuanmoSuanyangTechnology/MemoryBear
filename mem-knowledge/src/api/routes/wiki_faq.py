@@ -7,9 +7,9 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import StreamingResponse
 
+from ...application.runtime import ProcessRuntime
 from ...errors import KnowledgeError
 from ...repositories.wiki_faq import read, write
-from ...runtime import ProcessRuntime
 from ...services import wiki_faq as service
 from ..dependencies import Principal, get_principal, get_runtime, get_source
 from ..schemas.chunk import KnowledgeRetrievalSource

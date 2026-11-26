@@ -30,18 +30,18 @@ from redbear_model import (
 )
 from redbear_model.errors import is_provider_rate_limit_error
 
-from .errors import TRANSIENT_DEPENDENCY_HTTP_STATUSES, KnowledgeError
-from .integrations.model.errors import (
+from ..integrations.model.errors import (
     ModelInvokeConfigurationError,
     ModelInvokeFailedError,
     ModelInvokeProtocolError,
     ModelInvokeTimeoutError,
     ModelInvokeUnavailableError,
 )
+from .definitions import TRANSIENT_DEPENDENCY_HTTP_STATUSES, KnowledgeError
 from .model_errors import ModelFailure, ModelRole, model_error
 
 if TYPE_CHECKING:
-    from .rag.wiki.config import WikiError
+    from ..rag.wiki.config import WikiError
 
 
 def _with_cause(
@@ -367,8 +367,8 @@ def map_database_error(exc: BaseException) -> KnowledgeError:
 
 
 def map_connector_error(exc: BaseException) -> KnowledgeError:
-    from .rag.integrations.feishu.exceptions import FeishuAuthError
-    from .rag.integrations.yuque.exceptions import YuqueAuthError
+    from ..rag.integrations.feishu.exceptions import FeishuAuthError
+    from ..rag.integrations.yuque.exceptions import YuqueAuthError
 
     for cause in _exception_chain(exc):
         if isinstance(cause, (TimeoutError, httpx.TimeoutException)):
@@ -393,8 +393,8 @@ _FEISHU_INVALID_CREDENTIAL_CODES = {"10003", "10015", "20002"}
 
 def map_connector_check_error(exc: Exception) -> KnowledgeError:
     """Only reclassify evidence that refers to inputs supplied by this caller."""
-    from .rag.integrations.feishu.exceptions import FeishuAuthError, FeishuFolderNotFoundError
-    from .rag.integrations.yuque.exceptions import YuqueAPIError, YuqueAuthError
+    from ..rag.integrations.feishu.exceptions import FeishuAuthError, FeishuFolderNotFoundError
+    from ..rag.integrations.yuque.exceptions import YuqueAPIError, YuqueAuthError
 
     status = getattr(getattr(exc, "response", None), "status_code", None)
     if isinstance(exc, YuqueAuthError) and status == 401:
@@ -439,7 +439,7 @@ _WIKI_CAUSES = {
 
 
 def map_wiki_error(exc: WikiError, *, faq: bool = False) -> KnowledgeError:
-    from .errors import ERROR_DEFINITIONS
+    from .definitions import ERROR_DEFINITIONS
 
     code = exc.code if exc.code in ERROR_DEFINITIONS else _WIKI_CAUSES.get(exc.code)
     code = code or ("KB_FAQ_LOAD_FAILED" if faq else "KB_WIKI_UNMAPPED_ERROR")
