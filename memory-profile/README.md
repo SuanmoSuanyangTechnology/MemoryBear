@@ -151,7 +151,8 @@ Required direct-mode headers are `x-tenant-id`, `x-workspace-id`, `x-source`, an
 Emotion reply uses the trusted API proxy channel. Route its public face through
 the API to verify the API key type, workspace binding, and tenant context.
 With `MEMORY_ENTERPRISE_BASE_URL` and `MEMORY_INTERNAL_TOKEN` configured,
-memory-profile sends the emotion code to memory-enterprise after BERT classification.
+memory-profile calls `GET /internal/v1/ontology/default-emotion-policies/{emotion_code}`
+after BERT classification.
 memory-enterprise compares the token against its own `MEMORY_INTERNAL_TOKEN` and
 reads the tenant from `X-Tenant-Id`; no identity ACL rule is involved.
 
