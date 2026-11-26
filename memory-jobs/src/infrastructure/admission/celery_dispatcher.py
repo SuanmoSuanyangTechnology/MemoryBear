@@ -57,9 +57,18 @@ class CeleryJobDispatcher:
                 "refusing to dispatch admission task "
                 f"{message.task_name!r} as admitted work"
             )
+        kwargs = dict(message.params)
+        if not message.queue:
+            # Only this service's tasks declare the completion hook. A message
+            # that names its own queue belongs to another service (the API's
+            # write tasks): its handler has a fixed signature, so the extra
+            # keyword would make it raise before doing any work, and it could
+            # not report completion anyway. Such an attempt is finalized from
+            # the result backend by the recovery sweep instead.
+            kwargs[ADMISSION_MSG_ID_KEY] = message.msg_id
         result = self._sender().send_task(
             message.task_name,
-            kwargs={**dict(message.params), ADMISSION_MSG_ID_KEY: message.msg_id},
+            kwargs=kwargs,
             queue=queue,
             priority=int(message.priority),
         )

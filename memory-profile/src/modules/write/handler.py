@@ -16,7 +16,7 @@ from typing import Any
 
 from fastapi.responses import JSONResponse
 
-from src.common.errors import BizCode
+from src.common.errors import BizCode, ProfileError
 from src.common.responses import (
     legacy_fail_response,
     success,
@@ -36,9 +36,77 @@ class MemoryHandler:
         # Ports are pure assembly (no I/O); merge resolves the end user and the
         # workspace's active config before it acquires any lock.
         from src.core.adapters.read.config import build_config_port, build_end_user_port
+        from src.services.memory_write import MemoryWriteService
 
         self._end_users = build_end_user_port(runtime)
         self._configs = build_config_port(runtime)
+        self._writes = MemoryWriteService(runtime)
+
+    # ── write faces ──────────────────────────────────────────────────────
+
+    async def write(
+        self,
+        context: MemoryPrincipal,
+        payload: dict,
+        language: str,
+    ) -> WriteApiResponse | JSONResponse:
+        """The API-key write face; the host's envelope and messages verbatim."""
+
+        outcome = await self._writes.write_api(
+            workspace_id=context.workspace_id,
+            tenant_id=context.tenant_id,
+            payload=payload,
+            language=language,
+        )
+        if not outcome.ok:
+            return legacy_fail_response(outcome.code, outcome.msg, outcome.error)
+        return success(data=outcome.data or {}, msg=outcome.msg)
+
+    async def ingest_workflow(
+        self, context: MemoryPrincipal, payload: dict
+    ) -> WriteApiResponse | JSONResponse:
+        """Workflow message ingestion callback."""
+
+        try:
+            await self._writes.ingest_workflow(
+                workspace_id=context.workspace_id,
+                tenant_id=context.tenant_id,
+                payload=payload,
+            )
+        except ProfileError:
+            # A business rejection (e.g. the end user is not in this workspace)
+            # keeps its own code and status; the global handler renders it.
+            raise
+        except ValueError as exc:
+            return legacy_fail_response(
+                BizCode.INVALID_PARAMETER, "工作流消息摄入参数无效", str(exc)
+            )
+        except Exception as exc:  # noqa: BLE001 - boundary maps to the host envelope
+            logger.exception("workflow memory ingestion failed")
+            return legacy_fail_response(BizCode.INTERNAL_ERROR, "记忆写入失败", str(exc))
+        return success(data={})
+
+    async def ingest_agent(
+        self, context: MemoryPrincipal, payload: dict
+    ) -> WriteApiResponse | JSONResponse:
+        """One agent turn's ingestion callback (user + assistant, one dispatch)."""
+
+        try:
+            await self._writes.ingest_agent(
+                workspace_id=context.workspace_id,
+                tenant_id=context.tenant_id,
+                payload=payload,
+            )
+        except ProfileError:
+            raise
+        except ValueError as exc:
+            return legacy_fail_response(
+                BizCode.INVALID_PARAMETER, "Agent 消息摄入参数无效", str(exc)
+            )
+        except Exception as exc:  # noqa: BLE001 - boundary maps to the host envelope
+            logger.exception("agent memory ingestion failed")
+            return legacy_fail_response(BizCode.INTERNAL_ERROR, "记忆写入失败", str(exc))
+        return success(data={})
 
     async def merge(
         self,
