@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from contextvars import ContextVar
 from pathlib import Path
 from typing import Literal
 from urllib.parse import quote_plus, urlparse
@@ -17,6 +18,10 @@ from pydantic import (
 )
 from pydantic_settings import BaseSettings
 from sqlalchemy.engine import make_url
+
+memory_output_override: ContextVar[Path | None] = ContextVar(
+    "memory_output_override", default=None
+)
 
 
 def _redis_url_with_db(url: str, db: int) -> str:
@@ -546,7 +551,7 @@ class ProfileSettings(BaseSettings):
         Returns:
             Full path to the output file or directory
         """
-        base_path = Path(self.memory_output_dir)
+        base_path = memory_output_override.get() or Path(self.memory_output_dir)
         if filename:
             return str(base_path / filename)
         return str(base_path)
@@ -556,5 +561,5 @@ class ProfileSettings(BaseSettings):
         Ensure the memory output directory exists.
         Creates the directory if it doesn't exist.
         """
-        output_dir = Path(self.memory_output_dir)
+        output_dir = Path(self.get_memory_output_path())
         output_dir.mkdir(parents=True, exist_ok=True)

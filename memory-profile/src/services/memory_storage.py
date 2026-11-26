@@ -7,12 +7,18 @@ import re
 from collections import Counter, defaultdict
 from datetime import datetime
 from enum import Enum
+from io import BytesIO
+from pathlib import Path
+from tempfile import TemporaryDirectory
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
 from uuid import UUID
 
 from neo4j.time import DateTime as Neo4jDateTime
+from starlette.datastructures import Headers, UploadFile
 
 from src.common.errors import BizCode, ProfileError
+from src.config import memory_output_override
+from src.infrastructure.file_service import FileServiceError
 from src.common.datetime_utils import parse_iso_to_utc_naive, to_timestamp_ms
 from src.schemas.event_category_models import EVENT_CATEGORY_NAMES, EVENT_CATEGORY_NAME_TO_ID
 from src.emotion.emotion_buckets import emotion_valence
@@ -924,7 +930,10 @@ class MemoryStorageService:
             self.runtime, config_id, workspace_id, tenant_id, include_runtime_views=include_runtime_views
         )
 
-    async def pilot_run_stream(self, payload: PilotRunInput, language: str = "zh", *, workspace_id, tenant_id) -> AsyncGenerator[str, None]:
+    async def pilot_run_stream(
+        self, payload: PilotRunInput, language: str = "zh", *, workspace_id, tenant_id,
+        actor_id: UUID, actor_kind: str,
+    ) -> AsyncGenerator[str, None]:
         """
         流式执行试运行，产生 SSE 格式的进度事件
 
@@ -1009,18 +1018,31 @@ class MemoryStorageService:
                     logger.info(
                         f"[PILOT_RUN_STREAM] Calling run_pilot_extraction with messages count: {len(messages)}"
                     )
-                    await self._run_pilot_extraction(
-                        memory_config=memory_config,
-                        messages=messages,
-                        llm_client=llm_client,
-                        progress_callback=progress_callback,
-                        language=language,
-                        model_views=views,
-                    )
+                    settings = get_settings()
+                    settings.ensure_memory_output_dir()
+                    with TemporaryDirectory(dir=settings.get_memory_output_path()) as output_dir:
+                        output_token = memory_output_override.set(Path(output_dir))
+                        try:
+                            await self._run_pilot_extraction(
+                                memory_config=memory_config,
+                                messages=messages,
+                                llm_client=llm_client,
+                                progress_callback=progress_callback,
+                                language=language,
+                                model_views=views,
+                                actor_id=actor_id,
+                                actor_kind=actor_kind,
+                            )
+                            result_path = Path(output_dir) / "extracted_result.json"
+                            result_bytes = result_path.read_bytes()
+                            extracted_result = json.loads(result_bytes)
+                        finally:
+                            memory_output_override.reset(output_token)
                     logger.info("[PILOT_RUN_STREAM] pipeline_main completed")
 
                     # 标记管线完成
                     await progress_queue.put(("__PIPELINE_COMPLETE__", "", None))
+                    return extracted_result, result_bytes
                 except Exception as e:
                     # 将异常放入队列
                     await progress_queue.put(("__PIPELINE_ERROR__", str(e), None))
@@ -1060,17 +1082,22 @@ class MemoryStorageService:
                     # 超时，继续等待（这允许检测客户端断开）
                     continue
 
-            # 等待管线任务完成
-            await pipeline_task
-
-            # 步骤 5: 读取提取结果
-            settings = get_settings()
-            result_path = settings.get_memory_output_path("extracted_result.json")
-            if not os.path.isfile(result_path):
-                raise FileNotFoundError(f"试运行完成，但未找到提取结果文件: {result_path}")
-
-            with open(result_path, "r", encoding="utf-8") as rf:
-                extracted_result = json.load(rf)
+            extracted_result, result_bytes = await pipeline_task
+            with BytesIO(result_bytes) as content:
+                try:
+                    await self.runtime.file_service.upload(
+                        file=UploadFile(
+                            content,
+                            filename=f"pilot-run-{uuid.uuid4()}.json",
+                            headers=Headers({"content-type": "application/json"}),
+                        ),
+                        tenant_id=tenant_id,
+                        workspace_id=workspace_id,
+                        actor_id=actor_id,
+                        actor_kind=actor_kind,
+                    )
+                except FileServiceError:
+                    logger.warning("Pilot run result upload failed", exc_info=True)
 
             # 步骤 6: 组装结果（试运行不做额外覆盖率后处理）
             result_data = {
@@ -1213,16 +1240,19 @@ class MemoryStorageService:
                 part["video"] = get_data_url()
 
     async def _process_trial_run_files(
-            cls,
+            self,
             files,
             multimodal_service,
             workspace_id: uuid.UUID,
             tenant_id: uuid.UUID,
             input_modalities,
             language: str,
+            *,
+            actor_id: UUID,
+            actor_kind: str,
     ) -> list[dict[str, Any]]:
         """按请求顺序处理附件，对模型不支持的类型生成可见文本提示。"""
-        normalized_modalities = cls._normalize_modalities(input_modalities)
+        normalized_modalities = self._normalize_modalities(input_modalities)
         required_modalities = {
             FileType.IMAGE: "image",
             FileType.AUDIO: "audio",
@@ -1232,17 +1262,19 @@ class MemoryStorageService:
         for position, file in enumerate(files or [], start=1):
             required = required_modalities.get(file.type)
             if required and required not in normalized_modalities:
-                processed_parts.append(cls._file_marker_part(file, position, language))
-                processed_parts.append(cls._unsupported_file_part(file.type, language))
+                processed_parts.append(self._file_marker_part(file, position, language))
+                processed_parts.append(self._unsupported_file_part(file.type, language))
                 continue
 
             local_media: tuple[bytes, str] | None = None
             if file.transfer_method == TransferMethod.LOCAL_FILE:
                 try:
-                    content, mime_type = await cls._load_trial_run_local_file(
+                    content, mime_type = await self._load_trial_run_local_file(
                         file,
                         workspace_id,
                         tenant_id,
+                        actor_id=actor_id,
+                        actor_kind=actor_kind,
                     )
                     if file.type in {FileType.IMAGE, FileType.AUDIO, FileType.VIDEO}:
                         local_media = (content, mime_type)
@@ -1254,8 +1286,8 @@ class MemoryStorageService:
                         file.upload_file_id,
                         exc_info=True,
                     )
-                    processed_parts.append(cls._file_marker_part(file, position, language))
-                    processed_parts.append(cls._local_file_error_part(language))
+                    processed_parts.append(self._file_marker_part(file, position, language))
+                    processed_parts.append(self._local_file_error_part(language))
                     continue
 
             parts = await multimodal_service.process_files(
@@ -1265,8 +1297,8 @@ class MemoryStorageService:
                 include_processing_errors=True,
             )
             if local_media:
-                cls._replace_local_media_url(parts, *local_media)
-            processed_parts.append(cls._file_marker_part(file, position, language))
+                self._replace_local_media_url(parts, *local_media)
+            processed_parts.append(self._file_marker_part(file, position, language))
             processed_parts.extend(parts)
         return processed_parts
 
@@ -1350,8 +1382,11 @@ class MemoryStorageService:
             file,
             workspace_id: uuid.UUID,
             tenant_id: uuid.UUID,
+            *,
+            actor_id: UUID,
+            actor_kind: str,
     ) -> tuple[bytes, str]:
-        """校验本地附件归属并从配置的存储后端读取原始字节。"""
+        """Check attachment ownership before fetching bytes through file-service."""
         import magic
 
         metadata = await self.repository.metadata(
@@ -1359,12 +1394,17 @@ class MemoryStorageService:
         )
         if metadata is None:
             raise ValueError("local attachment is unavailable in the current workspace")
-        file_key = metadata.file_key
         metadata_content_type = metadata.content_type
         metadata_file_ext = metadata.file_ext
         metadata_file_name = metadata.file_name
 
-        content = await self.runtime.attachment_storage.backend.download(file_key)
+        content = await self.runtime.file_service.download(
+            file.upload_file_id,
+            workspace_id=workspace_id,
+            tenant_id=tenant_id,
+            actor_id=actor_id,
+            actor_kind=actor_kind,
+        )
         if not content:
             raise ValueError("local attachment is empty")
 
@@ -1387,6 +1427,9 @@ class MemoryStorageService:
             language: str = "zh",
             workspace_id: uuid.UUID | None = None,
             tenant_id: uuid.UUID | None = None,
+            *,
+            actor_id: UUID,
+            actor_kind: str,
     ) -> AsyncGenerator[str, None]:
         """按附件类型分别解析，再由文本模型合并生成流式回答。"""
         from src.services.model_config import ModelConfigService, ModelConfigurationError
@@ -1522,6 +1565,8 @@ class MemoryStorageService:
                     config_tenant_id,
                     model_info.input_modalities,
                     language,
+                    actor_id=actor_id,
+                    actor_kind=actor_kind,
                 )
 
                 mapping = "\n".join(
@@ -1586,6 +1631,8 @@ class MemoryStorageService:
                             file,
                             config_workspace_id,
                             config_tenant_id,
+                            actor_id=actor_id,
+                            actor_kind=actor_kind,
                         )
                     text = await multimodal_service.extract_document_text(file)
                     documents.append(f"{attachment_label(ref)}\n{text}")
@@ -1730,8 +1777,9 @@ class MemoryStorageService:
                 "message": "Configuration loading failed" if language == "en" else "配置读取失败",
             })
 
-    async def _pilot_snapshots(self, messages, config, views):
-        from pathlib import Path
+    async def _pilot_snapshots(
+        self, messages, config, views, *, actor_id: UUID, actor_kind: str
+    ):
         from types import SimpleNamespace
         from urllib.parse import unquote, urlparse
 
@@ -1755,7 +1803,8 @@ class MemoryStorageService:
                 media = MultimodalService(self.repository, view, attachment_storage=self.runtime.attachment_storage)
                 if file.transfer_method == TransferMethod.LOCAL_FILE:
                     await self._load_trial_run_local_file(
-                        file, config.workspace_id, config.tenant_id
+                        file, config.workspace_id, config.tenant_id,
+                        actor_id=actor_id, actor_kind=actor_kind,
                     )
                     file.url = await media.get_file_url(file)
                 parts = await media.process_files([file], workspace_id=config.workspace_id)
@@ -2009,6 +2058,8 @@ class MemoryStorageService:
         language: str = "zh",
         *,
         model_views=None,
+        actor_id: UUID,
+        actor_kind: str,
     ) -> None:
         """执行试运行模式的知识提取流水线（v0.3.13 QA 消息格式）。
 
@@ -2045,7 +2096,10 @@ class MemoryStorageService:
             step_start = time.time()
             await emit("perceptual_extract", "开始提取感知记忆", None)
 
-            perceptual_snapshots = await self._pilot_snapshots(messages, memory_config, model_views or {})
+            perceptual_snapshots = await self._pilot_snapshots(
+                messages, memory_config, model_views or {},
+                actor_id=actor_id, actor_kind=actor_kind,
+            )
 
             await emit(
                 "perceptual_result", "感知记忆结果",

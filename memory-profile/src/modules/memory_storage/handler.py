@@ -140,6 +140,8 @@ class MemoryStorageHandler:
             payload,
             workspace_id=context.workspace_id,
             tenant_id=context.tenant_id,
+            actor_id=context.actor_id,
+            actor_kind=context.actor_kind,
             language=language,
         )
 
@@ -158,6 +160,8 @@ class MemoryStorageHandler:
             payload,
             workspace_id=context.workspace_id,
             tenant_id=context.tenant_id,
+            actor_id=context.actor_id,
+            actor_kind=context.actor_kind,
             language=language,
         )
 
