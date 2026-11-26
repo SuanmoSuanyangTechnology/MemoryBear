@@ -53,6 +53,7 @@ from src.schemas.memory_config import (
     SceneConfigData,
     SimpleSceneData,
     ValidateConfigResult,
+    WorkspaceActiveConfigData,
 )
 from src.schemas.memory_config_requests import (
     CommunityPreviewBody,
@@ -1052,6 +1053,32 @@ class MemoryConfigHandler:
                 ),
             )
         return success(result, translate_request(request, "memory_config.success.update"))
+
+    # ── Workspace config ─────────────────────────────────────────────────
+
+    async def workspace_active_config(
+        self, principal: MemoryPrincipal, request: Request
+    ) -> ApiResponse[WorkspaceActiveConfigData]:
+        """The workspace's active configuration id.
+
+        Replaces the host ``memory/workspace-config`` callback: the host raised a
+        business exception when a workspace had no enabled configuration, so a
+        missing id answers with a non-zero code instead of an empty payload the
+        caller would have to interpret.
+        """
+
+        language = get_header_language(request)
+        config_id = await self.query.active_config_id(principal.workspace_id)
+        if config_id is None:
+            logger.warning(
+                "workspace %s has no active memory configuration", principal.workspace_id
+            )
+            return failure(
+                BizCode.NOT_FOUND,
+                t("memory_config.workspace.no_active_config", language),
+                "memory_config_missing",
+            )
+        return success({"config_id": str(config_id)})
 
     # ── Management-only ──────────────────────────────────────────────────
 

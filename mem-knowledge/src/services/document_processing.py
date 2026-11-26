@@ -11,16 +11,18 @@ import re
 import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from io import BytesIO
 from threading import Event
-from typing import Any
+from typing import Any, cast
 
 from jinja2 import Environment
 from pypdf import PdfReader
 from redbear_model import QWEN3_VL_EMBEDDING_DIMENSION
 
 from ..application.runtime import ProcessRuntime
+from ..errors.mapping import map_model_error
+from ..errors.model_errors import MODEL_FIELD_ROLES, ModelFailure, model_error
 from ..integrations.model.asr_video import (
     AudioTranscriptionChunkModel,
     VideoUnderstandingChunkModel,
@@ -32,6 +34,7 @@ from ..integrations.model.views import is_qwen3_vl_embedding_view
 from ..integrations.model.vision import QWenCV as ImageQWenCV
 from ..models.owned import Document, Knowledge
 from ..models.references import Workspace
+from ..parser_configuration import to_runtime
 from ..rag.chunk.context import (
     ChunkOutputMode,
     build_chunk_context,
@@ -47,9 +50,15 @@ from ..rag.knowledge_graph import GraphPipeline, is_graph_enabled, resolve_graph
 from ..rag.models.chunk import DocumentChunk
 from ..rag.models.task_runtime import TaskModelFactory
 from ..rag.vdb.vector_store import TaskVectorStore
+from ..repositories.parser_configuration import (
+    ParserConfigurationRepository,
+    document_configuration,
+    knowledge_configuration,
+)
 from ..tasks.dispatch import TaskDispatcher
 from ..tasks.observability import BusinessOutcome, TaskRun
 from ..utils.datetime_utils import to_iso_z, to_timestamp_ms, utcnow, utcnow_naive
+from .document_models import resolve_document_models
 from .document_mutation_guard import (
     DocumentMutationLeaseLost,
     sync_document_mutation_guard,
@@ -60,6 +69,7 @@ from .document_task_lifecycle import (
     ensure_document_active,
 )
 from .knowledge_file_storage import KnowledgeFileStorage
+from .knowledge_model_validation import matches_knowledge_model_field
 from .multimodal_image import StorageImageResolver
 
 logger = logging.getLogger(__name__)
@@ -124,6 +134,8 @@ class ParseDocumentSnapshot:
     image2text_id: uuid.UUID | None
     audio2text_id: uuid.UUID | None
     video2text_id: uuid.UUID | None
+    rag_enabled: bool = True
+    model_sources: dict[str, str | None] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -163,6 +175,13 @@ def _load_snapshot(
             raise ValueError(f"Workspace {knowledge.workspace_id} not found")
 
         effective_file_name = file_name or document.file_name
+        configuration = ParserConfigurationRepository(session).get_effective_knowledge(
+            cast(uuid.UUID, knowledge.id)
+        )
+        if configuration is None:
+            raise ValueError(f"Knowledge configuration {knowledge.id} not found")
+        saved = document_configuration(document)
+        models = resolve_document_models(saved, configuration, workspace)
         return ParseDocumentSnapshot(
             document_id=document.id,
             knowledge_id=knowledge.id,
@@ -172,13 +191,15 @@ def _load_snapshot(
             file_name=effective_file_name,
             source_file_name=document.file_name,
             file_created_at_ms=to_timestamp_ms(document.created_at),
-            parser_config=dict(document.parser_config or {}),
-            parent_child_mode=bool(document.is_parent_child_mode),
+            parser_config=to_runtime(saved),
+            parent_child_mode=saved.chunk_method == "parent_child",
             embedding_id=knowledge.embedding_id,
             llm_id=knowledge.llm_id,
-            image2text_id=knowledge.image2text_id,
-            audio2text_id=knowledge.audio2text_id,
-            video2text_id=knowledge.video2text_id,
+            image2text_id=models.vision,
+            audio2text_id=models.audio,
+            video2text_id=models.video,
+            rag_enabled=configuration.index_strategy in {"rag", "rag_wiki"},
+            model_sources=models.sources,
         )
 
 
@@ -279,52 +300,52 @@ def _media_file_url(
     return url
 
 
-def _build_vision_model(
+def document_media_field(file_name: str) -> str:
+    if _AUDIO_PATTERN.search(file_name):
+        return "audio2text_id"
+    if _VIDEO_PATTERN.search(file_name):
+        return "video2text_id"
+    return "image2text_id"
+
+
+def build_document_vision_model(
     runtime: ProcessRuntime,
     snapshot: ParseDocumentSnapshot,
     file_key: str,
 ):
-    factory = TaskModelFactory(runtime)
-    if _AUDIO_PATTERN.search(snapshot.file_name):
-        if snapshot.audio2text_id is None:
+    field_name = document_media_field(snapshot.file_name)
+    if field_name == "image2text_id":
+        needs_image_model = (
+            bool(_DIRECT_IMAGE_PATTERN.search(snapshot.file_name))
+            and is_direct_image_vision_enabled(snapshot.parser_config)
+        ) or (
+            bool(_EMBEDDED_IMAGE_PATTERN.search(snapshot.file_name))
+            and is_embedded_image_vision_enabled(snapshot.parser_config)
+        )
+        if not needs_image_model:
             return None
-        config = factory.resolve_view(snapshot.audio2text_id, snapshot.tenant_id)
+    model_id = getattr(snapshot, field_name)
+    if model_id is None:
+        return None
+    try:
+        config = TaskModelFactory(runtime).resolve_view(model_id, snapshot.tenant_id)
+    except Exception as exc:
+        raise map_model_error(exc, model_role=MODEL_FIELD_ROLES[field_name]) from exc
+    if not matches_knowledge_model_field(field_name, config):
+        raise model_error(MODEL_FIELD_ROLES[field_name], ModelFailure.CAPABILITY_MISMATCH)
+    ref = ref_from_view(config, snapshot.tenant_id, workspace_id=snapshot.workspace_id)
+    if field_name == "audio2text_id":
         return AudioTranscriptionChunkModel.for_invoke_sync_ref(
-            ref_from_view(config, snapshot.tenant_id),
-            pool=runtime.model_runtime,
+            ref, pool=runtime.model_runtime,
             file_url=_media_file_url(runtime, file_key, snapshot.source_file_name),
         )
-    if _VIDEO_PATTERN.search(snapshot.file_name):
-        if snapshot.video2text_id is None:
-            return None
-        config = factory.resolve_view(snapshot.video2text_id, snapshot.tenant_id)
+    if field_name == "video2text_id":
         return VideoUnderstandingChunkModel.for_invoke_sync_ref(
-            ref_from_view(config, snapshot.tenant_id),
-            pool=runtime.model_runtime,
+            ref, pool=runtime.model_runtime,
             video_url=_media_file_url(runtime, file_key, snapshot.source_file_name),
             lang="Chinese",
         )
-    needs_image_model = (
-        bool(_DIRECT_IMAGE_PATTERN.search(snapshot.file_name))
-        and is_direct_image_vision_enabled(snapshot.parser_config)
-    ) or (
-        bool(_EMBEDDED_IMAGE_PATTERN.search(snapshot.file_name))
-        and is_embedded_image_vision_enabled(snapshot.parser_config)
-    )
-    if not needs_image_model:
-        return None
-    if snapshot.image2text_id is None:
-        return None
-    config = factory.resolve_image(
-        snapshot.image2text_id,
-        snapshot.tenant_id,
-    )
-    image_model = ImageQWenCV.for_invoke_sync_ref(
-        ref_from_view(config, snapshot.tenant_id),
-        pool=runtime.model_runtime,
-        lang="Chinese",
-    )
-    return image_model
+    return ImageQWenCV.for_invoke_sync_ref(ref, pool=runtime.model_runtime, lang="Chinese")
 
 
 def _preflight_document(
@@ -333,7 +354,10 @@ def _preflight_document(
     file_key: str,
 ) -> ParseDocumentPreflight:
     factory = TaskModelFactory(runtime)
-    auto_questions_topn = int(snapshot.parser_config.get("auto_questions", 0) or 0)
+    auto_questions_topn = (
+        int(snapshot.parser_config.get("auto_questions", 0) or 0)
+        if snapshot.rag_enabled and not snapshot.parent_child_mode else 0
+    )
     chat_model = None
     if auto_questions_topn:
         if snapshot.llm_id is None:
@@ -344,23 +368,24 @@ def _preflight_document(
             pool=runtime.model_runtime,
         )
 
-    vision_model = _build_vision_model(runtime, snapshot, file_key)
-    if snapshot.embedding_id is None:
-        raise ValueError(f"embedding_id config error: {snapshot.knowledge_id}")
-    embedding_config = factory.resolve_embedding(
-        snapshot.embedding_id,
-        snapshot.tenant_id,
-    )
-    structured_multimodal = is_qwen3_vl_embedding_view(embedding_config)
-    embeddings = RedBearEmbeddings.for_invoke_ref(
-        ref_from_view(embedding_config, snapshot.tenant_id),
-        pool=runtime.model_runtime,
-        multimodal=structured_multimodal,
-    )
+    vision_model = build_document_vision_model(runtime, snapshot, file_key)
+    embeddings = None
+    structured_multimodal = False
+    if snapshot.rag_enabled:
+        if snapshot.embedding_id is None:
+            raise ValueError(f"embedding_id config error: {snapshot.knowledge_id}")
+        embedding_config = factory.resolve_embedding(snapshot.embedding_id, snapshot.tenant_id)
+        structured_multimodal = is_qwen3_vl_embedding_view(embedding_config)
+        embeddings = RedBearEmbeddings.for_invoke_ref(
+            ref_from_view(embedding_config, snapshot.tenant_id),
+            pool=runtime.model_runtime,
+            multimodal=structured_multimodal,
+        )
     vector_store = TaskVectorStore(
         runtime.elasticsearch.sync_client(),
         snapshot.knowledge_id,
         embeddings,
+        vectorize=snapshot.rag_enabled,
         structured_multimodal=structured_multimodal,
         image_resolver=(
             StorageImageResolver(runtime, snapshot.knowledge_id)
@@ -379,12 +404,14 @@ def _preflight_document(
     )
 
 
-def _parse_chunks(
+def parse_document_chunks(
     runtime: ProcessRuntime,
     snapshot: ParseDocumentSnapshot,
     file_binary: bytes,
     progress_callback,
     vision_model,
+    *,
+    preview: bool = False,
 ):
     output_mode = (
         ChunkOutputMode.PARENT_CHILD if snapshot.parent_child_mode else ChunkOutputMode.NORMAL
@@ -393,7 +420,7 @@ def _parse_chunks(
         filename=snapshot.file_name,
         binary=file_binary,
         from_page=0,
-        to_page=DEFAULT_PARSE_TO_PAGE,
+        to_page=5 if preview else DEFAULT_PARSE_TO_PAGE,
         callback=progress_callback,
         vision_model=vision_model,
         parser_config=snapshot.parser_config,
@@ -406,6 +433,7 @@ def _parse_chunks(
         source_file_id=str(snapshot.file_id),
         source_file_name=snapshot.source_file_name,
         runtime=runtime,
+        preview=preview,
     )
     return FileTypeRouter().route(snapshot.file_name).run(context)
 
@@ -775,7 +803,7 @@ def _current_graph_config(
 ) -> dict[str, Any] | None:
     with runtime.database.sync_session() as session:
         knowledge = session.get(Knowledge, knowledge_id)
-        return dict(knowledge.parser_config or {}) if knowledge is not None else None
+        return to_runtime(knowledge_configuration(knowledge)) if knowledge is not None else None
 
 
 def _dispatch_graph(
@@ -839,6 +867,16 @@ def process_document(
                 file_name,
             )
         document_label = snapshot.file_name or str(normalized_document_id)
+        run.progress(
+            stage="load_snapshot", fraction=None, detail="document_models_resolved",
+            display_message=json.dumps({
+                kind: {"id": str(model_id) if model_id else None,
+                       "source": snapshot.model_sources.get(kind)}
+                for kind, model_id in (("vision", snapshot.image2text_id),
+                                       ("audio", snapshot.audio2text_id),
+                                       ("video", snapshot.video2text_id))
+            }),
+        )
         from .wiki.source import begin_source, finish_source
 
         wiki_source = begin_source(runtime, normalized_document_id, run.context.task_id)
@@ -901,7 +939,7 @@ def process_document(
         if _should_abort(runtime, normalized_document_id):
             raise _ParseAborted
         with run.stage("parse"):
-            parsed = _parse_chunks(
+            parsed = parse_document_chunks(
                 runtime,
                 snapshot,
                 file_binary,
@@ -995,15 +1033,16 @@ def process_document(
                 for start in range(0, len(all_chunks), batch_size)
             ]
             total_batches = len(batches)
-            with run.stage("embedding"):
+            with run.stage("embedding" if snapshot.rag_enabled else "write_elasticsearch"):
                 _write_chunks_with_retry(
                     runtime, vector_store, batches, normalized_document_id, write_started,
                     source_task_id=run.context.task_id,
                 )
             if _should_abort(runtime, normalized_document_id):
                 raise _ParseAborted
+            action = "embedded" if snapshot.rag_enabled else "indexed without vectors"
             progress_lines.append(
-                f"{_progress_ts()} All {total_batches} batches embedded "
+                f"{_progress_ts()} All {total_batches} batches {action} "
                 f"(workers={runtime.settings.embedding_max_workers})."
             )
 

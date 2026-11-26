@@ -1,10 +1,12 @@
 """Writable Knowledge-owned ORM models."""
 
+from ...parser_configuration.schema import validate_schema
 from .document import Document
 from .file import FILE_ROLE_DERIVED_IMAGE, FILE_ROLE_SOURCE, File, UploadFingerprint
 from .knowledge import Knowledge, KnowledgeType, ParserType, PermissionType
 from .knowledge_metadata import KnowledgeMetadata, KnowledgeMetadataBinding
 from .knowledge_share import KnowledgeShare
+from .parser_config import DocumentParserConfig, KnowledgeParserConfig
 from .wiki import (
     WikiDocumentPageTask,
     WikiDocumentState,
@@ -30,6 +32,8 @@ __all__ = [
     "FILE_ROLE_DERIVED_IMAGE",
     "FILE_ROLE_SOURCE",
     "Document",
+    "DocumentParserConfig",
+    "KnowledgeParserConfig",
     "File",
     "UploadFingerprint",
     "Knowledge",
@@ -40,3 +44,5 @@ __all__ = [
     "ParserType",
     "PermissionType",
 ]
+
+validate_schema()

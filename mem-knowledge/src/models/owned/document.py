@@ -1,24 +1,14 @@
 """Knowledge document model copied from the legacy API service."""
 
 import uuid
-from typing import Any
 
 from sqlalchemy import JSON, Column, DateTime, Float, Integer, String
 from sqlalchemy.dialects.postgresql import JSONB, UUID
+from sqlalchemy.orm import relationship
 
 from ...infrastructure.database.manager import KnowledgeBase
 from ...rag.parser_config import build_default_document_parser_config
 from ...utils.datetime_utils import utcnow_naive
-
-
-def _parse_bool_config(value: Any) -> bool:
-    if isinstance(value, bool):
-        return value
-    if value is None:
-        return False
-    if isinstance(value, str):
-        return value.strip().lower() in {"true", "1", "yes", "y", "on"}
-    return bool(value)
 
 
 class Document(KnowledgeBase):
@@ -41,11 +31,12 @@ class Document(KnowledgeBase):
         comment="{field_name: value}",
     )
     parser_id = Column(String, index=True, nullable=False, comment="default parser ID")
-    parser_config = Column(
+    legacy_parser_config_snapshot = Column(
+        "parser_config",
         JSON,
         nullable=False,
         default=build_default_document_parser_config,
-        comment="default parser config",
+        comment="Rollback snapshot; effective configuration lives in document_parser_configs",
     )
     chunk_num = Column(Integer, default=0, comment="chunk num")
     progress = Column(Float, default=0)
@@ -60,15 +51,17 @@ class Document(KnowledgeBase):
     status = Column(Integer, default=1, comment="is it validate(0: wasted, 1: validate)")
     created_at = Column(DateTime, default=utcnow_naive)
     updated_at = Column(DateTime, default=utcnow_naive)
+    configuration = relationship(
+        "DocumentParserConfig", uselist=False, lazy="selectin", viewonly=True
+    )
 
     @property
     def parent_child_mode(self) -> bool:
         """Return whether the document uses parent-child chunk mode."""
 
-        parser_config = self.parser_config or {}
-        if "parent_child_mode" in parser_config:
-            return _parse_bool_config(parser_config.get("parent_child_mode"))
-        return parser_config.get("parent_chunk_mode") in ["paragraph", "full-doc"]
+        if self.configuration is None:
+            raise ValueError("Document configuration has not been migrated")
+        return self.configuration.chunk_method == "parent_child"
 
     @property
     def is_parent_child_mode(self) -> bool:

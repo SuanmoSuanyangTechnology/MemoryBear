@@ -35,6 +35,8 @@ class DashboardHandler:
         except ProfileError as exc:
             return legacy_fail_response(exc.code, exc.message, exc.detail)
         except Exception:
+            if action == "end_users":
+                raise
             logger.exception("dashboard %s failed", action)
             return legacy_fail_response(BizCode.INTERNAL_ERROR, "Dashboard查询失败")
 

@@ -4,7 +4,7 @@ import type { ChatItem } from '@/components/Chat/types'
 import type { SSEMessage } from '@/utils/stream'
 import { getFileStatusById } from '@/api/fileStorage'
 import type { NodeData } from './type'
-import { createClusterStreamProcessor } from '../utils/clusterStream'
+import { createClusterStreamProcessor } from '@/components/Chat/utils/clusterStream'
 import { mapLastVersion } from '@/components/Chat/utils/messageVersions'
 import {
   addRunStartMessage,

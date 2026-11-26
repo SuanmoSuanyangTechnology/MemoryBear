@@ -7,7 +7,7 @@ import uuid
 
 from fastapi import APIRouter, Body, Depends, HTTPException, status, Query, Request
 from fastapi.encoders import jsonable_encoder
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import JSONResponse, Response, StreamingResponse
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.background import BackgroundTask
@@ -45,7 +45,7 @@ from app.core.rag.utils.redis_conn import REDIS_CONN
 from app.core.rag.vdb.elasticsearch.elasticsearch_vector import ElasticSearchVectorIndexOps
 from app.core.response_utils import success, fail
 from app.db import get_async_db, get_async_db_context
-from app.dependencies import cur_workspace_access_guard_async, get_current_user_async
+from app.dependencies import CurrentUserSnapshot, cur_workspace_access_guard_async, get_current_user_async
 from app.models import knowledge_model
 from app.models import file_model
 from app.models.document_model import Document
@@ -68,6 +68,7 @@ from app.services.qa_export_service import (
 from app.core.quota_stub import check_knowledge_capacity_quota
 from app.integrations.knowledge.call_profile import CallProfile
 from app.integrations.knowledge.contracts import KnowledgeRetrievalSource
+from app.integrations.knowledge.errors import KnowledgeUnavailableError
 from app.integrations.knowledge.route_proxy import route_through_knowledge_service
 from app.integrations.model.invoke_backend import ref_from_model_info
 
@@ -210,6 +211,23 @@ async def _build_knowledge_detail_data_async(
         data[id_field] = source_data.get(id_field)
         data[model_field] = source_data.get(model_field)
     return data
+
+
+# Decorators register from the bottom up, so fixed paths precede the ID route.
+@router.get("/v1/{knowledge_id}", include_in_schema=False)
+@router.patch("/v1/{knowledge_id}", include_in_schema=False)
+@router.get("/v1/{kb_id}/documents", include_in_schema=False)
+@router.get("/v1/configuration-options", include_in_schema=False)
+@router.get("/v1/folder-tree", include_in_schema=False)
+@router.get("/v1", include_in_schema=False)
+@router.post("/v1", include_in_schema=False)
+@cur_workspace_access_guard_async()
+@route_through_knowledge_service(source=KnowledgeRetrievalSource.MANAGER_API, require_remote=True)
+async def forward_knowledge_v1(
+    request: Request,
+    current_user: Annotated[CurrentUserSnapshot, Depends(get_current_user_async)],
+) -> Response:
+    raise KnowledgeUnavailableError("Versioned knowledge API requires the remote service")
 
 
 @router.get("/knowledgetype", response_model=ApiResponse)

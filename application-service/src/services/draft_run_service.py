@@ -3071,11 +3071,19 @@ class AgentRunService:
                     conv_uuid = uuid.UUID(conversation_id)
                     parent_message_id = await self._get_last_current_assistant_id_async(conv_uuid)
                     failed_user_message_id = uuid.uuid4()
+                    _failed_processed = locals().get("processed_files")
+                    failed_history_files = {
+                        "content": sanitize_processed_files_for_history(_failed_processed),
+                        "provider": (locals().get("api_key_config") or {}).get("provider"),
+                    } if _failed_processed else {}
                     await self._add_message_async(
                         conversation_id=conv_uuid,
                         role="user",
                         content=message,
-                        meta_data={"files": [], "history_files": {}},
+                        meta_data={
+                            "files": await self._build_user_files_meta(files),
+                            "history_files": failed_history_files,
+                        },
                         message_id=failed_user_message_id,
                         parent_message_id=parent_message_id,
                     )
@@ -3449,6 +3457,40 @@ class AgentRunService:
 
         return filtered_history
 
+    async def _build_user_files_meta(self, files: Optional[List[FileInput]]) -> list:
+        """Serialize this turn's attachments for the user message meta.files.
+
+        Shared by success and failure persistence so a failed turn still keeps
+        the uploaded file references in history.
+        """
+        if not files:
+            return []
+        local_ids = [
+            f.upload_file_id for f in files
+            if f.transfer_method.value == "local_file" and f.upload_file_id
+            and (not f.name or not f.size)
+        ]
+        meta_map: dict[str, tuple] = {}
+        if local_ids:
+            async with get_async_db_context() as db:
+                result = await db.execute(
+                    select(FileMetadata).where(
+                        FileMetadata.id.in_(local_ids),
+                        FileMetadata.status == "completed",
+                    )
+                )
+                meta_map = {str(r.id): (r.file_name, r.file_size) for r in result.scalars().all()}
+        files_meta: list = []
+        for f in files:
+            name, size = f.name, f.size
+            if f.transfer_method.value == "local_file" and f.upload_file_id and (not name or not size):
+                meta = meta_map.get(str(f.upload_file_id))
+                if meta:
+                    name = name or meta[0]
+                    size = size or meta[1]
+            files_meta.append(serialize_file_reference(f, name=name, size=size))
+        return files_meta
+
     async def _save_conversation_message(
             self,
             conversation_id: str,
@@ -3492,29 +3534,7 @@ class AgentRunService:
                 "files": [],
                 "history_files": {}
             }
-            if files:
-                local_ids = [f.upload_file_id for f in files
-                             if f.transfer_method.value == "local_file" and f.upload_file_id
-                             and (not f.name or not f.size)]
-                meta_map = {}
-                async with get_async_db_context() as db:
-                    if local_ids:
-                        result = await db.execute(
-                            select(FileMetadata).where(
-                                FileMetadata.id.in_(local_ids),
-                                FileMetadata.status == "completed"
-                            )
-                        )
-                        rows = result.scalars().all()
-                        meta_map = {str(r.id): (r.file_name, r.file_size) for r in rows}
-                for f in files:
-                    name, size = f.name, f.size
-                    if f.transfer_method.value == "local_file" and f.upload_file_id and (not name or not size):
-                        meta = meta_map.get(str(f.upload_file_id))
-                        if meta:
-                            name = name or meta[0]
-                            size = size or meta[1]
-                    human_meta["files"].append(serialize_file_reference(f, name=name, size=size))
+            human_meta["files"] = await self._build_user_files_meta(files)
 
             # Save history_files, including provider info
             if processed_files:

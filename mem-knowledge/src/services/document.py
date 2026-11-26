@@ -6,15 +6,14 @@ import logging
 import uuid
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from dataclasses import field as dataclass_field
+from typing import TYPE_CHECKING, Any, Literal, cast
 
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm.attributes import flag_modified
 
 from ..api.dependencies import Principal
 from ..api.query_validation import parse_uuid_filter
-from ..api.schemas.document import Document as DocumentSchema
 from ..api.schemas.document import DocumentCreate, DocumentUpdate
 from ..errors import KnowledgeError
 from ..errors.mapping import map_storage_error
@@ -25,6 +24,12 @@ from ..models.owned import (
     Knowledge,
     KnowledgeMetadataBinding,
 )
+from ..parser_configuration import to_runtime
+from ..parser_configuration.legacy import (
+    document_configuration_from_legacy,
+    reflect_first_document,
+    validate_document_chunk_mode,
+)
 from ..rag.knowledge_graph import (
     GraphPipeline,
     GraphPipelineConfigError,
@@ -33,8 +38,14 @@ from ..rag.knowledge_graph import (
 )
 from ..rag.parser_config import normalize_document_parser_config
 from ..repositories import document as document_repository
+from ..repositories.parser_configuration import (
+    AsyncParserConfigurationRepository,
+    document_configuration,
+    knowledge_configuration,
+)
 from ..repositories.wiki import read as wiki_read
-from ..tasks.dispatch import TaskDispatcher
+from ..tasks.dispatch import TaskDispatcher, TaskNotPublishedError
+from ..tasks.state import PARSE_CLAIM_PREFIX
 from ..utils.datetime_utils import to_iso_z, utcnow, utcnow_naive
 from . import file as file_service
 from . import knowledge as knowledge_service
@@ -43,6 +54,7 @@ from .document_mutation_guard import (
     async_document_mutation_guard,
 )
 from .knowledge_file_storage import KnowledgeFileStorage
+from .legacy_projection import document_to_data as document_to_data
 from .qa_export import collection_name_for_knowledge
 from .write_validation import validate_write_fields
 
@@ -64,13 +76,17 @@ end
 return 0
 """.strip()
 
+_COMPARE_AND_RECORD = """
+if redis.call('get', KEYS[1]) == ARGV[1] then
+    redis.call('set', KEYS[1], ARGV[2], 'EX', ARGV[3])
+    return 1
+end
+return 0
+""".strip()
+
 
 def _not_found(code: str = "KB_DOCUMENT_NOT_FOUND") -> KnowledgeError:
     return KnowledgeError.from_code(code)
-
-
-def document_to_data(document: Document) -> dict[str, Any]:
-    return DocumentSchema.model_validate(document).model_dump(mode="json")
 
 
 async def get_document(
@@ -100,6 +116,7 @@ async def list_documents(
     keywords: str | None,
     document_ids: str | None,
     include_wiki_count: bool = False,
+    project: Callable[[Document], dict[str, Any]] = document_to_data,
 ) -> tuple[int, list[dict[str, Any]]]:
     if await knowledge_service.get_knowledge(db, kb_id, principal) is None:
         raise KnowledgeError.from_code("KB_KNOWLEDGE_NOT_FOUND")
@@ -125,7 +142,7 @@ async def list_documents(
         orderby,
         desc,
     )
-    items = [document_to_data(document) for document in documents]
+    items = [project(document) for document in documents]
     if include_wiki_count and documents:
         counts = await wiki_read.count_pages_by_document(
             db,
@@ -175,13 +192,7 @@ class DocumentUpdatePlan:
     knowledge_id: uuid.UUID
     update_fields: dict[str, Any]
     status_changed: bool
-    graph_parser_config: dict[str, Any]
-
-
-def _uses_parent_child_mode(parser_config: dict[str, Any]) -> bool:
-    if "parent_child_mode" in parser_config:
-        return bool(parser_config["parent_child_mode"])
-    return parser_config.get("parent_chunk_mode") in {"paragraph", "full-doc"}
+    existing_chunk_method: str | None = None
 
 
 async def prepare_document_update(
@@ -203,7 +214,8 @@ async def prepare_document_update(
         if await file_service.get_file(db, file_id, principal, document.kb_id) is None:
             raise KnowledgeError.from_code("KB_FILE_NOT_FOUND")
 
-    graph_parser_config = dict(knowledge.parser_config or {})
+    current_knowledge = knowledge_configuration(knowledge)
+    existing_chunk_method = None
     if "parser_config" in update_fields:
         parser_config = update_fields["parser_config"]
         if not isinstance(parser_config, dict):
@@ -215,16 +227,16 @@ async def prepare_document_update(
         except (ValueError, GraphPipelineConfigError) as exc:
             raise KnowledgeError.from_code("KB_DOCUMENT_PARSER_CONFIG_INVALID") from exc
         update_fields["parser_config"] = parser_config
-        parent_child_mode = _uses_parent_child_mode(parser_config)
-        chunk_mode = knowledge.chunk_mode
-        if (chunk_mode == 1 and parent_child_mode) or (
-            chunk_mode == 2 and not parent_child_mode
+        current_document = document_configuration(document)
+        next_document = document_configuration_from_legacy(
+            parser_config, current_knowledge, current=current_document
+        )
+        validate_document_chunk_mode(current_knowledge, next_document, current=current_document)
+        if current_knowledge.chunk_method is not None and (
+            (current_knowledge.chunk_method == "parent_child")
+            != (current_document.chunk_method == "parent_child")
         ):
-            raise KnowledgeError.from_code(
-                "KB_DOCUMENT_CHUNK_MODE_CHANGE_FORBIDDEN",
-            )
-        if chunk_mode == 0:
-            graph_parser_config.update(parser_config)
+            existing_chunk_method = current_document.chunk_method
 
     validate_write_fields(
         update_fields,
@@ -244,7 +256,7 @@ async def prepare_document_update(
         knowledge_id=document.kb_id,
         update_fields=update_fields,
         status_changed=status_changed,
-        graph_parser_config=graph_parser_config,
+        existing_chunk_method=existing_chunk_method,
     )
 
 
@@ -252,7 +264,7 @@ async def apply_document_update(
     db: AsyncSession,
     plan: DocumentUpdatePlan,
     principal: Principal,
-) -> tuple[Document, list[str | dict[str, str]], dict | None]:
+) -> tuple[Document, list[str | dict[str, str]], dict | None, dict[str, Any]]:
     document = await get_document(db, plan.document_id, principal, plan.knowledge_id)
     if document is None:
         raise KnowledgeError.from_code("KB_DOCUMENT_NOT_FOUND")
@@ -260,16 +272,37 @@ async def apply_document_update(
     if knowledge is None:
         raise KnowledgeError.from_code("KB_KNOWLEDGE_NOT_FOUND")
 
-    await db.execute(select(Knowledge.id).where(Knowledge.id == knowledge.id).with_for_update())
+    knowledge = (await db.execute(
+        select(Knowledge).where(Knowledge.id == knowledge.id)
+        .with_for_update().execution_options(populate_existing=True)
+    )).scalar_one()
     await db.refresh(document, with_for_update=True)
     parser_config = plan.update_fields.get("parser_config")
-    if parser_config is not None and knowledge.chunk_mode == 0:
-        merged_config = dict(knowledge.parser_config or {})
-        merged_config.update(parser_config)
-        knowledge.parser_config = merged_config
-        flag_modified(knowledge, "parser_config")
+    if parser_config is not None:
+        current_knowledge = knowledge_configuration(knowledge)
+        current_document = document_configuration(document)
+        next_document = document_configuration_from_legacy(
+            parser_config, current_knowledge, current=current_document
+        )
+        # Only preserve a mismatch that existed when this request was prepared;
+        # a concurrent first-document update must still recheck the KB's mode.
+        validate_document_chunk_mode(
+            current_knowledge, next_document,
+            current=(
+                current_document
+                if plan.existing_chunk_method == current_document.chunk_method
+                else None
+            ),
+        )
+        repository = AsyncParserConfigurationRepository(db)
+        if current_knowledge.chunk_method is None:
+            await repository.write_knowledge(knowledge, lambda _: reflect_first_document(
+                current_knowledge, parser_config
+            ))
+        await repository.write_document(plan.knowledge_id, document, lambda _: next_document)
+    graph_config = to_runtime(knowledge_configuration(knowledge))
     for field, value in plan.update_fields.items():
-        if hasattr(document, field):
+        if field != "parser_config" and hasattr(document, field):
             setattr(document, field, value)
     await db.flush()
 
@@ -292,7 +325,7 @@ async def apply_document_update(
     try:
         await db.commit()
         await db.refresh(document)
-        return document, wiki_pages, wiki_delivery
+        return document, wiki_pages, wiki_delivery, graph_config
     except Exception:
         await db.rollback()
         raise
@@ -385,19 +418,38 @@ class ParseDocumentSnapshot:
     document_id: uuid.UUID
     file_key: str
     file_name: str
+    qa_knowledge_id: uuid.UUID | None = None
 
 
-@dataclass(frozen=True)
+@dataclass
 class ParseDispatchResult:
-    task_id: str
-    dispatched: bool
+    """Publication facts, separate from the legacy task-id placeholder contract."""
+
+    task_id: str | None = None
+    dispatched: bool = False
+    claim_value: str | None = None
+    publication: Literal["not_attempted", "not_published", "published", "unknown"] = "not_attempted"
+    error: Exception | None = dataclass_field(default=None, repr=False)
+
+    @property
+    def legacy_task_id(self) -> str:
+        if self.claim_value and self.claim_value.startswith(PARSE_CLAIM_PREFIX):
+            return "CLAIMED"
+        return self.task_id or self.claim_value or "unknown"
 
 
-async def _release_parse_claim(redis: Any, task_key: str) -> None:
+def _real_parse_task_id(value: str) -> str | None:
+    return (value if value and value not in {"CLAIMED", "unknown"}
+            and not value.startswith(PARSE_CLAIM_PREFIX) else None)
+
+
+async def _release_parse_claim(
+    redis: Any, task_key: str, claim_value: str = "CLAIMED",
+) -> None:
     if hasattr(redis, "eval"):
-        await redis.eval(_COMPARE_AND_DELETE, 1, task_key, "CLAIMED")
+        await redis.eval(_COMPARE_AND_DELETE, 1, task_key, claim_value)
         return
-    if await redis.get(task_key) == "CLAIMED":
+    if await redis.get(task_key) == claim_value:
         await redis.delete(task_key)
 
 
@@ -430,41 +482,102 @@ async def claim_and_dispatch_parse(
     runtime: ProcessRuntime,
     dispatcher: TaskDispatcher,
     snapshot: ParseDocumentSnapshot,
+    *,
+    preserve_unknown: bool = False,
 ) -> ParseDispatchResult:
-    redis = await runtime.redis.client()
-    task_key = PARSE_TASK_KEY.format(doc_id=snapshot.document_id)
-    claimed = await redis.set(task_key, "CLAIMED", ex=PARSE_TASK_TTL, nx=True)
-    if not claimed:
-        existing_task_id = await redis.get(task_key)
-        return ParseDispatchResult(str(existing_task_id or "unknown"), False)
+    """V2 observes failures and retains uncertain claims; legacy callers still raise."""
+    result = await dispatch_parse_result(
+        runtime, dispatcher, snapshot, preserve_unknown=preserve_unknown,
+    )
+    if result.error is not None and not preserve_unknown:
+        raise result.error
+    return result
+
+
+async def dispatch_parse_result(
+    runtime: ProcessRuntime,
+    dispatcher: TaskDispatcher,
+    snapshot: ParseDocumentSnapshot,
+    *,
+    preserve_unknown: bool = False,
+) -> ParseDispatchResult:
+    """Observe dispatch without changing the legacy claim/failure side effects."""
+    result = ParseDispatchResult()
     try:
-        await _persist_parse_dispatch_state(
-            runtime,
-            snapshot.document_id,
-            state="queued",
-        )
-        task_id = await dispatcher.send(
-            PARSE_TASK_NAME,
-            args=[snapshot.file_key, snapshot.document_id, snapshot.file_name],
-            queue="document_tasks",
-        )
-    except Exception:
-        await _release_parse_claim(redis, task_key)
+        redis = await runtime.redis.client()
+        task_key = PARSE_TASK_KEY.format(doc_id=snapshot.document_id)
+        proposed_task_id = str(uuid.uuid4()) if preserve_unknown else None
+        claim_value = PARSE_CLAIM_PREFIX + proposed_task_id if proposed_task_id else "CLAIMED"
+        claimed = await redis.set(task_key, claim_value, ex=PARSE_TASK_TTL, nx=True)
+        if not claimed:
+            result.claim_value = str(await redis.get(task_key) or "unknown")
+            result.task_id = _real_parse_task_id(result.claim_value)
+            return result
+        result.claim_value = claim_value
         try:
             await _persist_parse_dispatch_state(
                 runtime,
                 snapshot.document_id,
-                state="failed",
+                state="queued",
             )
-        except Exception as state_exc:  # noqa: BLE001 - preserve dispatch failure.
-            logger.warning(
-                "Failed to persist parse dispatch failure: document=%s error_type=%s",
-                snapshot.document_id,
-                type(state_exc).__name__,
+            result.publication = "unknown"
+            try:
+                publish_options: dict[str, Any] = (
+                    {"connect_before_publish": True, "task_id": proposed_task_id}
+                    if preserve_unknown else {}
+                )
+                if snapshot.qa_knowledge_id is not None:
+                    task_id = await dispatcher.send(
+                        "app.core.rag.tasks.import_qa_chunks",
+                        args=[str(snapshot.qa_knowledge_id), str(snapshot.document_id),
+                              snapshot.file_name],
+                        kwargs={"file_key": snapshot.file_key, "clear_parse_task": True},
+                        queue="qa_import",
+                        **publish_options,
+                    )
+                else:
+                    task_id = await dispatcher.send(
+                        PARSE_TASK_NAME,
+                        args=[snapshot.file_key, snapshot.document_id, snapshot.file_name],
+                        queue="document_tasks",
+                        **publish_options,
+                    )
+            except TaskNotPublishedError:
+                result.publication = "not_published"
+                raise
+        except Exception:
+            if preserve_unknown and result.publication == "unknown":
+                # The broker may have accepted the message. Keep the claim until
+                # the worker clears it or its lease expires; never auto-resubmit.
+                raise
+            await _release_parse_claim(redis, task_key, claim_value)
+            try:
+                await _persist_parse_dispatch_state(
+                    runtime,
+                    snapshot.document_id,
+                    state="failed",
+                )
+            except Exception as state_exc:  # noqa: BLE001 - preserve dispatch failure.
+                logger.warning(
+                    "Failed to persist parse dispatch failure: document=%s error_type=%s",
+                    snapshot.document_id,
+                    type(state_exc).__name__,
+                )
+            raise
+        result.task_id = _real_parse_task_id(task_id)
+        result.claim_value = task_id
+        result.dispatched = True
+        result.publication = "published"
+        if preserve_unknown and hasattr(redis, "eval"):
+            # A fast worker may already have finished, or a newer claim may exist.
+            await cast(Any, redis).eval(
+                _COMPARE_AND_RECORD, 1, task_key, claim_value, task_id, PARSE_TASK_TTL,
             )
-        raise
-    await redis.set(task_key, task_id, ex=PARSE_TASK_TTL)
-    return ParseDispatchResult(task_id, True)
+        elif not preserve_unknown or await redis.get(task_key) == claim_value:
+            await redis.set(task_key, task_id, ex=PARSE_TASK_TTL)
+    except Exception as exc:
+        result.error = exc
+    return result
 
 
 @dataclass(frozen=True)
@@ -511,7 +624,7 @@ async def prepare_document_deletion(
     return DocumentDeletionSnapshot(
         document_id=document.id,
         knowledge_id=document.kb_id,
-        parser_config=dict(knowledge.parser_config or {}),
+        parser_config=to_runtime(knowledge_configuration(knowledge)),
         storage_keys=tuple(file.file_key for file in files if file.file_key),
         file_ids=tuple(file.id for file in files),
     )

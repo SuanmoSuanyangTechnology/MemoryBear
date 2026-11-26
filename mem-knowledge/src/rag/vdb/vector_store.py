@@ -51,6 +51,7 @@ class TaskVectorStore:
         knowledge_id: uuid.UUID | str,
         embeddings: Any,
         *,
+        vectorize: bool = True,
         structured_multimodal: bool = False,
         image_resolver: ImageResolver | None = None,
         embedding_dimension: int | None = None,
@@ -58,7 +59,8 @@ class TaskVectorStore:
         self._client = client
         self._collection_name = collection_name_for_knowledge(knowledge_id)
         self._embeddings = embeddings
-        self._structured_multimodal = structured_multimodal
+        self._vectorize = vectorize
+        self._structured_multimodal = vectorize and structured_multimodal
         self._image_resolver = image_resolver
         self._embedding_dimension = embedding_dimension
 
@@ -74,15 +76,16 @@ class TaskVectorStore:
             return PreparedChunkBatch(actions=(), chunk_count=0)
         if self._structured_multimodal:
             return self._prepare_multimodal_units(chunks)
-        vectors = self._embed_chunks(chunks)
+        vectors = self._embed_chunks(chunks) if self._vectorize else [None] * len(chunks)
         actions = []
         for chunk, vector in zip(chunks, vectors, strict=True):
             metadata = dict(chunk.metadata or {})
             source: dict[str, Any] = {
                 Field.CONTENT_KEY.value: chunk.page_content,
                 Field.METADATA_KEY.value: metadata,
-                Field.VECTOR.value: vector,
             }
+            if self._vectorize:
+                source[Field.VECTOR.value] = vector
             for field in (
                 Field.CHUNK_TYPE,
                 Field.QUESTION,
@@ -194,7 +197,7 @@ class TaskVectorStore:
                     action["_source"][Field.VECTOR.value]
                     for batch in batches
                     for action in batch.actions
-                    if action["_source"][Field.VECTOR.value] is not None
+                    if action["_source"].get(Field.VECTOR.value) is not None
                 ),
                 None,
             )

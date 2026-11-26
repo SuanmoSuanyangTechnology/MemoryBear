@@ -20,6 +20,9 @@ dependencies = [
     "rsa>=4.9",
     "email-validator>=2.1",
     "alembic>=1.13",
+    "psycopg2-binary>=2.9.9",
+    "celery>=5.5.2",
+    "passlib>=1.7.4",
 ]
 
 [dependency-groups]
@@ -33,8 +36,12 @@ error-core = { path = "../packages/error-core" }
 # 使 wheel 安装产出 package src 及其子包——find where=["src"] 会把子包打成顶层包、
 # 漏掉 src 根模块（main/db/config/keys/redis），uvicorn src.main:app 将不可导入
 [tool.setuptools]
-packages = ["src", "src.controllers", "src.models",
-            "src.repositories", "src.schemas", "src.services"]
+packages = ["src", "src.controllers", "src.core", "src.models",
+            "src.repositories", "src.schemas", "src.services", "src.plugins",
+            "src.integrations"]
+
+[tool.setuptools.package-data]
+src = ["locales/*.json"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -50,6 +57,7 @@ select = ["E", "F", "I", "UP", "B", "ASYNC"]
 [tool.ruff.lint.per-file-ignores]
 # FastAPI dependencies are injected via Depends() defaults by convention.
 "src/controllers/*.py" = ["B008"]
+"src/core/deps.py" = ["B008"]
 
 # Resolve through the mirror so re-locks keep every lock URL on it.
 [[tool.uv.index]]

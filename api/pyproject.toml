@@ -159,9 +159,9 @@ dependencies = [
 ]
 
 [tool.uv.sources]
-redbear-model = { path = "../packages/redbear-model" }
-error-core = { path = "../packages/error-core" }
-task-bridge-sdk = { path = "../packages/task-bridge-sdk" }
+redbear-model = { path = "../packages/redbear-model", editable = true }
+error-core = { path = "../packages/error-core", editable = true }
+task-bridge-sdk = { path = "../packages/task-bridge-sdk", editable = true }
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

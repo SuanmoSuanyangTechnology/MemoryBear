@@ -313,3 +313,25 @@ class EndUserRepository:
         if row is None:
             return None
         return {"id": row["id"], "other_name": row["other_name"]}
+
+    async def memory_user_snapshot(self, end_user_id: UUID) -> dict[str, Any] | None:
+        """Resolve only identity and ownership for the migrated memory controllers."""
+        async with self.postgres.session() as session:
+            row = (await session.execute(
+                select(EndUser.id, EndUser.workspace_id).where(
+                    EndUser.id == end_user_id, EndUser.is_active.is_(True)
+                ).limit(1)
+            )).mappings().first()
+            if row is None:
+                target_id = await session.scalar(
+                    select(EndUserMerge.target_id).where(
+                        EndUserMerge.origin_id == end_user_id
+                    ).order_by(EndUserMerge.id.desc()).limit(1)
+                )
+                if target_id is not None:
+                    row = (await session.execute(
+                        select(EndUser.id, EndUser.workspace_id).where(
+                            EndUser.id == target_id, EndUser.is_active.is_(True)
+                        ).limit(1)
+                    )).mappings().first()
+        return dict(row) if row is not None else None

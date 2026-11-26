@@ -40,17 +40,21 @@ class MinerUV3Parser(DocumentParser):
         )
         retained_file_ids: set[uuid.UUID] = set()
         storage_complete = True
+        preview = ctx.kwargs.get("preview", False)
         if embedded_vision:
             attached, unresolved = self._attach_images(blocks, result.images)
             for block in blocks:
                 if block.type is ParsedBlockType.IMAGE:
                     block.image_vision_scope = ImageVisionScope.EMBEDDED
-            retained_file_ids, stored = self._store_image_assets(attached, ctx)
-            storage_complete = stored and unresolved == 0
-        if storage_complete:
-            self._cleanup_stale_image_assets(ctx, retained_file_ids)
-        else:
-            LOGGER.warning("MinerU stale image cleanup skipped after incomplete asset storage")
+            if not preview:
+                retained_file_ids, stored = self._store_image_assets(attached, ctx)
+                storage_complete = stored and unresolved == 0
+        # A GET preview must not persist or retire derived image assets.
+        if not preview:
+            if storage_complete:
+                self._cleanup_stale_image_assets(ctx, retained_file_ids)
+            else:
+                LOGGER.warning("MinerU stale image cleanup skipped after incomplete asset storage")
         return ParseResult(
             blocks=blocks,
             merge_strategy="blocks",

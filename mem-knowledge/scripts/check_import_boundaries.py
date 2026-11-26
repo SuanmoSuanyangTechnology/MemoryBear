@@ -44,9 +44,11 @@ AUTHORIZED_TASKS_BY_MODULE = {
 REQUIRED_RUNTIME_ROOT_MODULES = frozenset(
     {
         "main.py",
-        "database_migrations.py",
         "api/router.py",
+        "database_migrations.py",
+        "infrastructure/database/migrations.py",
         "infrastructure/database/migration_policy.py",  # Also loaded by the Alembic CLI outside src.
+        "parser_configuration/cli.py",  # Explicit offline/authorized migration entry point.
         "rag/chunk/router.py",
         "tasks/celery_worker.py",
         *AUTHORIZED_TASKS_BY_MODULE,
@@ -55,9 +57,11 @@ REQUIRED_RUNTIME_ROOT_MODULES = frozenset(
 RUNTIME_ROOT_MODULES = frozenset(
     {
         "main.py",
-        "database_migrations.py",
         "api/router.py",
+        "database_migrations.py",
+        "infrastructure/database/migrations.py",
         "infrastructure/database/migration_policy.py",  # Also loaded by the Alembic CLI outside src.
+        "parser_configuration/cli.py",  # Explicit offline/authorized migration entry point.
         "services/wiki/taxonomy.py",  # scripts/replan_wiki_taxonomy.py 的显式运维入口。
         "rag/chunk/router.py",
         "tasks/celery_worker.py",

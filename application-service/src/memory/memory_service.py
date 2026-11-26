@@ -1,12 +1,12 @@
-"""Delegating facade for the monolith long-term memory entry point.
+"""Delegating facade for the long-term memory entry point.
 
-Long-term memory reads, writes and ingestion stay served by the monolith
-memory API during the coexistence period; this facade forwards every
-operation to the internal memory endpoints over the internal network (never
-through the gateway) so memory state keeps exactly one writer. An
-unconfigured channel fails closed with a clear ``BusinessException`` instead
-of silently degrading, so memory-dependent runs fail visibly rather than
-losing memory without a trace.
+Long-term memory reads run inside memory-profile through its app-service read
+callback; ingestion still goes to the monolith memory API during the
+coexistence period. Both go over the internal network (never through the
+gateway) so memory state keeps exactly one writer per path. An unconfigured
+channel fails closed with a clear ``BusinessException`` instead of silently
+degrading, so memory-dependent runs fail visibly rather than losing memory
+without a trace.
 
 ``create_long_term_memory_tool`` keeps the host contract for disabled configs
 (returns ``None`` when memory is off or no end user is given), and the tool
@@ -17,22 +17,41 @@ LLM behavior stays identical.
 from __future__ import annotations
 
 import logging
+import uuid
 from typing import Any
 
 from pydantic import BaseModel, Field
 
+from ..db import get_async_db_context
 from ..errors import BizCode, BusinessException, as_biz_code
 from ..infrastructure.upstream import UpstreamUnavailableError, get_monolith_upstream
+from ..integrations.memory_profile import (
+    MemoryProfileProtocolError,
+    MemoryProfileUnavailableError,
+    get_memory_profile_client,
+)
+from ..repositories.tool_repository import ToolRepository
+from ..trace import get_trace_id
 from .enums import SearchStrategy
 
 logger = logging.getLogger(__name__)
 
 _UNAVAILABLE_MESSAGE = (
-    "Long-term memory is served by the memory API and is not wired into this "
-    "service yet; disable memory for this run or use the monolith endpoint"
+    "Long-term memory ingestion is served by the memory API and its channel is "
+    "not configured (APPLICATION_SERVICE_UPSTREAM_BASE_URL); disable memory for "
+    "this run"
 )
 
-_READ_PATH = "/api/internal/app-service/memory/read"
+_READ_UNAVAILABLE_MESSAGE = (
+    "Long-term memory reads are served by memory-profile and its channel is "
+    "not configured (MEMORY_PROFILE_BASE_URL); disable memory for this run"
+)
+
+_READ_IDENTITY_MESSAGE = (
+    "Long-term memory reads need the end-user and workspace to resolve a full "
+    "internal principal and the workspace tenant; unable to build it for this run"
+)
+
 _INGEST_WORKFLOW_PATH = "/api/internal/app-service/memory/ingest-workflow"
 _INGEST_AGENT_PATH = "/api/internal/app-service/memory/ingest-agent"
 
@@ -81,7 +100,7 @@ async def _forward_memory_call(
         workspace_id: str | None,
         json_body: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Call an internal memory endpoint and return its ``data`` payload.
+    """Call an internal monolith memory endpoint and return its ``data`` payload.
 
     Fail-closed: an unconfigured channel raises the stand-in message, and a
     rejected or unreachable upstream raises the envelope error.
@@ -110,8 +129,47 @@ async def _forward_memory_call(
     return data if isinstance(data, dict) else {}
 
 
+async def _workspace_tenant_id(workspace_id: uuid.UUID) -> uuid.UUID | None:
+    """Resolve the workspace's tenant through the shared cached lookup."""
+
+    async with get_async_db_context() as db:
+        return await ToolRepository.get_tenant_id_by_workspace_id_async(
+            db, str(workspace_id)
+        )
+
+
+async def _read_identity(
+        end_user_id: str, workspace_id: str | None
+) -> tuple[uuid.UUID, uuid.UUID, uuid.UUID]:
+    """Build the full internal principal memory-profile's direct mode demands.
+
+    Reads run without an inbound request, so the end user acts as the caller,
+    the tenant comes from the workspace, and every identity must be a UUID;
+    any missing or malformed identity fails the read closed.
+    """
+
+    try:
+        actor_id = uuid.UUID(str(end_user_id))
+        workspace_uuid = uuid.UUID(str(workspace_id))
+    except (TypeError, ValueError) as exc:
+        raise BusinessException(
+            _READ_IDENTITY_MESSAGE, code=BizCode.SERVICE_UNAVAILABLE
+        ) from exc
+    try:
+        tenant_id = await _workspace_tenant_id(workspace_uuid)
+    except Exception as exc:  # noqa: BLE001 - a failed lookup must fail the read closed
+        raise BusinessException(
+            _READ_IDENTITY_MESSAGE, code=BizCode.SERVICE_UNAVAILABLE
+        ) from exc
+    if tenant_id is None:
+        raise BusinessException(
+            _READ_IDENTITY_MESSAGE, code=BizCode.SERVICE_UNAVAILABLE
+        )
+    return actor_id, tenant_id, workspace_uuid
+
+
 class MemoryService:
-    """Monolith-compatible facade backed by the internal memory endpoints."""
+    """Monolith-compatible facade over memory-profile reads and monolith ingestion."""
 
     def __init__(
             self,
@@ -174,28 +232,55 @@ class MemoryService:
             enable_rerank: bool = False,
             record_display: bool = False,
     ) -> _MemorySearchResult:
-        data = await _forward_memory_call(
-            _READ_PATH,
-            workspace_id=self._workspace_id,
-            json_body={
-                "end_user_id": self._end_user_id,
-                "query": query,
-                "search_switch": str(search_switch),
-                "config_id": self._config_id,
-                "history": history or [],
-                "limit": limit,
-                "includes": [str(item) for item in includes] if includes else None,
-                "skip_summary": skip_summary,
-                "enable_rerank": enable_rerank,
-                "record_display": record_display,
-                "storage_type": self._storage_type,
-                "user_rag_memory_id": self._user_rag_memory_id or "",
-                "conversation_id": self._conversation_id,
-                "language": self._language,
-                "draft": self._draft,
-                "app_id": self._app_id,
-            },
+        client = get_memory_profile_client()
+        if client is None or not client.configured:
+            raise BusinessException(
+                _READ_UNAVAILABLE_MESSAGE, code=BizCode.SERVICE_UNAVAILABLE
+            )
+        actor_id, tenant_id, workspace_uuid = await _read_identity(
+            self._end_user_id, self._workspace_id
         )
+        try:
+            envelope = await client.read_app_service_memory(
+                payload={
+                    "end_user_id": self._end_user_id,
+                    "query": query,
+                    "search_switch": str(search_switch),
+                    "config_id": self._config_id,
+                    "history": history or [],
+                    "limit": limit,
+                    "includes": [str(item) for item in includes] if includes else None,
+                    "skip_summary": skip_summary,
+                    "enable_rerank": enable_rerank,
+                    "record_display": record_display,
+                    "storage_type": self._storage_type,
+                    "user_rag_memory_id": self._user_rag_memory_id or "",
+                    "conversation_id": self._conversation_id,
+                    "language": self._language,
+                    "draft": self._draft,
+                    "app_id": self._app_id,
+                },
+                workspace_id=workspace_uuid,
+                tenant_id=tenant_id,
+                actor_id=actor_id,
+                trace_id=get_trace_id() or uuid.uuid4().hex,
+            )
+        except MemoryProfileUnavailableError as exc:
+            raise BusinessException(
+                f"forward to memory API failed: {exc}",
+                code=BizCode.SERVICE_UNAVAILABLE,
+            ) from exc
+        except MemoryProfileProtocolError as exc:
+            raise BusinessException(
+                str(exc), code=BizCode.SERVICE_UNAVAILABLE
+            ) from exc
+        if envelope.get("code") != 0:
+            detail = envelope.get("msg") or envelope.get("error")
+            raise BusinessException(
+                str(detail or "memory API rejected the request"),
+                code=as_biz_code(envelope.get("code")),
+            )
+        data = envelope.get("data") if isinstance(envelope.get("data"), dict) else {}
         return _MemorySearchResult(
             content=str(data.get("content") or ""),
             memories=list(data.get("memories") or []),

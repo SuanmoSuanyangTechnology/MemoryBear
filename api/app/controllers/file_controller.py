@@ -89,6 +89,20 @@ def _require_parent_folder(
         )
 
 
+@router.post("/v1/upload-and-parse", include_in_schema=False)
+@cur_workspace_access_guard_async()
+@route_through_knowledge_service(
+    source=KnowledgeRetrievalSource.MANAGER_API,
+    profile=CallProfile.RAW_UPLOAD,
+    require_remote=True,
+)
+async def upload_and_parse_v1(
+    request: Request,
+    current_user: CurrentUserSnapshot = Depends(get_current_user_async),
+) -> Response:
+    raise KnowledgeUnavailableError("Versioned knowledge upload requires the remote service")
+
+
 @router.get("/{kb_id}/{parent_id}/files", response_model=ApiResponse)
 @cur_workspace_access_guard()
 @route_through_knowledge_service(source=KnowledgeRetrievalSource.MANAGER_API)

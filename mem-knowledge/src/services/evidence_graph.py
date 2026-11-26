@@ -14,6 +14,7 @@ from ..integrations.model.embedding import RedBearEmbeddings
 from ..integrations.model.invoke_backend import ref_from_view
 from ..integrations.model.views import is_qwen3_vl_embedding_view
 from ..models.owned import Document, Knowledge
+from ..parser_configuration import to_runtime
 from ..rag.knowledge_graph.config import (
     GraphDocumentDeletionPending,
     GraphPipeline,
@@ -31,6 +32,7 @@ from ..rag.knowledge_graph.index_pipeline import GraphStageCallback, KnowledgeGr
 from ..rag.knowledge_graph.lock import create_knowledge_graph_lock
 from ..rag.knowledge_graph.models import GraphTaskState
 from ..rag.knowledge_graph.runtime import GraphRuntimeDisabled, snapshot_graph_runtime
+from ..repositories.parser_configuration import knowledge_configuration
 
 
 def _canonical_uuid(value: object, field_name: str) -> str:
@@ -84,11 +86,12 @@ def load_graph_task_state(
                 .scalars()
                 .all()
             )
+        parser_config = to_runtime(knowledge_configuration(knowledge))
         return GraphTaskState(
             knowledge_id=str(knowledge.id),
             workspace_id=str(knowledge.workspace_id),
-            pipeline=resolve_graph_pipeline(knowledge.parser_config),
-            graph_enabled=is_graph_enabled(knowledge.parser_config),
+            pipeline=resolve_graph_pipeline(parser_config),
+            graph_enabled=is_graph_enabled(parser_config),
             document_active=document_active,
             active_document_ids=active_document_ids,
         )

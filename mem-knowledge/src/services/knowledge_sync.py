@@ -10,11 +10,12 @@ import uuid
 from dataclasses import asdict, dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from sqlalchemy import select
 
 from ..application.runtime import ProcessRuntime
+from ..errors import KnowledgeError
 from ..models.owned import (
     FILE_ROLE_DERIVED_IMAGE,
     FILE_ROLE_SOURCE,
@@ -22,12 +23,19 @@ from ..models.owned import (
     File,
     Knowledge,
 )
+from ..parser_configuration import ConfigurationError, KnowledgeConfiguration
+from ..parser_configuration.api import require_sync_source
+from ..parser_configuration.legacy import document_configuration_from_legacy
 from ..rag.integrations.feishu import FeishuAPIClient
 from ..rag.integrations.feishu.models import FileInfo
 from ..rag.integrations.web import WebCrawler
 from ..rag.integrations.yuque import YuqueAPIClient
 from ..rag.integrations.yuque.models import YuqueDocInfo
 from ..rag.vdb.vector_store import TaskVectorStore
+from ..repositories.parser_configuration import (
+    ParserConfigurationRepository,
+    knowledge_configuration,
+)
 from ..tasks.dispatch import TaskDispatcher
 from ..tasks.observability import BusinessOutcome, TaskRun
 from ..utils.datetime_utils import utcnow_naive
@@ -49,8 +57,7 @@ DEFAULT_SYNC_PARSER_CONFIG = {
 class _KnowledgeSnapshot:
     id: uuid.UUID
     name: str
-    type: str
-    parser_config: dict[str, Any]
+    source: str | None
     created_by: uuid.UUID
 
 
@@ -138,10 +145,31 @@ def _load_knowledge(
         return _KnowledgeSnapshot(
             id=record.id,
             name=record.name,
-            type=record.type,
-            parser_config=dict(record.parser_config or {}),
+            source=cast(str | None, record.source),
             created_by=record.created_by,
         )
+
+
+def _load_configuration(
+    runtime: ProcessRuntime, knowledge: _KnowledgeSnapshot,
+) -> KnowledgeConfiguration:
+    with runtime.database.sync_session() as session:
+        record = session.get(Knowledge, knowledge.id)
+        if record is None or record.configuration is None:
+            raise ConfigurationError("configuration_not_migrated")
+        if knowledge.source == "third_party" and record.configuration.third_party_platform not in {
+            "yuque", "feishu",
+        }:
+            raise KnowledgeError.from_code("KB_CONNECTOR_SOURCE_INVALID")
+        config = knowledge_configuration(record)
+        if config.source_issues():
+            logger.error(
+                "Synchronization source requires repair: knowledge=%s source=%s fields=%s",
+                knowledge.id, knowledge.source,
+                ",".join(issue.field for issue in config.source_issues()),
+            )
+        require_sync_source(config)
+        return config
 
 
 def _list_file_records(runtime: ProcessRuntime, kb_id: uuid.UUID) -> list[_FileSnapshot]:
@@ -259,6 +287,7 @@ def _create_document(
     runtime: ProcessRuntime,
     knowledge: _KnowledgeSnapshot,
     file_record: _FileSnapshot,
+    configuration: KnowledgeConfiguration,
 ) -> _DocumentSnapshot:
     with runtime.database.sync_session() as session:
         record = Document(
@@ -271,9 +300,12 @@ def _create_document(
             file_size=file_record.file_size,
             file_meta={},
             parser_id="naive",
-            parser_config=dict(DEFAULT_SYNC_PARSER_CONFIG),
         )
-        session.add(record)
+        ParserConfigurationRepository(session).write_document(
+            knowledge.id,
+            record,
+            lambda _: document_configuration_from_legacy(DEFAULT_SYNC_PARSER_CONFIG, configuration),
+        )
         session.commit()
         session.refresh(record)
         snapshot = _snapshot_document(record)
@@ -499,13 +531,18 @@ def _sync_web(
     run: TaskRun,
     counters: KnowledgeSyncCounters,
 ) -> None:
-    config = knowledge.parser_config
+    config = _load_configuration(runtime, knowledge)
+    assert config.web_entry_url is not None
+    assert config.web_max_pages is not None
+    assert config.web_delay_seconds is not None
+    assert config.web_timeout_seconds is not None
+    assert config.web_user_agent is not None
     crawler = WebCrawler(
-        entry_url=config.get("entry_url", ""),
-        max_pages=config.get("max_pages", 20),
-        delay_seconds=config.get("delay_seconds", 1.0),
-        timeout_seconds=config.get("timeout_seconds", 10),
-        user_agent=config.get("user_agent", "KnowledgeBaseCrawler/1.0"),
+        entry_url=config.web_entry_url,
+        max_pages=config.web_max_pages,
+        delay_seconds=config.web_delay_seconds,
+        timeout_seconds=config.web_timeout_seconds,
+        user_agent=config.web_user_agent,
     )
     current_urls: set[str] = set()
     for crawled in crawler.crawl():
@@ -547,7 +584,7 @@ def _sync_web(
         if file_record is None:
             continue
         document = (
-            _create_document(runtime, knowledge, file_record)
+            _create_document(runtime, knowledge, file_record, config)
             if is_new
             else existing_document
         )
@@ -584,11 +621,12 @@ def _sync_yuque(
     knowledge: _KnowledgeSnapshot,
     run: TaskRun,
     counters: KnowledgeSyncCounters,
+    config: KnowledgeConfiguration,
 ) -> None:
-    config = knowledge.parser_config
+    assert config.yuque_user_id is not None and config.yuque_token is not None
     client = YuqueAPIClient(
-        user_id=config.get("yuque_user_id", ""),
-        token=config.get("yuque_token", ""),
+        user_id=config.yuque_user_id,
+        token=config.yuque_token,
     )
     with run.stage("list_remote_documents"):
         documents = runtime.run_async(lambda: _list_yuque_documents(client))
@@ -654,7 +692,7 @@ def _sync_yuque(
         if file_record is None:
             continue
         synced_document = (
-            _create_document(runtime, knowledge, file_record)
+            _create_document(runtime, knowledge, file_record, config)
             if is_new
             else existing_document
         )
@@ -691,17 +729,20 @@ def _sync_feishu(
     knowledge: _KnowledgeSnapshot,
     run: TaskRun,
     counters: KnowledgeSyncCounters,
+    config: KnowledgeConfiguration,
 ) -> None:
-    config = knowledge.parser_config
+    assert config.feishu_app_id is not None and config.feishu_app_secret is not None
+    folder_token = config.feishu_folder_token
+    assert folder_token is not None
     client = FeishuAPIClient(
-        app_id=config.get("feishu_app_id", ""),
-        app_secret=config.get("feishu_app_secret", ""),
+        app_id=config.feishu_app_id,
+        app_secret=config.feishu_app_secret,
     )
     with run.stage("list_remote_documents"):
         files = runtime.run_async(
             lambda: _list_feishu_documents(
                 client,
-                config.get("feishu_folder_token", ""),
+                folder_token,
             )
         )
     documents = [
@@ -765,7 +806,7 @@ def _sync_feishu(
         if file_record is None:
             continue
         synced_document = (
-            _create_document(runtime, knowledge, file_record)
+            _create_document(runtime, knowledge, file_record, config)
             if is_new
             else existing_document
         )
@@ -786,44 +827,22 @@ def _sync_third_party(
     run: TaskRun,
     counters: KnowledgeSyncCounters,
 ) -> int:
-    config = knowledge.parser_config
-    yuque_user_id = config.get("yuque_user_id", "")
-    feishu_app_id = config.get("feishu_app_id", "")
-    existing_files = _list_source_files(runtime, knowledge.id)
-    has_yuque = any(
-        record.file_url and "yuque.com" in record.file_url for record in existing_files
-    )
-    has_feishu = any(
-        record.file_url and "feishu.cn" in record.file_url for record in existing_files
-    )
-    failures = 0
-    if (
-        yuque_user_id
-        and yuque_user_id not in {"User ID", ""}
-        and (not existing_files or has_yuque)
-    ):
-        try:
-            _sync_yuque(runtime, knowledge, run, counters)
-        except Exception as exc:
-            failures += 1
-            logger.error(
-                "Yuque knowledge synchronization failed: error_type=%s",
-                type(exc).__name__,
-            )
-    if (
-        feishu_app_id
-        and feishu_app_id not in {"App ID", ""}
-        and (not existing_files or has_feishu)
-    ):
-        try:
-            _sync_feishu(runtime, knowledge, run, counters)
-        except Exception as exc:
-            failures += 1
-            logger.error(
-                "Feishu knowledge synchronization failed: error_type=%s",
-                type(exc).__name__,
-            )
-    return failures
+    try:
+        config = _load_configuration(runtime, knowledge)
+        if config.third_party_platform == "yuque":
+            _sync_yuque(runtime, knowledge, run, counters, config)
+        elif config.third_party_platform == "feishu":
+            _sync_feishu(runtime, knowledge, run, counters, config)
+    except Exception as exc:
+        logger.error(
+            "Third-party knowledge synchronization failed: knowledge=%s error_type=%s "
+            "error_code=%s",
+            knowledge.id,
+            type(exc).__name__,
+            exc.code if isinstance(exc, KnowledgeError) else "KB_SYNC_PROCESSING_FAILED",
+        )
+        return 1
+    return 0
 
 
 def process_knowledge_sync(
@@ -849,8 +868,8 @@ def process_knowledge_sync(
                 counts=counters.as_dict(),
             )
             return "sync knowledge failed: knowledge not found"
-        match knowledge.type:
-            case "Web":
+        match knowledge.source:
+            case "website":
                 try:
                     with run.stage("sync_web"):
                         _sync_web(runtime, knowledge, run, counters)
@@ -860,14 +879,14 @@ def process_knowledge_sync(
                         "Web knowledge synchronization failed: error_type=%s",
                         type(exc).__name__,
                     )
-            case "Third-party":
+            case "third_party":
                 with run.stage("sync_third_party"):
                     counters.failed += _sync_third_party(runtime, knowledge, run, counters)
             case _:
                 logger.info(
-                    "Knowledge type requires no synchronization: knowledge=%s type=%s",
+                    "Knowledge source requires no synchronization: knowledge=%s source=%s",
                     knowledge_id,
-                    knowledge.type,
+                    knowledge.source,
                 )
                 run.finish(
                     BusinessOutcome.SKIPPED,

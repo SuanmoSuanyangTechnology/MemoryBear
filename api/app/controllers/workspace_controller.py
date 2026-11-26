@@ -1,7 +1,7 @@
 import uuid
 from typing import List, Optional, Callable
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, status
 from sqlalchemy.orm import Session
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -24,6 +24,7 @@ from app.i18n.serializers import (
     WorkspaceMemberSerializer,
     WorkspaceInviteSerializer
 )
+from app.integrations.profile.proxy import memory_profile_proxy
 from app.models.tenant_model import Tenants
 from app.models.user_model import User
 from app.models.workspace_model import InviteStatus
@@ -187,8 +188,10 @@ def update_workspace(
 
 
 @router.get("/temporary-memory-retention", response_model=ApiResponse)
+@memory_profile_proxy(preserve_status=True)
 @cur_workspace_access_guard()
-def get_workspace_retention_policy(
+async def get_workspace_retention_policy(
+    request: Request,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
     t: Callable = Depends(get_translator),
@@ -213,8 +216,10 @@ def get_workspace_retention_policy(
 
 
 @router.put("/temporary-memory-retention", response_model=ApiResponse)
+@memory_profile_proxy(body_arg="policy", body_fields=("retention_days",), preserve_status=True)
 @cur_workspace_access_guard()
-def update_workspace_retention_policy(
+async def update_workspace_retention_policy(
+    request: Request,
     policy: WorkspaceRetentionPolicyUpdate,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),

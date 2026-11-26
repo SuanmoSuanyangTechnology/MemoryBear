@@ -41,6 +41,15 @@ class ErrorDefinition:
 
 # 存量入口保留旧 HTTP 与重试策略；公开业务码单独映射，不改变任务结果原因键。
 _DEFINITIONS = {
+    "KB_UPLOAD_SAVE_UNKNOWN": ErrorDefinition(
+        503, False, 9498, "business", {}, "UNAVAILABLE"
+    ),
+    "KB_KNOWLEDGE_FIELD_IMMUTABLE": ErrorDefinition(
+        400, False, 9495, "business", {"field": str}, "INVALID_ARGUMENT"
+    ),
+    "KB_PARSER_CONFIG_PARENT_CHILD_QA_CONFLICT": ErrorDefinition(
+        400, False, 9496, "business", {}, "INVALID_ARGUMENT"
+    ),
     "KB_SHARE_SOURCE_NOT_FOUND": ErrorDefinition(
         404, False, 9470, "business", {}, "NOT_FOUND"
     ),
@@ -420,6 +429,9 @@ _DEFINITIONS = {
     ),
     "KB_MODEL_PROVIDER_RESPONSE_INVALID": ErrorDefinition(
         400, False, 9342, "business", {}, "INTERNAL"
+    ),
+    "KB_RETRIEVAL_RAG_NOT_ENABLED": ErrorDefinition(
+        400, False, 9497, "business", {}, "FAILED_PRECONDITION"
     ),
     "KB_RETRIEVAL_EMBEDDING_MODEL_NOT_CONFIGURED": ErrorDefinition(
         400, False, 9310, "business", {}, "FAILED_PRECONDITION"

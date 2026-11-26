@@ -129,7 +129,10 @@ class KnowledgeServiceClient:
         url = self._transport.internal_url(path, request.scope.get("query_string", b""))
         headers = self._transport.request_headers(request.headers, context, profile)
         send_kwargs: dict[str, Any] = {}
-        if profile is CallProfile.MULTIPART_UPLOAD:
+        if profile is CallProfile.RAW_UPLOAD:
+            # Preserve multipart part headers, duplicate fields and bytes for downstream validation.
+            send_kwargs["content"] = request.stream()
+        elif profile is CallProfile.MULTIPART_UPLOAD:
             form = await request.form()
             data: dict[str, str] = {}
             files: list[tuple[str, tuple[str, Any, str | None]]] = []

@@ -1,7 +1,8 @@
 /**
  * useChatMessages
- * 管理会话消息列表的增删改、助手语音文件轮询，以及会话详情的归一化写入。
- * 逻辑与原 index.tsx 保持一致，仅做模块化抽离。
+ * Manages CRUD of the conversation message list, assistant voice file polling,
+ * and normalized writes of conversation details.
+ * Logic stays in line with the original index.tsx; only modular extraction is applied.
  */
 import { useState, useRef, useEffect } from 'react'
 
@@ -14,6 +15,7 @@ import type {
   MemoryTraceEventData,
 } from '@/components/Chat/types'
 import { getFileStatusById } from '@/api/fileStorage'
+import { buildTimelineSteps, type Timeline, type TimelineChatItem } from '@/views/ApplicationConfig/utils/logTimeline'
 
 const normalizeMemoryInput = (input: MemoryTraceEventData['input']): Record<string, unknown> => {
   if (input && typeof input === 'object' && !Array.isArray(input)) return input
@@ -28,6 +30,7 @@ const normalizeMemoryInput = (input: MemoryTraceEventData['input']): Record<stri
   }
 }
 
+/** Fold a long_term_memory trace event into the memory_retrieval structure. */
 const updateMemoryTrace = (
   current: MemoryRetrieval | undefined,
   event: MemoryTraceEvent,
@@ -41,6 +44,7 @@ const updateMemoryTrace = (
     if (toolName !== 'long_term_memory' || !stepId) return current
     const nextToolCall: MemoryToolCall = {
       step_id: stepId,
+      seq: data.seq,
       name: 'long_term_memory',
       input: normalizeMemoryInput(data.input),
       status: 'running',
@@ -91,13 +95,30 @@ const updateMemoryTrace = (
   }
 }
 
+/** Rebuild the step timeline from persisted meta_data.timeline so historical messages render like streaming (v0.5.8). */
+const enrichTimelineMessage = (msg: ChatItem): TimelineChatItem => {
+  if (msg.role !== 'assistant') return msg
+  const timeline = (msg.meta_data as Record<string, any> | undefined)?.timeline as Timeline | undefined
+  if (!timeline?.steps?.length) return msg
+  const built = buildTimelineSteps(timeline, [])
+  return {
+    ...msg,
+    timeline: built,
+    subContent: built.steps,
+    content: '',
+  } as TimelineChatItem
+}
+
+const enrichTimelineEntry = (entry: ChatItem | ChatItem[]): ChatItem | ChatItem[] =>
+  Array.isArray(entry) ? entry.map(enrichTimelineMessage) : enrichTimelineMessage(entry)
+
 export function useChatMessages() {
   const [chatList, setChatList] = useState<Array<ChatItem | ChatItem[]>>([])
   const [audioStatusMap, setAudioStatusMap] = useState<Record<string, string>>({})
   const audioPollingRef = useRef<Map<string, ReturnType<typeof setInterval>>>(new Map())
   const streamLoadingRef = useRef(false)
-
-  /** 组件卸载时清理所有轮询定时器 */
+  console.log('chatList', chatList)
+  /** Clear all polling timers on unmount */
   useEffect(() => {
     return () => {
       audioPollingRef.current.forEach((timer) => clearInterval(timer))
@@ -105,7 +126,7 @@ export function useChatMessages() {
     }
   }, [])
 
-  /** 根据轮询得到的状态同步更新消息的 audio_status */
+  /** Sync the message audio_status from the polled state */
   useEffect(() => {
     if (!Object.keys(audioStatusMap).length) return
     setChatList(prev => prev.map(msg => {
@@ -133,7 +154,7 @@ export function useChatMessages() {
     }))
   }, [audioStatusMap, chatList.length])
 
-  /** 轮询语音文件转换状态 */
+  /** Poll the voice file conversion status */
   const startAudioPolling = (audioUrl: string, idToPoll: string) => {
     if (audioPollingRef.current.has(idToPoll)) return
     const fileId = audioUrl.split('/').pop()
@@ -156,7 +177,7 @@ export function useChatMessages() {
     audioPollingRef.current.set(idToPoll, timer)
   }
 
-  /** 追加一条用户消息 */
+  /** Append a user message */
   const addUserMessage = (conversation_id: string | null, message: string = '', files?: any[]) => {
     setChatList(prev => [...prev, {
       conversation_id,
@@ -169,7 +190,7 @@ export function useChatMessages() {
     }])
   }
 
-  /** 追加一条助手消息（message_id 存在时表示为指定消息追加新版本） */
+  /** Append an assistant message (with a message_id it appends a new version to that message) */
   const addAssistantMessage = (message_id?: string) => {
     const assistantMsg: ChatItem = {
       created_at: Date.now(),
@@ -209,7 +230,7 @@ export function useChatMessages() {
     }
   }
 
-  /** 流式更新助手消息正文/语音/引用/建议问题/错误（replace 为 true 时整体替换正文） */
+  /** Stream-update the assistant message body/voice/citations/suggested questions/errors (replace=true overwrites the whole body) */
   const updateAssistantMessage = (
     content: string = '',
     audio_url?: string,
@@ -256,7 +277,7 @@ export function useChatMessages() {
     })
   }
 
-  /** 流式更新助手消息的思考内容 */
+  /** Stream-update the assistant message thinking content */
   const updateAssistantReasoningMessage = (content: string = '', message_id?: string) => {
     if (!content) return
     if (streamLoadingRef.current) streamLoadingRef.current = false
@@ -303,7 +324,7 @@ export function useChatMessages() {
     })
   }
 
-  /** 将长期记忆工具事件归一到与历史消息一致的 memory_retrieval 结构 */
+  /** Normalize long-term memory tool events into the memory_retrieval structure used by historical messages */
   const updateAssistantMemoryRetrieval = (
     event: MemoryTraceEvent,
     data: MemoryTraceEventData,
@@ -337,7 +358,7 @@ export function useChatMessages() {
     })
   }
 
-  /** 写入会话详情：归一化消息、挂载待处理人工干预、并按需重启语音轮询 */
+  /** Write conversation details: normalize messages, attach pending manual interventions, and restart voice polling as needed */
   const applyChatDetail = (response: { messages: ChatItem[]; pending_intervention?: Record<string, any> }) => {
     const messages = response?.messages || []
     const historyAudioUrls = new Set(messages.map(m => m.meta_data?.audio_url).filter(Boolean))
@@ -386,10 +407,10 @@ export function useChatMessages() {
       }
       msg.status = msg.role === 'user' ? undefined : msg.status
       return msg
-    }))
+    }).map(enrichTimelineEntry))
   }
 
-  /** 合并更早的消息到列表头部 */
+  /** Merge earlier messages into the head of the list */
   const applyEarlierMessages = (response: { messages: ChatItem[]; pending_intervention?: Record<string, any> }) => {
     const messages = response?.messages || []
     const historyAudioUrls = new Set(messages.map(m => m.meta_data?.audio_url).filter(Boolean))
@@ -438,7 +459,7 @@ export function useChatMessages() {
       }
       msg.status = msg.role === 'user' ? undefined : msg.status
       return msg
-    })
+    }).map(enrichTimelineEntry)
     setChatList(prev => {
       // Keep opening statement messages at the beginning
       const openingMessages = prev.filter(item => {

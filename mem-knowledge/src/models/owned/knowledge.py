@@ -3,10 +3,12 @@
 import enum
 import uuid
 
-from sqlalchemy import JSON, Column, DateTime, ForeignKey, Integer, String
+from sqlalchemy import JSON, CheckConstraint, Column, DateTime, ForeignKey, Integer, String
 from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.orm import relationship
 
 from ...infrastructure.database.manager import KnowledgeBase
+from ...parser_configuration.schema import INDEX_STRATEGY_CHECK, SOURCE_TYPE_CHECK
 from ...rag.parser_config import build_default_knowledge_parser_config
 from ...utils.datetime_utils import utcnow_naive
 from ..references.model_registry import ModelConfig
@@ -45,6 +47,10 @@ class PermissionType(enum.StrEnum):
 
 class Knowledge(KnowledgeBase):
     __tablename__ = "knowledges"
+    __table_args__ = (
+        CheckConstraint(SOURCE_TYPE_CHECK, name="ck_knowledges_source_type"),
+        CheckConstraint(INDEX_STRATEGY_CHECK, name="ck_knowledges_index_strategy"),
+    )
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
     external_id = Column(
@@ -68,6 +74,8 @@ class Knowledge(KnowledgeBase):
     description = Column(String, comment="KB description")
     avatar = Column(String, comment="avatar url")
     type = Column(String, default="General", comment="Type:General|Web|Third-party|Folder")
+    source = Column(String(16), nullable=True, comment="来源；Folder 为空，存储 type 保持不变")
+    index_strategy = Column(String(16), nullable=True, comment="索引策略；Folder 为空")
     permission_id = Column(
         String,
         default="Private",
@@ -112,11 +120,12 @@ class Knowledge(KnowledgeBase):
     doc_num = Column(Integer, default=0, comment="doc num")
     chunk_num = Column(Integer, default=0, comment="chunk num")
     parser_id = Column(String, index=True, default="naive", comment="default parser ID")
-    parser_config = Column(
+    legacy_parser_config_snapshot = Column(
+        "parser_config",
         JSON,
         nullable=False,
         default=build_default_knowledge_parser_config,
-        comment="default parser config",
+        comment="Rollback snapshot; effective configuration lives in knowledge_parser_configs",
     )
     status = Column(
         Integer,
@@ -133,6 +142,9 @@ class Knowledge(KnowledgeBase):
     )
     created_at = Column(DateTime, default=utcnow_naive)
     updated_at = Column(DateTime, default=utcnow_naive)
+    configuration = relationship(
+        "KnowledgeParserConfig", uselist=False, lazy="selectin", viewonly=True
+    )
 
     @property
     def is_folder(self) -> bool:
@@ -150,19 +162,8 @@ class Knowledge(KnowledgeBase):
     def chunk_mode(self) -> int:
         """Return the legacy knowledge chunk policy state."""
 
-        # Legacy null configurations have no recorded chunk policy.
-        if self.parser_config is None:
-            return 0
-
-        if (
-            "auto_questions" not in self.parser_config
-            and "parent_chunk_mode" not in self.parser_config
-        ):
-            return 0
-        if (
-            "auto_questions" in self.parser_config
-            and "parent_chunk_mode" not in self.parser_config
-            and not self.parser_config.get("parent_child_mode", False)
-        ):
-            return 1
-        return 2
+        if self.configuration is None:
+            raise ValueError("Knowledge configuration has not been migrated")
+        return {None: 0, "default": 1, "custom": 1, "parent_child": 2}[
+            self.configuration.chunk_method
+        ]

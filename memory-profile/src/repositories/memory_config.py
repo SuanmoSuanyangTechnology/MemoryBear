@@ -420,3 +420,36 @@ class MemoryConfigReadRepository:
                     Workspace.is_active.is_(True),
                 )
             )
+
+    async def resolve_trial_config_id(self, config_id, workspace_id):
+        if isinstance(config_id, UUID):
+            return config_id
+        if isinstance(config_id, str):
+            value = config_id.strip()
+            try:
+                legacy_id = int(value)
+            except ValueError:
+                legacy_id = None
+            if legacy_id is None or legacy_id <= 0:
+                try:
+                    return UUID(value)
+                except ValueError:
+                    raise ValueError(
+                        f"无效的 config_id 格式: '{config_id}'（必须是 UUID 或正整数）"
+                    ) from None
+        elif isinstance(config_id, int):
+            if config_id <= 0:
+                raise ValueError(f"config_id 必须是正整数: {config_id}")
+            legacy_id = config_id
+        else:
+            raise ValueError(f"不支持的 config_id 类型: {type(config_id).__name__}")
+
+        statement = select(MemoryConfigRow.config_id).where(
+            MemoryConfigRow.config_id_old == legacy_id,
+            MemoryConfigRow.workspace_id == workspace_id,
+        )
+        async with self.postgres.session() as session:
+            resolved = await session.scalar(statement)
+        if resolved is None:
+            raise ValueError(f"未找到 config_id_old={legacy_id} 对应的配置")
+        return resolved

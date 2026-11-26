@@ -1,13 +1,13 @@
-"""Internal routes for the migrated workspace re-embed endpoints.
+"""Internal routes for workspace re-embed and temporary-memory retention endpoints.
 
 Paths mirror the monolith exactly (``/workspaces/...``) because the API proxy
 forwards the caller's path unchanged after mapping ``/api`` or ``/v1`` onto
 ``/internal/v1``. The API-key face does not expose these routes, so no route
 carries ``@external_api``.
 
-``response_model`` is the API's *untyped* envelope, because the host controller
-declares plain ``ApiResponse`` for these routes; a typed envelope would change
-the published response schema. Two literals must stay ahead of their
+For re-embed, the host controller declares a plain ``ApiResponse`` envelope.
+A typed envelope would change the published response schema.
+Two literals must stay ahead of their
 ``{job_id}`` siblings: ``/workspace_reembed/current`` before
 ``/workspace_reembed/{job_id}`` and ``/workspace_reembed/current/end_users``
 before ``/{job_id}/end_users``, so "current" is never parsed as a UUID job id.
@@ -21,13 +21,20 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, Header, Query, Request
 from fastapi.responses import JSONResponse
 
+from src.common.errors import BizCode, ProfileError
 from src.common.responses import ApiResponse
-from src.middleware.auth import MemoryPrincipal
+from src.i18n import get_request_language
+from src.middleware.auth import SOURCE_INTERNAL, MemoryPrincipal
 from src.middleware.identity import require_memory_context
 from src.modules.workspace.handler import WorkspaceHandler
+from src.schemas.workspace import (
+    WorkspaceRetentionPolicyResponse,
+    WorkspaceRetentionPolicyResult,
+)
 from src.schemas.workspace_api import (
     WorkspaceApiResponse,
     WorkspaceReembedJobCreate,
+    WorkspaceRetentionPolicyUpdate,
 )
 
 router = APIRouter(prefix="/workspaces", tags=["Workspace"])
@@ -209,4 +216,39 @@ async def retry_workspace_reembed_end_user(
         mode="job_one",
         job_id=job_id,
         end_user_id=end_user_id,
+    )
+
+
+# ── Temporary-memory retention ──────────────────────────────────────────────
+
+
+async def _require_user_context(request: Request) -> MemoryPrincipal:
+    context = await require_memory_context(request)
+    if context.source != SOURCE_INTERNAL or context.actor_kind != "actor":
+        raise ProfileError(BizCode.FORBIDDEN, "User authentication required", status_code=403)
+    return context
+
+
+RetentionContext = Annotated[MemoryPrincipal, Depends(_require_user_context)]
+
+
+@router.get(
+    "/temporary-memory-retention", response_model=ApiResponse[WorkspaceRetentionPolicyResponse]
+)
+async def get_workspace_retention_policy(
+    request: Request, context: RetentionContext
+) -> ApiResponse[WorkspaceRetentionPolicyResponse]:
+    return await _handler(request).get_workspace_retention_policy(
+        context, get_request_language(request)
+    )
+
+
+@router.put(
+    "/temporary-memory-retention", response_model=ApiResponse[WorkspaceRetentionPolicyResult]
+)
+async def update_workspace_retention_policy(
+    request: Request, context: RetentionContext, policy: WorkspaceRetentionPolicyUpdate
+) -> ApiResponse[WorkspaceRetentionPolicyResult]:
+    return await _handler(request).update_workspace_retention_policy(
+        context, policy, get_request_language(request)
     )

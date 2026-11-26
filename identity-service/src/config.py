@@ -35,7 +35,7 @@ class Settings:
     # ---- Redis ----
     REDIS_HOST: str = os.getenv("REDIS_HOST", "127.0.0.1")
     REDIS_PORT: int = int(os.getenv("REDIS_PORT", "6379"))
-    REDIS_DB: int = int(os.getenv("REDIS_DB", "0"))
+    REDIS_DB: int = int(os.getenv("REDIS_DB", "1"))
     REDIS_PASSWORD: str | None = os.getenv("REDIS_PASSWORD") or None
     REDIS_URL: str = (
         f"redis://:{quote_plus(REDIS_PASSWORD)}@{REDIS_HOST}:{REDIS_PORT}/{REDIS_DB}"
@@ -83,6 +83,91 @@ class Settings:
         os.getenv("ACL_RULES_CHANGED_CHANNEL", "").strip()
         or f"acl:rules:changed:{DB_NAME}"
     )
+
+    # ---- 管理面（sync）与老单体的兼容配置 ----
+    # 同步 URL 与 DATABASE_URL 同库同用户，仅驱动换 psycopg2；
+    # UTC + 60s statement_timeout 在 db.init_sync_db() 的 connect_args 中注入
+    DATABASE_SYNC_URL: str = (
+        f"postgresql+psycopg2://{DB_USER}:{quote_plus(DB_PASSWORD)}"
+        f"@{DB_HOST}:{DB_PORT}/{DB_NAME}"
+    )
+    # 同步 Redis 线程本地连接池上限（与老单体同名同默认）
+    REDIS_POOL_SIZE: int = int(os.getenv("REDIS_POOL_SIZE", "100"))
+
+    # ---- JWT / 会话语义（名称、取值、默认值必须与 core/api/app/core/config.py 一致）----
+    # 两侧签发/验签、黑名单、单会话键位共享，切流与回滚期间 token 必须双向可用
+    SECRET_KEY: str = os.getenv("SECRET_KEY", "a_default_secret_key_that_is_long_and_random")
+    ALGORITHM: str = "HS256"
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "30"))
+    REFRESH_TOKEN_EXPIRE_DAYS: int = int(os.getenv("REFRESH_TOKEN_EXPIRE_DAYS", "7"))
+    ENABLE_SINGLE_SESSION: bool = (
+        os.getenv("ENABLE_SINGLE_SESSION", "false").lower() == "true"
+    )
+    ENABLE_SINGLE_WORKSPACE: bool = (
+        os.getenv("ENABLE_SINGLE_WORKSPACE", "true").lower() == "true"
+    )
+
+    # ---- SMTP（同步 smtplib：邮箱验证码与邀请邮件）----
+    SMTP_SERVER: str = os.getenv("SMTP_SERVER", "smtp.gmail.com")
+    SMTP_PORT: int = int(os.getenv("SMTP_PORT", "587"))
+    SMTP_USER: str = os.getenv("SMTP_USER", "")
+    SMTP_PASSWORD: str = os.getenv("SMTP_PASSWORD", "")
+
+    # ---- 首超管 bootstrap（POST /api/setup，仅在无超管时生效）----
+    FIRST_SUPERUSER_EMAIL: str = os.getenv("FIRST_SUPERUSER_EMAIL", "admin@example.com")
+    FIRST_SUPERUSER_USERNAME: str = os.getenv("FIRST_SUPERUSER_USERNAME", "admin")
+    FIRST_SUPERUSER_PASSWORD: str = os.getenv("FIRST_SUPERUSER_PASSWORD", "admin_password")
+    ENVIRONMENT: str = os.getenv("ENVIRONMENT", "development")
+
+    # ---- i18n ----
+    I18N_DEFAULT_LANGUAGE: str = os.getenv("I18N_DEFAULT_LANGUAGE", "zh")
+    I18N_SUPPORTED_LANGUAGES: list[str] = [
+        lang.strip().lower().split("-")[0]
+        for lang in os.getenv("I18N_SUPPORTED_LANGUAGES", "zh,en").split(",")
+        if lang.strip()
+    ]
+
+    # ---- 日志敏感字段过滤（与老单体同名同默认）----
+    ENABLE_SENSITIVE_DATA_FILTER: bool = (
+        os.getenv("ENABLE_SENSITIVE_DATA_FILTER", "true").lower() == "true"
+    )
+
+    # ---- 出站 model-service（空间模型选择校验，Task 8）----
+    # read 必须对齐 model-service 探活预算：其 validate 内部按 LLM_TIMEOUT
+    # （默认 120s）等真实上游，10s 会把正常慢探活误判为 verify_failed
+    MODEL_SERVICE_BASE_URL: str = os.getenv(
+        "MODEL_SERVICE_BASE_URL", "http://127.0.0.1:8080"
+    )
+    MODEL_SERVICE_CONNECT_TIMEOUT_SECONDS: float = float(
+        os.getenv("MODEL_SERVICE_CONNECT_TIMEOUT_SECONDS", "5")
+    )
+    MODEL_SERVICE_READ_TIMEOUT_SECONDS: float = float(
+        os.getenv("MODEL_SERVICE_READ_TIMEOUT_SECONDS", "120")
+    )
+
+    # ---- 出站老单体（W2-A 过渡回调：在途 reembed job id 与 workspace_models 原子写）----
+    # 回调写单元保持老单体单事务（决策 D1）；密钥两端同名同值，未配置时
+    # PUT 失败关闭（503）、job id 降级 null
+    MONOLITH_BASE_URL: str = os.getenv("MONOLITH_BASE_URL", "http://api:8000")
+    MONOLITH_CONNECT_TIMEOUT_SECONDS: float = float(
+        os.getenv("MONOLITH_CONNECT_TIMEOUT_SECONDS", "5")
+    )
+    # 覆盖老单体探活预算（LLM_TIMEOUT 默认 120s）
+    MONOLITH_READ_TIMEOUT_SECONDS: float = float(
+        os.getenv("MONOLITH_READ_TIMEOUT_SECONDS", "180")
+    )
+    IDENTITY_CALLBACK_SECRET: str = os.getenv("IDENTITY_CALLBACK_SECRET", "")
+
+    # ---- Celery 生产端（identity 不跑 worker；任务由 notification-service 消费）----
+    CELERY_BROKER_URL: str = os.getenv("CELERY_BROKER_URL", "")
+    REDIS_DB_CELERY_BROKER: int = int(os.getenv("REDIS_DB_CELERY_BROKER", "3"))
+
+    @property
+    def celery_broker(self) -> str:
+        if self.CELERY_BROKER_URL.strip():
+            return self.CELERY_BROKER_URL.strip()
+        auth = f":{quote_plus(self.REDIS_PASSWORD)}@" if self.REDIS_PASSWORD else ""
+        return f"redis://{auth}{self.REDIS_HOST}:{self.REDIS_PORT}/{self.REDIS_DB_CELERY_BROKER}"
 
 
 settings = Settings()

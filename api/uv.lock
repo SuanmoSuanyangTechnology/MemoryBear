@@ -841,7 +841,7 @@ wheels = [
 [[package]]
 name = "error-core"
 version = "0.1.0"
-source = { directory = "../packages/error-core" }
+source = { editable = "../packages/error-core" }
 
 [package.metadata]
 
@@ -3275,7 +3275,7 @@ requires-dist = [
     { name = "elasticsearch", specifier = "==8.17.0" },
     { name = "elasticsearch-dsl", specifier = "==8.17.0" },
     { name = "email-validator", specifier = ">=2.3.0" },
-    { name = "error-core", directory = "../packages/error-core" },
+    { name = "error-core", editable = "../packages/error-core" },
     { name = "exceptiongroup", specifier = "==1.3.0" },
     { name = "fastapi", specifier = "==0.119.0" },
     { name = "fastmcp", specifier = ">=2.13.1" },
@@ -3352,7 +3352,7 @@ requires-dist = [
     { name = "python-pptx", specifier = "==1.0.2" },
     { name = "pyyaml", specifier = "==6.0.3" },
     { name = "rdflib", specifier = ">=7.0.0" },
-    { name = "redbear-model", directory = "../packages/redbear-model" },
+    { name = "redbear-model", editable = "../packages/redbear-model" },
     { name = "redis", specifier = "==6.4.0" },
     { name = "requests", specifier = "==2.32.5" },
     { name = "roman-numbers", specifier = "==1.0.2" },
@@ -3366,7 +3366,7 @@ requires-dist = [
     { name = "sqlalchemy", specifier = "==2.0.44" },
     { name = "starlette", specifier = "==0.48.0" },
     { name = "strenum", specifier = "==0.4.15" },
-    { name = "task-bridge-sdk", extras = ["mem-router"], directory = "../packages/task-bridge-sdk" },
+    { name = "task-bridge-sdk", extras = ["mem-router"], editable = "../packages/task-bridge-sdk" },
     { name = "tika", specifier = "==3.1.0" },
     { name = "tiktoken", specifier = "==0.12.0" },
     { name = "tomli", specifier = "==2.3.0" },
@@ -3394,7 +3394,7 @@ requires-dist = [
 [[package]]
 name = "redbear-model"
 version = "0.1.0"
-source = { directory = "../packages/redbear-model" }
+source = { editable = "../packages/redbear-model" }
 dependencies = [
     { name = "cryptography" },
     { name = "error-core" },
@@ -3407,7 +3407,7 @@ requires-dist = [
     { name = "cryptography", specifier = ">=43" },
     { name = "dashscope", marker = "extra == 'all'", specifier = ">=1.25,<2" },
     { name = "dashscope", marker = "extra == 'dashscope'", specifier = ">=1.25,<2" },
-    { name = "error-core", directory = "../packages/error-core" },
+    { name = "error-core", editable = "../packages/error-core" },
     { name = "httpx", marker = "extra == 'all'", specifier = ">=0.28,<1" },
     { name = "httpx", marker = "extra == 'runtime'", specifier = ">=0.28,<1" },
     { name = "httpx", extras = ["socks"], marker = "extra == 'all'", specifier = ">=0.28,<1" },
@@ -3424,7 +3424,7 @@ requires-dist = [
     { name = "langchain-ollama", marker = "extra == 'ollama'", specifier = ">=1.0,<2" },
     { name = "langchain-openai", marker = "extra == 'all'", specifier = ">=1.0,<2" },
     { name = "langchain-openai", marker = "extra == 'runtime'", specifier = ">=1.0,<2" },
-    { name = "memorybear-grpc", marker = "extra == 'grpc'", directory = "../packages/memorybear-grpc" },
+    { name = "memorybear-grpc", marker = "extra == 'grpc'", editable = "../packages/memorybear-grpc" },
     { name = "pydantic", specifier = ">=2.12,<3" },
     { name = "sqlalchemy", specifier = ">=2.0,<3" },
     { name = "volcengine-python-sdk", extras = ["ark"], marker = "extra == 'all'", specifier = ">=5.0.19,<6" },
@@ -3861,7 +3861,7 @@ wheels = [
 [[package]]
 name = "task-bridge-sdk"
 version = "0.1.0"
-source = { directory = "../packages/task-bridge-sdk" }
+source = { editable = "../packages/task-bridge-sdk" }
 
 [package.metadata]
 requires-dist = [

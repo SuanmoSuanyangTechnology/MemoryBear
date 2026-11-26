@@ -100,7 +100,7 @@ class TaskBridgeManager:
         *,
         kwargs: Mapping[str, Any],
         queue: str = QueueName.MEMORY_JOBS.value,
-        priority: int = TaskPriority.INTERACTIVE,
+        priority: int | None = TaskPriority.INTERACTIVE,
     ) -> str:
         """Publish one task to memory-jobs and return its task id.
 

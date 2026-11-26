@@ -16,7 +16,6 @@ from src.modules.analytics.schemas import (
     GenerateCacheBatchResult,
     GenerateCacheUserResult,
     GraphDataResponse,
-    HotMemoryTag,
     InterestItem,
     MemoryInsightData,
     MemoryTypeStatistic,
@@ -234,14 +233,6 @@ class AnalyticsHandler:
     ) -> GraphResponse:
         data = await self.graph_query.scene_community_graph(end_user_id, context.workspace_id)
         return GraphResponse(data=data, time=int(time() * 1000))
-
-    async def hot_memory_tags(
-        self, context: MemoryPrincipal, limit: int, language: str
-    ) -> ApiResponse[list[HotMemoryTag]]:
-        data = await self.profile_query.workspace_hot_memory_tags(context.workspace_id, limit)
-        return ApiResponse[list[HotMemoryTag]](
-            data=data, msg=message("analytics.msg.query_success", language)
-        )
 
     async def user_profile(
         self, context: MemoryPrincipal, end_user_id: str | None, language: str

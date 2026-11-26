@@ -141,6 +141,7 @@ export const home = {
       resources: 'Resource Center',
       communityMarket: 'Community Market',
       personalityAnchor: 'Personality Anchor Engine',
+      spatiotemporalEngine: 'Spatial-Temporal Memory Anchoring Engine',
     },
     dashboard: {
       activityTotal: 'Total Memory Activity',

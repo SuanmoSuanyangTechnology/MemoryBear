@@ -17,8 +17,10 @@ from ..api.schemas.knowledge_share import (
 )
 from ..errors import KnowledgeError
 from ..models.owned import KnowledgeShare, KnowledgeType, PermissionType
+from ..parser_configuration import to_legacy
 from ..repositories import knowledge as knowledge_repository
 from ..repositories import knowledge_share as share_repository
+from ..repositories.parser_configuration import knowledge_configuration
 from ..repositories.reference import ReferenceRepository
 from ..utils.datetime_utils import to_timestamp_ms
 from . import knowledge as knowledge_service
@@ -123,13 +125,14 @@ async def create_share(
         doc_num=source.doc_num,
         chunk_num=source.chunk_num,
         parser_id=source.parser_id,
-        parser_config=source.parser_config,
+        parser_config=to_legacy(knowledge_configuration(source)),
     )
     target = await knowledge_service.create_shared_knowledge(
         db,
         mirrored,
         principal,
         create_data.target_workspace_id,
+        knowledge_configuration(source),
     )
     share_create = create_data.model_copy(deep=True)
     share_create.source_workspace_id = principal.workspace_id
@@ -262,9 +265,9 @@ async def create_or_reuse_share(
                     doc_num=source.doc_num,
                     chunk_num=source.chunk_num,
                     parser_id=source.parser_id,
-                    parser_config=source.parser_config,
+                    parser_config=to_legacy(knowledge_configuration(source)),
                 ),
-                preserve_source_parser_config=True,
+                configuration=knowledge_configuration(source),
                 commit=False,
             )
             target.builtin_metadata_enabled = source.builtin_metadata_enabled

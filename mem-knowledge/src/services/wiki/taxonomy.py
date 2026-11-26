@@ -3,9 +3,11 @@
 from sqlalchemy import select
 
 from ...models.owned import WikiPage
+from ...parser_configuration import to_runtime
 from ...rag.wiki.config import WikiError, fingerprint, read_wiki_config
 from ...rag.wiki.contracts import FolderAssignment
 from ...rag.wiki.planning import taxonomy, validate_category_path
+from ...repositories.parser_configuration import knowledge_configuration
 from ...repositories.wiki.common import as_uuid, lock_knowledge
 from ...repositories.wiki.pages import _folder, _planning_context
 from ...repositories.wiki.read import scoped_pages
@@ -45,7 +47,7 @@ def _snapshot(session, kb_id, expected_scope=None):
         })
     return {"scope": {key: str(value) for key, value in scope.items()},
             "llm_id": str(knowledge.llm_id) if knowledge.llm_id else None,
-            "language": read_wiki_config(knowledge.parser_config).language,
+            "language": read_wiki_config(to_runtime(knowledge_configuration(knowledge))).language,
             "revision": context["revision"], "entries": entries}
 
 

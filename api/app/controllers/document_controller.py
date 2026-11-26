@@ -5,7 +5,7 @@ import os
 from typing import Annotated, Optional
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, status, Query, Body, Request
+from fastapi import APIRouter, Depends, HTTPException, status, Query, Body, Request, Response
 from fastapi.encoders import jsonable_encoder
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -29,7 +29,7 @@ from app.core.exceptions import BusinessException
 from app.core.error_codes import BizCode
 from app.core.response_utils import success
 from app.db import get_async_db
-from app.dependencies import cur_workspace_access_guard_async, get_current_user_async
+from app.dependencies import CurrentUserSnapshot, cur_workspace_access_guard_async, get_current_user_async
 from app.models import document_model
 from app.models import file_model
 from app.models.user_model import User
@@ -41,6 +41,7 @@ from app.services.file_storage_service import FileStorageService, get_file_stora
 from app.schemas import knowledge_metadata_schema as metadata_schema
 from app.services.knowledge_metadata_service import KnowledgeMetadataService
 from app.integrations.knowledge.contracts import KnowledgeRetrievalSource
+from app.integrations.knowledge.errors import KnowledgeUnavailableError
 from app.integrations.knowledge.route_proxy import route_through_knowledge_service
 
 
@@ -104,6 +105,17 @@ async def _delete_file_record_async(
 
     await db.delete(db_file)
     await db.commit()
+
+
+@router.get("/v1/{document_id}", include_in_schema=False)
+@router.post("/v1/{document_id}/rechunk", include_in_schema=False)
+@cur_workspace_access_guard_async()
+@route_through_knowledge_service(source=KnowledgeRetrievalSource.MANAGER_API, require_remote=True)
+async def forward_document_v1(
+    request: Request,
+    current_user: Annotated[CurrentUserSnapshot, Depends(get_current_user_async)],
+) -> Response:
+    raise KnowledgeUnavailableError("Versioned knowledge API requires the remote service")
 
 
 @router.get("/{kb_id}/documents", response_model=ApiResponse)

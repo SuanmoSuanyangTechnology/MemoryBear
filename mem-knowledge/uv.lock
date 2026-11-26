@@ -178,7 +178,7 @@ wheels = [
 [[package]]
 name = "auth-sdk"
 version = "0.1.0"
-source = { directory = "../packages/auth-sdk" }
+source = { editable = "../packages/auth-sdk" }
 dependencies = [
     { name = "httpx" },
     { name = "pydantic" },
@@ -531,7 +531,7 @@ wheels = [
 [[package]]
 name = "error-core"
 version = "0.1.0"
-source = { directory = "../packages/error-core" }
+source = { editable = "../packages/error-core" }
 
 [package.metadata]
 
@@ -1203,13 +1203,13 @@ requires-dist = [
     { name = "alembic", specifier = "==1.17.0" },
     { name = "amqp", specifier = "==5.3.1" },
     { name = "asyncpg", specifier = ">=0.31,<1" },
-    { name = "auth-sdk", directory = "../packages/auth-sdk" },
+    { name = "auth-sdk", editable = "../packages/auth-sdk" },
     { name = "beautifulsoup4", specifier = ">=4.13,<5" },
     { name = "billiard", specifier = "==4.2.2" },
     { name = "celery", specifier = "==5.5.3" },
     { name = "chardet", specifier = "==5.2.0" },
     { name = "elasticsearch", specifier = ">=8.17,<9" },
-    { name = "error-core", directory = "../packages/error-core" },
+    { name = "error-core", editable = "../packages/error-core" },
     { name = "fastapi", specifier = ">=0.119,<1" },
     { name = "html5lib", specifier = "==1.1" },
     { name = "httpx", specifier = ">=0.28,<1" },
@@ -1219,8 +1219,8 @@ requires-dist = [
     { name = "kombu", specifier = "==5.5.4" },
     { name = "lxml", specifier = ">=6,<7" },
     { name = "markdown", specifier = "==3.8" },
-    { name = "mem-storage-core", directory = "../packages/storage-core" },
-    { name = "memorybear-grpc", directory = "../packages/memorybear-grpc" },
+    { name = "mem-storage-core", editable = "../packages/storage-core" },
+    { name = "memorybear-grpc", editable = "../packages/memorybear-grpc" },
     { name = "openpyxl", specifier = "==3.1.5" },
     { name = "pillow", specifier = "==12.0.0" },
     { name = "psutil", marker = "sys_platform == 'darwin'", specifier = ">=7.0,<8" },
@@ -1231,7 +1231,7 @@ requires-dist = [
     { name = "python-dotenv", specifier = ">=1.1,<2" },
     { name = "python-multipart", specifier = ">=0.0.20,<1" },
     { name = "python-pptx", specifier = ">=1.0,<2" },
-    { name = "redbear-model", extras = ["all"], directory = "../packages/redbear-model" },
+    { name = "redbear-model", extras = ["all"], editable = "../packages/redbear-model" },
     { name = "redis", specifier = ">=6.4,<7" },
     { name = "requests", specifier = ">=2.32,<3" },
     { name = "sqlalchemy", extras = ["asyncio"], specifier = ">=2.0.44,<3" },
@@ -1253,7 +1253,7 @@ dev = [
 [[package]]
 name = "mem-storage-core"
 version = "0.1.0"
-source = { directory = "../packages/storage-core" }
+source = { editable = "../packages/storage-core" }
 dependencies = [
     { name = "aiofiles" },
     { name = "boto3" },
@@ -1272,7 +1272,7 @@ requires-dist = [
 [[package]]
 name = "memorybear-grpc"
 version = "0.1.0"
-source = { directory = "../packages/memorybear-grpc" }
+source = { editable = "../packages/memorybear-grpc" }
 dependencies = [
     { name = "grpcio" },
     { name = "grpcio-health-checking" },
@@ -1808,7 +1808,7 @@ wheels = [
 [[package]]
 name = "redbear-model"
 version = "0.1.0"
-source = { directory = "../packages/redbear-model" }
+source = { editable = "../packages/redbear-model" }
 dependencies = [
     { name = "cryptography" },
     { name = "error-core" },
@@ -1834,7 +1834,7 @@ requires-dist = [
     { name = "cryptography", specifier = ">=43" },
     { name = "dashscope", marker = "extra == 'all'", specifier = ">=1.25,<2" },
     { name = "dashscope", marker = "extra == 'dashscope'", specifier = ">=1.25,<2" },
-    { name = "error-core", directory = "../packages/error-core" },
+    { name = "error-core", editable = "../packages/error-core" },
     { name = "httpx", marker = "extra == 'all'", specifier = ">=0.28,<1" },
     { name = "httpx", marker = "extra == 'runtime'", specifier = ">=0.28,<1" },
     { name = "httpx", extras = ["socks"], marker = "extra == 'all'", specifier = ">=0.28,<1" },
@@ -1851,7 +1851,7 @@ requires-dist = [
     { name = "langchain-ollama", marker = "extra == 'ollama'", specifier = ">=1.0,<2" },
     { name = "langchain-openai", marker = "extra == 'all'", specifier = ">=1.0,<2" },
     { name = "langchain-openai", marker = "extra == 'runtime'", specifier = ">=1.0,<2" },
-    { name = "memorybear-grpc", marker = "extra == 'grpc'", directory = "../packages/memorybear-grpc" },
+    { name = "memorybear-grpc", marker = "extra == 'grpc'", editable = "../packages/memorybear-grpc" },
     { name = "pydantic", specifier = ">=2.12,<3" },
     { name = "sqlalchemy", specifier = ">=2.0,<3" },
     { name = "volcengine-python-sdk", extras = ["ark"], marker = "extra == 'all'", specifier = ">=5.0.19,<6" },

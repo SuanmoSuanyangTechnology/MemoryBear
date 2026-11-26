@@ -111,29 +111,49 @@ async def save_new_upload(
     content: bytes,
     content_type: str | None,
 ) -> file_service.UploadOutcome:
-    async with upload_lease(runtime, plan) as ensure_owned:
-        async with runtime.database.async_session() as db:
-            await require_new_content(db, plan)
-        await storage.upload(plan.file_key, content, content_type)
-        commit_started = False
-        try:
-            await ensure_owned()
+    return (await save_new_upload_result(
+        runtime, storage, plan, principal, content, content_type
+    )).unwrap()
+
+
+async def save_new_upload_result(
+    runtime: ProcessRuntime,
+    storage: KnowledgeFileStorage,
+    plan: file_service.UploadPlan,
+    principal: Principal,
+    content: bytes,
+    content_type: str | None,
+) -> file_service.UploadSaveResult:
+    """Expose save facts while retaining the existing lease and cleanup timing."""
+    result = file_service.UploadSaveResult(plan.file_id, plan.file_key)
+    try:
+        async with upload_lease(runtime, plan) as ensure_owned:
             async with runtime.database.async_session() as db:
-                outcome = await file_service.persist_uploaded_content(
-                    db, plan, principal, commit=False
-                )
-                # Once COMMIT starts, a connection error does not prove rollback.
-                commit_started = True
-                await db.commit()
-        except Exception:
-            if not commit_started:
-                await file_service.compensate_storage_upload(storage, plan.file_key)
-            else:
-                logger.exception(
-                    "上传事务提交结果需核对 kb_id=%s file_id=%s", plan.kb_id, plan.file_id,
-                )
-            raise
-        return outcome
+                await require_new_content(db, plan)
+            await storage.upload(plan.file_key, content, content_type)
+            result.object_saved = True
+            try:
+                await ensure_owned()
+                async with runtime.database.async_session() as db:
+                    await file_service.persist_uploaded_content(
+                        db, plan, principal, commit=False, save_result=result
+                    )
+                    # Once COMMIT starts, a connection error does not prove rollback.
+                    result.commit_started = True
+                    await db.commit()
+                    result.committed = True
+            except Exception as exc:
+                if not result.commit_started:
+                    await file_service.compensate_storage_upload(storage, plan.file_key)
+                else:
+                    logger.warning(
+                        "上传事务提交结果需核对 kb_id=%s file_id=%s error_type=%s",
+                        plan.kb_id, plan.file_id, type(exc).__name__,
+                    )
+                raise
+    except Exception as exc:
+        result.error = exc
+    return result
 
 
 async def discard_unpublished_qa_upload(

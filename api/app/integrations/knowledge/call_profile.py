@@ -6,4 +6,5 @@ from enum import StrEnum
 class CallProfile(StrEnum):
     JSON = "json"
     MULTIPART_UPLOAD = "multipart_upload"
+    RAW_UPLOAD = "raw_upload"
     STREAM_DOWNLOAD = "stream_download"

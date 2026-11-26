@@ -5,7 +5,22 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
+
+
+class WorkspaceRetentionPolicyResult(BaseModel):
+    retention_days: int | None = Field(
+        ge=1,
+        le=3650,
+        description="临时身份保留天数，null 表示永不过期",
+    )
+
+
+class WorkspaceRetentionPolicyResponse(WorkspaceRetentionPolicyResult):
+    end_user_count: int = Field(
+        ge=0,
+        description="当前工作空间中至少有一条记忆的有效临时 EndUser 数量",
+    )
 
 
 class WorkspaceEligibility(BaseModel):

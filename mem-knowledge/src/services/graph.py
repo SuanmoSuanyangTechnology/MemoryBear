@@ -9,15 +9,15 @@ from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm.attributes import flag_modified
 
 from ..errors import KnowledgeError
 from ..integrations.model.chat import RedBearChatModel
 from ..integrations.model.invoke_backend import ref_from_view
 from ..models.owned import Knowledge
+from ..parser_configuration import ConfigurationError, KnowledgeConfiguration
 from ..rag.knowledge_graph.config import GraphPipeline, is_graph_enabled, resolve_graph_pipeline
 from ..rag.knowledge_graph.elasticsearch_store import graph_index_name
-from ..rag.parser_config import set_graph_pipeline_for_migration
+from ..repositories.parser_configuration import AsyncParserConfigurationRepository
 
 logger = logging.getLogger(__name__)
 
@@ -79,16 +79,16 @@ async def commit_evidence_pipeline(
     knowledge = result.scalars().first()
     if knowledge is None:
         raise KnowledgeError.from_code("KB_KNOWLEDGE_NOT_FOUND")
-    if not is_graph_enabled(knowledge.parser_config):
-        raise KnowledgeError.from_code(
-            "KB_GRAPH_NOT_ENABLED",
-        )
-    knowledge.parser_config = set_graph_pipeline_for_migration(
-        knowledge.parser_config,
-        GraphPipeline.EVIDENCE,
-    )
-    flag_modified(knowledge, "parser_config")
+
+    def migrate(current: KnowledgeConfiguration | None) -> KnowledgeConfiguration:
+        if current is None:
+            raise ConfigurationError("configuration_not_migrated")
+        if not current.graph_enabled:
+            raise KnowledgeError.from_code("KB_GRAPH_NOT_ENABLED")
+        return current.model_copy(update={"graph_pipeline": GraphPipeline.EVIDENCE.value})
+
     try:
+        await AsyncParserConfigurationRepository(db).write_knowledge(knowledge, migrate)
         await db.commit()
         await db.refresh(knowledge)
     except Exception:

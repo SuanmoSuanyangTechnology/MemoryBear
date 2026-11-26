@@ -12,6 +12,7 @@ from app.core.response_utils import fail, success
 from app.db import get_async_db_context
 from app.dependencies import cur_workspace_access_guard_async, get_current_user_async, CurrentUserSnapshot
 from app.integrations.profile.proxy import memory_profile_proxy
+from app.integrations.profile.stream import memory_profile_stream_proxy
 from app.schemas.memory_storage_schema import (
     TrialRunChatInput,
     PilotRunInput,
@@ -68,7 +69,9 @@ async def get_storage_info(
 
 
 @router.post("/pilot_run", response_model=None)
+@memory_profile_stream_proxy(body_arg="payload", body_fields=("config_id", "messages"))
 async def pilot_run(
+        request: Request,
         payload: PilotRunInput,
         language_type: str = Header(default=None, alias="X-Language-Type"),
         current_user: CurrentUserSnapshot = Depends(get_current_user_async),
@@ -99,7 +102,11 @@ async def pilot_run(
 
 @router.post("/chat", response_model=None)
 @cur_workspace_access_guard_async()
+@memory_profile_stream_proxy(
+    body_arg="payload", body_fields=("config_id", "message", "files", "history")
+)
 async def trial_run_chat_stream(
+        request: Request,
         payload: TrialRunChatInput,
         language_type: str = Header(default=None, alias="X-Language-Type"),
         current_user: CurrentUserSnapshot = Depends(get_current_user_async),
@@ -131,15 +138,15 @@ async def trial_run_chat_stream(
             "Connection": "keep-alive",
             "X-Accel-Buffering": "no",
         },
-    )
+    )   
 
 
 @router.get("/analytics/hot_memory_tags", response_model=ApiResponse)
 @memory_profile_proxy(
     query_fields=("limit",),
-    # 管理端沿用 /memory-storage/analytics/... 的历史路径，转发目标仍是分析域的
-    # 同一内部路由；路径映射只影响转发，不影响身份面判定。
-    target_path="/internal/v1/memory/analytics/hot_memory_tags",
+    # 路径按调用方自己的面推导：管理端 /api/memory-storage/... 落到
+    # memory-profile 的 /internal/v1/memory-storage/analytics/hot_memory_tags，
+    # API-Key 面 /v1/memory/analytics/... 落到分析域同路径，两处共用同一实现。
 )
 async def get_hot_memory_tags_api(
         limit: int = 10,
@@ -178,7 +185,9 @@ async def get_recent_activity_stats_api(
 
 
 @router.delete("/end-users/{end_user_id}", response_model=ApiResponse)
+@memory_profile_proxy()
 async def delete_end_user(
+        request: Request,
         end_user_id: UUID,
         current_user: CurrentUserSnapshot = Depends(get_current_user_async),
 ) -> dict:

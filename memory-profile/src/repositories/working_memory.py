@@ -14,11 +14,8 @@ from typing import Any
 from sqlalchemy import func, select
 
 from src.infrastructure.postgres import PostgresManager
-from src.models.references.memory_statistics_model import (
-    Conversation,
-    MemoryMessage,
-    Message,
-)
+from src.models.references.conversation_model import Conversation, Message
+from src.models.references.memory_statistics_model import MemoryMessage
 
 #: Sources accepted by T03/T04 — same set as the monolith's
 #: ``MemoryMessageRepository._API_MCP_SOURCES``.

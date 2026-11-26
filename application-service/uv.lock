@@ -210,12 +210,12 @@ requires-dist = [
     { name = "aiofiles", specifier = ">=23.0.0,<25" },
     { name = "aiohttp", specifier = ">=3.13,<4" },
     { name = "asyncpg", specifier = ">=0.31,<1" },
-    { name = "auth-sdk", directory = "../packages/auth-sdk" },
+    { name = "auth-sdk", editable = "../packages/auth-sdk" },
     { name = "boto3", specifier = ">=1.42,<2" },
     { name = "celery", specifier = "==5.5.3" },
     { name = "chardet", specifier = ">=5.2.0,<6" },
     { name = "deprecated", specifier = ">=1.3.1,<2" },
-    { name = "error-core", directory = "../packages/error-core" },
+    { name = "error-core", editable = "../packages/error-core" },
     { name = "fastapi", specifier = ">=0.119,<1" },
     { name = "httpx", specifier = ">=0.28,<1" },
     { name = "jinja2", specifier = ">=3.1.6,<4" },
@@ -228,8 +228,8 @@ requires-dist = [
     { name = "langchain-openai", specifier = ">=1.1,<2" },
     { name = "langgraph", specifier = ">=1.0,<2" },
     { name = "langid", specifier = ">=1.1.6,<2" },
-    { name = "mem-storage-core", directory = "../packages/storage-core" },
-    { name = "memorybear-grpc", directory = "../packages/memorybear-grpc" },
+    { name = "mem-storage-core", editable = "../packages/storage-core" },
+    { name = "memorybear-grpc", editable = "../packages/memorybear-grpc" },
     { name = "modelscope", specifier = "==1.36.1" },
     { name = "olefile", specifier = ">=0.47,<1" },
     { name = "openpyxl", specifier = ">=3.1.5,<4" },
@@ -250,7 +250,7 @@ requires-dist = [
     { name = "python-multipart", specifier = ">=0.0.20,<1" },
     { name = "pytz", specifier = ">=2025.2,<2027" },
     { name = "pyyaml", specifier = ">=6.0.3,<7" },
-    { name = "redbear-model", extras = ["all", "grpc"], directory = "../packages/redbear-model" },
+    { name = "redbear-model", extras = ["all", "grpc"], editable = "../packages/redbear-model" },
     { name = "redis", specifier = ">=6.4,<7" },
     { name = "requests", specifier = ">=2.32,<3" },
     { name = "simpleeval", specifier = ">=1.0.3,<2" },
@@ -299,7 +299,7 @@ wheels = [
 [[package]]
 name = "auth-sdk"
 version = "0.1.0"
-source = { directory = "../packages/auth-sdk" }
+source = { editable = "../packages/auth-sdk" }
 dependencies = [
     { name = "httpx" },
     { name = "pydantic" },
@@ -631,7 +631,7 @@ wheels = [
 [[package]]
 name = "error-core"
 version = "0.1.0"
-source = { directory = "../packages/error-core" }
+source = { editable = "../packages/error-core" }
 
 [package.metadata]
 
@@ -1279,7 +1279,7 @@ wheels = [
 [[package]]
 name = "mem-storage-core"
 version = "0.1.0"
-source = { directory = "../packages/storage-core" }
+source = { editable = "../packages/storage-core" }
 dependencies = [
     { name = "aiofiles" },
     { name = "boto3" },
@@ -1298,7 +1298,7 @@ requires-dist = [
 [[package]]
 name = "memorybear-grpc"
 version = "0.1.0"
-source = { directory = "../packages/memorybear-grpc" }
+source = { editable = "../packages/memorybear-grpc" }
 dependencies = [
     { name = "grpcio" },
     { name = "grpcio-health-checking" },
@@ -1910,7 +1910,7 @@ wheels = [
 [[package]]
 name = "redbear-model"
 version = "0.1.0"
-source = { directory = "../packages/redbear-model" }
+source = { editable = "../packages/redbear-model" }
 dependencies = [
     { name = "cryptography" },
     { name = "error-core" },
@@ -1939,7 +1939,7 @@ requires-dist = [
     { name = "cryptography", specifier = ">=43" },
     { name = "dashscope", marker = "extra == 'all'", specifier = ">=1.25,<2" },
     { name = "dashscope", marker = "extra == 'dashscope'", specifier = ">=1.25,<2" },
-    { name = "error-core", directory = "../packages/error-core" },
+    { name = "error-core", editable = "../packages/error-core" },
     { name = "httpx", marker = "extra == 'all'", specifier = ">=0.28,<1" },
     { name = "httpx", marker = "extra == 'runtime'", specifier = ">=0.28,<1" },
     { name = "httpx", extras = ["socks"], marker = "extra == 'all'", specifier = ">=0.28,<1" },
@@ -1956,7 +1956,7 @@ requires-dist = [
     { name = "langchain-ollama", marker = "extra == 'ollama'", specifier = ">=1.0,<2" },
     { name = "langchain-openai", marker = "extra == 'all'", specifier = ">=1.0,<2" },
     { name = "langchain-openai", marker = "extra == 'runtime'", specifier = ">=1.0,<2" },
-    { name = "memorybear-grpc", marker = "extra == 'grpc'", directory = "../packages/memorybear-grpc" },
+    { name = "memorybear-grpc", marker = "extra == 'grpc'", editable = "../packages/memorybear-grpc" },
     { name = "pydantic", specifier = ">=2.12,<3" },
     { name = "sqlalchemy", specifier = ">=2.0,<3" },
     { name = "volcengine-python-sdk", extras = ["ark"], marker = "extra == 'all'", specifier = ">=5.0.19,<6" },

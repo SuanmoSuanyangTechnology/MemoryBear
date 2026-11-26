@@ -81,11 +81,6 @@ class MemoryTypeStatistic(BaseModel):
     percentage: float
 
 
-class HotMemoryTag(BaseModel):
-    name: str
-    frequency: int
-
-
 class InterestItem(BaseModel):
     name: str
     frequency: int

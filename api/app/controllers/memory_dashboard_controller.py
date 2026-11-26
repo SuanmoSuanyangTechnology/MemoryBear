@@ -122,7 +122,13 @@ async def get_workspace_total_end_users(
 
 
 @router.get("/end_users", response_model=ApiResponse)
+@memory_profile_proxy(
+    query_fields=("workspace_id", "page", "pagesize", "keyword", "label"),
+    upper_bounds={"pagesize": 100},
+    preserve_status=True,
+)
 async def get_workspace_end_users(
+    request: Request,
     background_tasks: BackgroundTasks,
     workspace_id: Optional[uuid.UUID] = Query(None, description="工作空间ID（可选，默认当前用户工作空间）"),
     keyword: Optional[str] = Query(None, description="搜索关键词（同时模糊匹配 other_name 和 id）"),

@@ -11,13 +11,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..api.query_validation import execute_list_page
 from ..api.schemas.knowledge import KnowledgeCreate
-from ..errors import KnowledgeError
 from ..models.owned import Document, Knowledge, KnowledgeMetadata, PermissionType
-from ..rag.knowledge_graph.config import GraphPipelineConfigError
-from ..rag.parser_config import (
-    build_default_knowledge_parser_config,
-    normalize_new_knowledge_parser_config,
-)
+from ..parser_configuration import KnowledgeConfiguration
+from ..parser_configuration.legacy import create_knowledge_configuration
+from .parser_configuration import AsyncParserConfigurationRepository
 
 logger = logging.getLogger(__name__)
 
@@ -38,7 +35,10 @@ async def get_knowledge_copy_snapshot_async(
     knowledge_id: uuid.UUID,
     workspace_id: uuid.UUID,
 ) -> tuple[dict[str, Any], list[dict[str, Any]]] | None:
-    """Load the source configuration and metadata fields in one SQL statement."""
+    """Keep the source owner and its configuration stable while taking the copy snapshot."""
+    owner = await lock_share_source_async(db, knowledge_id)
+    if owner is None or owner.workspace_id != workspace_id:
+        return None
     result = await db.execute(
         select(
             Knowledge.id.label("source_id"),
@@ -56,7 +56,6 @@ async def get_knowledge_copy_snapshot_async(
             Knowledge.audio2text_id.label("source_audio2text_id"),
             Knowledge.video2text_id.label("source_video2text_id"),
             Knowledge.parser_id.label("source_parser_id"),
-            Knowledge.parser_config.label("source_parser_config"),
             Knowledge.status.label("source_status"),
             Knowledge.builtin_metadata_enabled.label(
                 "source_builtin_metadata_enabled"
@@ -96,10 +95,12 @@ async def get_knowledge_copy_snapshot_async(
         "audio2text_id": first["source_audio2text_id"],
         "video2text_id": first["source_video2text_id"],
         "parser_id": first["source_parser_id"],
-        "parser_config": first["source_parser_config"],
         "status": first["source_status"],
         "builtin_metadata_enabled": first["source_builtin_metadata_enabled"],
     }
+    source["configuration"] = await AsyncParserConfigurationRepository(db).get_knowledge(
+        knowledge_id
+    )
     metadata_fields = [
         {
             "tenant_id": row["metadata_tenant_id"],
@@ -142,28 +143,6 @@ def stage_knowledge_copy(
     return knowledge
 
 
-def _knowledge_values(
-    knowledge: KnowledgeCreate,
-    *,
-    preserve_source_parser_config: bool = False,
-) -> dict[str, Any]:
-    values = knowledge.model_dump()
-    if preserve_source_parser_config:
-        if values.get("parser_config") is None:
-            values["parser_config"] = build_default_knowledge_parser_config()
-    else:
-        try:
-            values["parser_config"] = normalize_new_knowledge_parser_config(
-                values.get("parser_config")
-            )
-        except GraphPipelineConfigError as exc:
-            raise KnowledgeError.from_code(
-                "KB_KNOWLEDGE_PARSER_CONFIG_INVALID",
-                diagnostic="body.parser_config.graphrag: invalid graph pipeline configuration",
-            ) from exc
-    return values
-
-
 async def get_knowledges_paginated_async(
     db: AsyncSession,
     filters: list,
@@ -189,18 +168,16 @@ async def create_knowledge_async(
     db: AsyncSession,
     knowledge: KnowledgeCreate,
     *,
-    preserve_source_parser_config: bool = False,
+    configuration: KnowledgeConfiguration | None = None,
     commit: bool = True,
 ) -> Knowledge:
     """Create a record; commit=False leaves the transaction to the caller."""
     try:
-        db_knowledge = Knowledge(
-            **_knowledge_values(
-                knowledge,
-                preserve_source_parser_config=preserve_source_parser_config,
-            )
-        )
-        db.add(db_knowledge)
+        values = knowledge.model_dump()
+        config = configuration or create_knowledge_configuration(values)
+        values.pop("parser_config", None)
+        db_knowledge = Knowledge(**values)
+        await AsyncParserConfigurationRepository(db).write_knowledge(db_knowledge, lambda _: config)
         if not commit:
             await db.flush()
             return db_knowledge
@@ -238,13 +215,16 @@ async def get_knowledge_by_id_in_workspace_async(
     db: AsyncSession,
     knowledge_id: uuid.UUID,
     workspace_id: uuid.UUID,
+    *,
+    for_update: bool = False,
 ) -> Knowledge | None:
-    result = await db.execute(
-        select(Knowledge).where(
-            Knowledge.id == knowledge_id,
-            Knowledge.workspace_id == workspace_id,
-        )
+    stmt = select(Knowledge).where(
+        Knowledge.id == knowledge_id,
+        Knowledge.workspace_id == workspace_id,
     )
+    if for_update:
+        stmt = stmt.with_for_update().execution_options(populate_existing=True)
+    result = await db.execute(stmt)
     return result.scalars().first()
 
 

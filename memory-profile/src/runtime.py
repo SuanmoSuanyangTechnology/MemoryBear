@@ -20,6 +20,7 @@ from src.common.observability.runtime_metrics import (
     utc_timestamp,
 )
 from src.config import ProfileSettings
+from src.infrastructure.attachment_storage import AttachmentStorageManager
 from src.infrastructure.api_tasks import ApiTaskPublisher
 from src.infrastructure.elasticsearch import ElasticsearchManager
 from src.infrastructure.emotion_classifier import EmotionClassifier
@@ -42,9 +43,11 @@ class ProfileRuntime:
 
     def __init__(self, settings: ProfileSettings) -> None:
         self.settings = settings
+        self.attachment_storage = AttachmentStorageManager(settings)
         self.postgres = PostgresManager(settings)
         self.neo4j = Neo4jManager(settings)
         self.redis = RedisManager(settings)
+        self.dashboard_redis = RedisManager(settings, settings.memory_write_redis_url)
         self.elasticsearch = ElasticsearchManager(settings)
         # 生成类用例专用；只读端点不会触碰它，因此它不参与 readiness 探测。
         self.model_service = ModelServiceManager(settings)
@@ -195,8 +198,10 @@ class ProfileRuntime:
             self.postgres.aclose(),
             self.neo4j.aclose(),
             self.redis.aclose(),
+            self.dashboard_redis.aclose(),
             self.elasticsearch.aclose(),
             self.model_service.aclose(),
+            self.attachment_storage.aclose(),
             self.scene_continuity.aclose(),
             self.emotion_classifier.aclose(),
             self.task_bridge.aclose(),

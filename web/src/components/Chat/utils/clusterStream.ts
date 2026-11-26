@@ -117,7 +117,7 @@ const normalizeIteration = (value: unknown, fallbackIndex: number): AgentTraceIt
   }
 }
 
-const normalizeTrace = (payload: ClusterEventData): AgentTrace => {
+export const normalizeTrace = (payload: ClusterEventData): AgentTrace => {
   const trace = isRecord(payload.data) ? payload.data : payload
   return Array.isArray(trace.iterations)
     ? {
@@ -135,8 +135,9 @@ const mergeToolCalls = (
   const mergedCalls = [...currentCalls]
 
   incomingCalls.forEach(incomingCall => {
-    const targetIndex = incomingCall.step_id
-      ? mergedCalls.findIndex(call => call.step_id === incomingCall.step_id)
+    const callKey = incomingCall.step_id || (incomingCall as Record<string, unknown>).id
+    const targetIndex = callKey
+      ? mergedCalls.findIndex(call => call.step_id === callKey || (call as Record<string, unknown>).id === callKey)
       : -1
     if (targetIndex === -1) {
       mergedCalls.push(incomingCall)
@@ -155,7 +156,7 @@ const mergeToolCalls = (
   return mergedCalls
 }
 
-const mergeTrace = (currentTrace: AgentTrace, incomingTrace: AgentTrace): AgentTrace => {
+export const mergeTrace = (currentTrace: AgentTrace, incomingTrace: AgentTrace): AgentTrace => {
   const mergedIterations = currentTrace.iterations.map((iteration, index) =>
     normalizeIteration(iteration, index)
   )
@@ -206,7 +207,7 @@ const getErrorText = (error: unknown): string | undefined => {
   return undefined
 }
 
-const getEndFailure = (payload: ClusterEventData, forceFailure = false): string | undefined => {
+export const getEndFailure = (payload: ClusterEventData, forceFailure = false): string | undefined => {
   const code = payload.code
   const failed = forceFailure || payload.status === 'failed' || payload.status === 'error'
     || (code !== undefined && code !== null && code !== 0 && code !== 200 && code !== '0' && code !== '200')
@@ -218,7 +219,7 @@ const getEndFailure = (payload: ClusterEventData, forceFailure = false): string 
   return msg || codeName || i18n.t('common.unknownError')
 }
 
-const getTraceOutput = (trace: AgentTrace): unknown => {
+export const getTraceOutput = (trace: AgentTrace): unknown => {
   for (let index = trace.iterations.length - 1; index >= 0; index--) {
     const output = trace.iterations[index]?.llm?.output
     if (output !== undefined && output !== null && output !== '') return output
@@ -226,7 +227,7 @@ const getTraceOutput = (trace: AgentTrace): unknown => {
   return undefined
 }
 
-const normalizeAgentStatus = (status?: string, error?: unknown) => {
+export const normalizeAgentStatus = (status?: string, error?: unknown) => {
   if (error || status === 'failed' || status === 'error') return 'failed'
   if (!status || status === 'success') return 'completed'
   return status

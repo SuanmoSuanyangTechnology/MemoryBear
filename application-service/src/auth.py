@@ -100,6 +100,11 @@ _PUBLIC_PATH_PATTERNS = (
         re.compile(r"^/internal/v1/workflows/triggers/webhook/[^/]+$"),
         ("GET", "POST", "PUT", "PATCH", "DELETE", "HEAD"),
     ),
+    # Home-page version card: anonymous by host contract (the monolith route
+    # had no auth dependency — the dashboard shows it regardless of login
+    # state). Exact path, GET only; the statistics/workspace cards stay
+    # tenant-scoped behind the gateway-assembled principal.
+    (re.compile(r"^/internal/v1/home-page/version$"), ("GET",)),
 )
 
 
