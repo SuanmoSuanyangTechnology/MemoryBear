@@ -3,13 +3,11 @@
 The open build owns no enterprise tables. An enterprise deployment runs the
 closed-source ``memory-enterprise`` service for quotas and ontology data.
 
-Calls authenticate with a **service-to-service internal JWT**, the same mechanism
-memory-profile already uses for file-service uploads: `LocalTokenIssuer` signs an
-RS256 token with the deployment's shared ``INTERNAL_ISSUER_PRIVATE_KEY``
-(``iss=memory-profile``, ``aud=MEMORY_ENTERPRISE_AUDIENCE``), and memory-enterprise
-verifies it through identity's JWKS and its caller ACL. No shared
-``X-Internal-Token`` is sent: the target rejects two credentials at once, and the
-JWT carries the tenant each call acts for.
+Calls authenticate with the deployment-wide **shared internal token**: every
+request carries ``X-Internal-Token: $MEMORY_INTERNAL_TOKEN`` and the tenant it
+acts for in ``X-Tenant-Id`` (memory-enterprise's shared-token branch has no JWT
+claims, so the header is the tenant context). memory-profile, memory-jobs and
+memory-enterprise all read the same ``MEMORY_INTERNAL_TOKEN``.
 
 This module is transport only. Each use case decides how to handle failures.
 
@@ -26,8 +24,6 @@ from typing import Any
 from uuid import UUID
 
 import httpx
-from auth_sdk.schema import UserContext
-from auth_sdk.token import LocalTokenIssuer
 
 from src.common.responses import ApiResponse
 from src.config import ProfileSettings
@@ -52,37 +48,31 @@ DEFAULT_EMOTION_POLICY_PATH = "/internal/v1/ontology/default-emotion-policies/{e
 RETRIEVAL_ALERT_PATH = "/internal/v1/notifications/retrieval-alerts"
 
 
+def _secret_value(value: object) -> str:
+    """Read a plain string or a ``SecretStr`` without importing pydantic here."""
+
+    getter = getattr(value, "get_secret_value", None)
+    if callable(getter):
+        return str(getter())
+    return str(value or "")
+
+
 class MemoryEnterpriseManager:
-    """Lazily own the enterprise-service HTTP pool and its internal-JWT issuer."""
+    """Lazily own the enterprise-service HTTP pool and its shared-token credential."""
 
     def __init__(
         self,
         settings: ProfileSettings,
         *,
         transport: httpx.AsyncBaseTransport | None = None,
-        issuer: Any | None = None,
     ) -> None:
         self._settings = settings
         self._transport = transport
-        self._issuer = issuer
-        if self._issuer is None:
-            secret = settings.internal_issuer_private_key
-            private_key = (
-                secret.get_secret_value()
-                if hasattr(secret, "get_secret_value")
-                else str(secret or "")
-            )
-            if private_key:
-                self._issuer = LocalTokenIssuer(
-                    private_key=private_key,
-                    kid=settings.internal_issuer_kid,
-                    ttl=settings.internal_token_ttl_seconds,
-                    issuer=settings.service_name,
-                )
-        if settings.memory_enterprise_base_url and self._issuer is None:
+        self._token = _secret_value(settings.memory_internal_token)
+        if settings.memory_enterprise_base_url and not self._token:
             logger.warning(
-                "memory-enterprise is configured but INTERNAL_ISSUER_PRIVATE_KEY "
-                "is missing; enterprise calls are disabled"
+                "memory-enterprise is configured but MEMORY_INTERNAL_TOKEN is "
+                "missing; enterprise calls are disabled"
             )
         self._client: httpx.AsyncClient | None = None
         self._loop: asyncio.AbstractEventLoop | None = None
@@ -90,32 +80,29 @@ class MemoryEnterpriseManager:
 
     @property
     def enabled(self) -> bool:
-        """Whether the service URL and the internal issuer are both configured."""
+        """Whether the service URL and the shared token are both configured."""
 
-        return bool(self._settings.memory_enterprise_base_url and self._issuer is not None)
+        return bool(self._settings.memory_enterprise_base_url and self._token)
 
     def _auth_headers(
         self, *, tenant_id: UUID | str, workspace_id: UUID | str | None = None
     ) -> dict[str, str]:
-        """Sign one call for the tenant it acts for.
+        """Authenticate one call and state the tenant it acts for.
 
-        The token ``sub`` is this service, not an end user: the ACL keys on
-        ``iss`` and the endpoint, and the target only needs a stable caller
-        identity. ``tenant_id`` (and ``workspace_id`` when known) travel as
-        claims, which memory-enterprise treats as the authoritative context.
+        The shared-token branch has no claims, so memory-enterprise reads the
+        tenant from ``X-Tenant-Id`` (and the workspace from ``X-Workspace-Id``
+        when the caller knows it).
         """
 
-        if self._issuer is None:
-            raise RuntimeError("Internal issuer key is not configured")
-        identity = UserContext(
-            user_id=self._settings.service_name,
-            tenant_id=str(tenant_id),
-            workspace_id=str(workspace_id) if workspace_id else "",
-        )
-        token = self._issuer.issue_internal_token(
-            identity, self._settings.memory_enterprise_audience
-        )
-        return {"Authorization": f"Bearer {token}"}
+        if not self._token:
+            raise RuntimeError("MEMORY_INTERNAL_TOKEN is not configured")
+        headers = {
+            "X-Internal-Token": self._token,
+            "X-Tenant-Id": str(tenant_id),
+        }
+        if workspace_id:
+            headers["X-Workspace-Id"] = str(workspace_id)
+        return headers
 
     async def client(self) -> httpx.AsyncClient:
         current_loop = asyncio.get_running_loop()
@@ -142,8 +129,7 @@ class MemoryEnterpriseManager:
         """Fetch one tenant's effective limits, split by source.
 
         Raises on a transport failure or an unusable payload; the caller decides
-        how to degrade. The tenant travels in the path because this call is
-        service-to-service and the gateway does not inject a tenant header.
+        how to degrade. The tenant travels in the path and in ``X-Tenant-Id``.
         """
 
         response = await (await self.client()).get(

@@ -363,26 +363,16 @@ class JobsSettings(BaseSettings):
     memory_enterprise_timeout_seconds: float = Field(
         3.0, gt=0, validation_alias="MEMORY_ENTERPRISE_TIMEOUT_SECONDS"
     )
-    #: Audience (the target's ``service_name``) of the internal JWT this worker
-    #: signs for memory-enterprise. Calls carry no shared token: the target
-    #: verifies ``iss=JOBS_SERVICE_NAME`` against identity's JWKS and its caller
-    #: ACL, and reads the tenant from the token claims.
-    memory_enterprise_audience: str = Field(
-        "mem-enterprise", validation_alias="MEMORY_ENTERPRISE_AUDIENCE"
+    #: Shared service credential memory-enterprise checks as ``X-Internal-Token``.
+    #: The same value is configured on memory-enterprise and memory-profile;
+    #: missing leaves enterprise calls degraded as unavailable.
+    memory_internal_token: SecretStr = Field(
+        SecretStr(""), validation_alias="MEMORY_INTERNAL_TOKEN"
     )
 
-    # ------------------------------------------------------- internal JWT issuer
-    #: Same variables as gateway / identity-service: all three must share one
-    #: key pair, otherwise memory-enterprise cannot verify through identity's
-    #: JWKS. Missing key leaves enterprise calls disabled (degrade as
-    #: unavailable, never as "no subscription"/"no scenes").
-    internal_issuer_private_key: SecretStr = Field(
-        SecretStr(""), validation_alias="INTERNAL_ISSUER_PRIVATE_KEY"
-    )
-    internal_issuer_kid: str = Field("internal-1", validation_alias="INTERNAL_ISSUER_KID")
-    internal_token_ttl_seconds: int = Field(
-        120, ge=1, validation_alias="INTERNAL_TOKEN_TTL"
-    )
+    # ------------------------------------------------------- service-to-service
+    # memory-enterprise calls authenticate with the static shared token above.
+    # File-service URL lookups use its public read, so no token is sent.
 
     # --------------------------------------------------------------------- Neo4j
     neo4j_uri: str = Field("bolt://localhost:7687", validation_alias="NEO4J_URI")
