@@ -71,12 +71,13 @@ async def get_folder_tree(
     principal: Annotated[Principal, Depends(get_principal)],
     runtime: Annotated[ProcessRuntime, Depends(get_runtime)],
     parent_id: UUID | None = None,
+    keywords: str | None = None,
 ) -> dict[str, Any]:
     if not is_manager_request(request):
         raise KnowledgeError.from_code("KB_ROUTE_NOT_FOUND", status_code=404)
-    check_query(request, {"parent_id"})
+    check_query(request, {"parent_id", "keywords"})
     async with runtime.database.async_session() as db:
-        return success(await service.folder_tree(db, principal, parent_id))
+        return success(await service.folder_tree(db, principal, parent_id, keywords=keywords))
 
 
 @router.get("", response_model=SuccessEnvelope[dict[str, Any]])
