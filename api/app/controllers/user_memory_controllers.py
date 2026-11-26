@@ -6,7 +6,7 @@
 """
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Header, Query
+from fastapi import APIRouter, Depends, Header, Query, Request
 
 from app.core.error_codes import BizCode
 from app.core.memory.constants.graph_data_constants import PREFERENCE_GROUP_NODE_ID_PREFIX
@@ -14,6 +14,7 @@ from app.core.language_utils import get_language_from_header
 from app.core.logging_config import get_api_logger
 from app.core.response_utils import success, fail
 from app.db import get_async_db_context
+from app.integrations.profile.proxy import memory_profile_proxy
 from app.dependencies import get_current_user_async, CurrentUserSnapshot
 from app.repositories.workspace_repository import WorkspaceRepository
 from app.repositories.end_user_repository import EndUserRepository
@@ -40,10 +41,12 @@ router = APIRouter(
 
 
 @router.get("/memory_space/timeline_memories", response_model=ApiResponse)
+@memory_profile_proxy(query_fields=("id", "label"))
 async def memory_space_timeline_of_shared_memories(
         id: str, label: str,
         language_type: str = Header(default=None, alias="X-Language-Type"),
         current_user: CurrentUserSnapshot = Depends(get_current_user_async),
+        request: Request = None,
 ):
     # 使用集中化的语言校验
     language = get_language_from_header(language_type)
@@ -92,6 +95,7 @@ async def memory_space_entity_event_timeline(
 
 
 @router.get("/memory_space/entity_timeline", response_model=ApiResponse)
+@memory_profile_proxy(query_fields=("id", "end_user_id", "type", "sort", "from_ts", "to_ts", "page", "pagesize"))
 async def memory_space_entity_timeline(
         id: str | None = Query(None, description="实体 elementId，与 end_user_id 二选一"),
         type: str = Query("all", description="来源筛选：all/key_node/statement/memory_summary"),
@@ -102,6 +106,7 @@ async def memory_space_entity_timeline(
         pagesize: int = Query(10, ge=1, le=100, description="每页数量"),
         current_user: CurrentUserSnapshot = Depends(get_current_user_async),
         end_user_id: str | None = Query(None, description="终端用户 UUID 字符串，与 id 二选一"),
+        request: Request = None,
 ):
     """ExtractedEntity 合并记忆时间线（关键节点 / 来源陈述 / 长期沉淀），分页 + 按来源筛选 + 排序 + 日期过滤。
 
@@ -180,9 +185,11 @@ async def memory_space_entity_timeline(
 
 
 @router.get("/memory_space/relationship_evolution", response_model=ApiResponse)
+@memory_profile_proxy(query_fields=("id", "label"))
 async def memory_space_relationship_evolution(id: str, label: str,
                                               current_user: CurrentUserSnapshot = Depends(get_current_user_async),
-                                              ):
+                                              request: Request = None,
+):
     try:
         api_logger.info(f"关系演变查询请求: id={id}, table={label}, user={current_user.username}")
 
@@ -212,8 +219,10 @@ async def memory_space_relationship_evolution(id: str, label: str,
 
 
 @router.post("/node/delete", response_model=ApiResponse)
+@memory_profile_proxy(body_arg="payload", body_fields=("element_id", "end_user_id"))
 async def delete_node_api(
-        request: DeleteNodeRequest,
+        request: Request,
+        payload: DeleteNodeRequest,
         current_user: CurrentUserSnapshot = Depends(get_current_user_async),
 ) -> dict:
     """通过 elementId 删除 Neo4j 图节点（含关联边）。
@@ -225,8 +234,8 @@ async def delete_node_api(
         api_logger.warning(f"用户 {current_user.username} 尝试删除节点但未选择工作空间")
         return fail(BizCode.INVALID_PARAMETER, "请先切换到一个工作空间", "current_workspace_id is None")
 
-    element_id = request.element_id
-    end_user_id = request.end_user_id
+    element_id = payload.element_id
+    end_user_id = payload.end_user_id
 
     if element_id.startswith(PREFERENCE_GROUP_NODE_ID_PREFIX):
         return fail(BizCode.INVALID_PARAMETER, "偏好汇总节点不可删除", "请先删除具体的偏好记忆节点")

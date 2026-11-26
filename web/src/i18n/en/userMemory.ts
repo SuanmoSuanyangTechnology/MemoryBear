@@ -349,6 +349,7 @@ export const userMemory = {
       SCENE_RECONSTRUCTION: 'Multimodal Episodic Memory Reconstruction Engine',
       PREDICTION: 'Memory Prediction Workbench',
       PERSONALITY_ANCHOR: 'Personality Anchor Engine',
+      SPATIOTEMPORAL_MEMORY_ANCHORING: 'Spatial-Temporal Memory Anchoring Engine',
 
       memorySubject: 'Memory Subject',
       basicInfo: 'Basic Information',

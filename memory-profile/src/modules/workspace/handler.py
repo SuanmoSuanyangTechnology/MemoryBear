@@ -1,6 +1,6 @@
-"""Transport adaptation for the migrated workspace re-embed endpoints.
+"""Transport adaptation for workspace re-embed and temporary-memory retention endpoints.
 
-Three groups share this handler:
+The following groups share this handler:
 
 * the re-embed status reads (the two job-detail routes and the two per-user
   lists) — the host returns the plain ``ApiResponse`` envelope, so the payload
@@ -9,7 +9,8 @@ Three groups share this handler:
   pending job and publishes the driver;
 * the four manual-retry routes — the retry logic itself now runs here, in
   ``ReembedRetryService``; only the downstream re-embed workers are still
-  published to the API worker.
+  published to the API worker;
+* the temporary-memory retention policy routes.
 
 Errors keep the host's shape: an unknown ``status`` filter is the API's
 ``BusinessException(INVALID_PARAMETER)`` (HTTP status from the shared error-core
@@ -40,8 +41,13 @@ from src.common.responses import (
 from src.i18n import get_request_language, t
 from src.middleware.auth import MemoryPrincipal
 from src.runtime import ProfileRuntime
+from src.schemas.workspace import (
+    WorkspaceRetentionPolicyResponse,
+    WorkspaceRetentionPolicyResult,
+)
 from src.schemas.workspace_api import (
     WorkspaceReembedJobCreate,
+    WorkspaceRetentionPolicyUpdate,
 )
 from src.services.reembed_jobs import (
     ReembedJobCreateConflictError,
@@ -58,6 +64,7 @@ from src.services.reembed_status import (
     ReembedJobNotFoundError,
     ReembedStatusService,
 )
+from src.services.workspace import WorkspaceService
 
 logger = logging.getLogger(__name__)
 
@@ -79,6 +86,7 @@ class WorkspaceHandler:
         self.reembed = ReembedStatusService(runtime.postgres)
         self.retry = ReembedRetryService(runtime)
         self.jobs = ReembedJobService(runtime)
+        self.retention = WorkspaceService.from_postgres(runtime.postgres)
 
     # ---------------------------------------------------- re-embed end users
 
@@ -257,7 +265,27 @@ class WorkspaceHandler:
             return _internal_error(request)
         return success(data=result.data, msg=result.message or _ok_message(request))
 
+    # ----------------------------------------------- temporary-memory retention
 
+    async def get_workspace_retention_policy(
+        self, context: MemoryPrincipal, language: str
+    ) -> ApiResponse[WorkspaceRetentionPolicyResponse]:
+        data = await self.retention.get_workspace_retention_policy(
+            context.workspace_id, context.actor_id
+        )
+        return ApiResponse(
+            data=data, msg=t("workspace.retention_policy.retrieved", language)
+        )
+
+    async def update_workspace_retention_policy(
+        self, context: MemoryPrincipal, policy: WorkspaceRetentionPolicyUpdate, language: str
+    ) -> ApiResponse[WorkspaceRetentionPolicyResult]:
+        data = await self.retention.update_workspace_retention_policy(
+            context.workspace_id, context.actor_id, policy.retention_days
+        )
+        return ApiResponse(
+            data=data, msg=t("workspace.retention_policy.updated", language)
+        )
 
 
 def _invalid_status(

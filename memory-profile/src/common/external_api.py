@@ -120,6 +120,10 @@ def _annotation_text(annotation: object) -> str:
     if isinstance(annotation, type):
         if annotation.__module__ == "builtins":
             return annotation.__qualname__
+        generic_metadata = getattr(annotation, "__pydantic_generic_metadata__", None)
+        if generic_metadata and generic_metadata.get("origin") is not None:
+            origin = generic_metadata["origin"]
+            return f"{origin.__module__}.{annotation.__qualname__}"
         return f"{annotation.__module__}.{annotation.__qualname__}"
     origin = get_origin(annotation)
     if origin is Annotated:

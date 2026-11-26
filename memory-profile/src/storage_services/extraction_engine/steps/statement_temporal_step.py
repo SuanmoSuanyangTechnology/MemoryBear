@@ -1,0 +1,227 @@
+"""StatementTemporalExtractionStep — critical step for extracting statements and temporal info from chunks.
+
+Replaces the legacy ``StatementExtractor`` with the unified ExtractionStep paradigm.
+Temporal extraction logic (valid_at / invalid_at) is merged into this step,
+eliminating the need for a separate ``TemporalExtractor`` call.
+"""
+
+import asyncio
+import logging
+import uuid
+from typing import Any, List
+
+from pydantic import AliasChoices, BaseModel, Field, field_validator
+
+from src.common.data.ontology import LABEL_DEFINITIONS
+from src.common.prompt.prompt_utils import render_statement_extraction_prompt
+
+from src.storage_services.extraction_engine.steps.base import ExtractionStep, StepContext
+from src.storage_services.extraction_engine.steps.schema import StatementStepInput, StatementStepOutput
+from src.storage_services.extraction_engine.steps.statement_classification import ClassificationError, StatementClassification, StatementClassifier
+
+logger = logging.getLogger(__name__)
+
+
+# ── LLM response schemas (internal) ──
+
+
+class _ExtractedStatement(BaseModel):
+    """Raw statement returned by the LLM (stage-1 five fields only).
+
+    statement_type / temporal_type / has_unsolved_reference 已被拆到阶段 2
+    （小模型分类器 + 备用 LLM 兜底），statement_id / speaker / dialog_at
+    由代码补齐，均不由本阶段 LLM 输出。
+    """
+
+    statement: str = Field(
+        ...,
+        validation_alias=AliasChoices("statement", "statement_text"),
+        description="The extracted statement text",
+    )
+    has_emotional_state: bool = Field(
+        False,
+        description="Whether the statement reflects user's emotional state",
+    )
+    is_permanent: bool = Field(
+        False,
+        description="Whether the user explicitly requires this statement to be retained permanently",
+    )
+    valid_at: str = Field("NULL", description="ISO 8601 or NULL")
+    invalid_at: str = Field("NULL", description="ISO 8601 or NULL")
+
+
+class _StatementExtractionResponse(BaseModel):
+    """Structured LLM response containing a list of extracted statements."""
+
+    statements: List[_ExtractedStatement] = Field(default_factory=list)
+
+    @field_validator("statements", mode="before")
+    @classmethod
+    def filter_empty(cls, v: Any) -> Any:
+        """Drop empty / malformed dicts that the LLM occasionally produces."""
+        if isinstance(v, list):
+            return [
+                s
+                for s in v
+                if isinstance(s, dict)
+                and (s.get("statement") or s.get("statement_text"))
+            ]
+        return v
+
+
+class StatementTemporalExtractionStep(ExtractionStep[StatementStepInput, List[StatementStepOutput]]):
+    """Extract atomic statements with temporal info (valid_at / invalid_at) from a dialogue chunk.
+
+    This is a **critical** step — failure aborts the pipeline after retries.
+
+    Config params bound at init (from ``StepContext.config.statement_extraction``):
+        * ``definitions`` — label definitions for statement classification
+        * ``json_schema`` — JSON schema for the expected LLM output
+        * ``granularity`` — extraction granularity level (1-3)
+        * ``include_dialogue_context`` — whether to include full dialogue context
+    """
+
+    def __init__(self, context: StepContext) -> None:
+        super().__init__(context)
+        stmt_cfg = getattr(self.config, "statement_extraction", None)
+        self.definitions = LABEL_DEFINITIONS
+        self.json_schema = _ExtractedStatement.model_json_schema()
+        self.granularity = getattr(stmt_cfg, "statement_granularity", None)
+        self.include_dialogue_context = getattr(stmt_cfg, "include_dialogue_context", True)
+        self.max_dialogue_context_chars = getattr(stmt_cfg, "max_dialogue_context_chars", 2000)
+
+    # ── Identity ──
+
+    @property
+    def name(self) -> str:
+        return "statement_extraction"
+
+    @property
+    def is_critical(self) -> bool:
+        return True
+
+    # ── Lifecycle ──
+
+    async def render_prompt(self, input_data: StatementStepInput) -> str:
+        ctx = input_data.supporting_context
+        has_any_ctx = bool(ctx.before_msgs or ctx.after_msgs)
+
+        # Build optional dialogue context — kept for prompts that use the
+        # legacy ``dialogue_context`` flag; preserves before → after order so
+        # the LLM sees the natural temporal flow with target_content sitting
+        # logically in between the two halves.
+        dialogue_content = None
+        if self.include_dialogue_context and has_any_ctx:
+            parts: List[str] = []
+            if ctx.before_msgs:
+                parts.append(
+                    "\n".join(f"{m.role}: {m.msg}" for m in ctx.before_msgs)
+                )
+            if ctx.after_msgs:
+                parts.append(
+                    "\n".join(f"{m.role}: {m.msg}" for m in ctx.after_msgs)
+                )
+            dialogue_content = "\n---\n".join(parts)
+
+        input_json = {
+            "chunk_id": input_data.chunk_id,
+            "end_user_id": input_data.end_user_id,
+            "dialog_at": input_data.dialog_at or "",
+            "target_content": input_data.target_content,
+            "supporting_context": {
+                "before_msgs": [
+                    {"role": m.role, "msg": m.msg} for m in ctx.before_msgs
+                ],
+                "after_msgs": [
+                    {"role": m.role, "msg": m.msg} for m in ctx.after_msgs
+                ],
+            },
+        }
+
+        return await render_statement_extraction_prompt(
+            chunk_content=input_data.target_content,
+            definitions=self.definitions,
+            json_schema=self.json_schema,
+            granularity=self.granularity,
+            include_dialogue_context=self.include_dialogue_context,
+            dialogue_content=dialogue_content,
+            max_dialogue_chars=self.max_dialogue_context_chars,
+            language=self.language,
+            input_json=input_json,
+        )
+
+    async def call_llm(self, prompt: Any) -> Any:
+        messages = [
+            {
+                "role": "system",
+                "content": (
+                    "You are an expert at extracting and labeling atomic statements "
+                    "from conversational text. Return valid JSON conforming to the schema."
+                ),
+            },
+            {"role": "user", "content": prompt},
+        ]
+        return await self.llm_client.call_structured(
+            messages, _StatementExtractionResponse
+        )
+
+    async def parse_response(
+        self, raw_response: Any, input_data: StatementStepInput
+    ) -> List[StatementStepOutput]:
+        if not hasattr(raw_response, "statements") or raw_response.statements is None:
+            return []
+
+        classifier = StatementClassifier()
+        try:
+            # 阶段 2：逐条三分类（小模型并发；任一失败该条整体回退备用 LLM；双失败上抛触发步骤重试）
+            async def _classify(stmt) -> StatementClassification:
+                return await classifier.classify(
+                    stmt.statement,
+                    llm_client=self.llm_client,
+                    language=self.language,
+                )
+
+            classifications: List[StatementClassification] = list(
+                await asyncio.gather(*[_classify(s) for s in raw_response.statements])
+            )
+        except ClassificationError as exc:
+            logger.error(
+                "[StmtExtract] classification failed (small models + fallback LLM): %s", exc
+            )
+            raise
+        finally:
+            await classifier.close()
+
+        results: List[StatementStepOutput] = []
+        for stmt, cls in zip(raw_response.statements, classifications):
+            valid_at = stmt.valid_at or "NULL"
+            invalid_at = stmt.invalid_at or "NULL"
+            # 3.1 时间-类型冲突：以阶段 2 temporal_type 为准，代码清空时间字段
+            if cls.temporal_type == "ATEMPORAL":
+                valid_at, invalid_at = "NULL", "NULL"
+            elif cls.temporal_type == "STATIC":
+                invalid_at = "NULL"
+            # DYNAMIC：时间字段按阶段 1 原值，不做强制清空
+
+            statement_id = uuid.uuid4().hex
+
+            results.append(
+                StatementStepOutput(
+                    statement_id=statement_id,
+                    statement_text=stmt.statement,
+                    statement_type=cls.statement_type,
+                    temporal_type=cls.temporal_type,
+                    # relevance=stmt.relevance.strip().upper(),
+                    speaker="user",  # default; orchestrator overrides from chunk metadata
+                    has_emotional_state=getattr(stmt, "has_emotional_state", False),
+                    is_permanent=getattr(stmt, "is_permanent", False),
+                    dialog_at=input_data.dialog_at or "",  # carry through from input
+                    valid_at=valid_at,
+                    invalid_at=invalid_at,
+                    has_unsolved_reference=cls.has_unsolved_reference,
+                )
+            )
+        return results
+
+    def get_default_output(self) -> List[StatementStepOutput]:
+        return []

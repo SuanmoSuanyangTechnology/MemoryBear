@@ -13,6 +13,7 @@ import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.common.timing import utcnow_naive
+from src.models.references.conversation_model import Conversation
 from src.models.references.end_user_model import EndUser, EndUserMerge
 from src.models.references.memory_display_model import (
     MemoryDisplayRecord,
@@ -22,7 +23,6 @@ from src.models.references.memory_forget_model import ForgettingCycleHistory
 from src.models.references.memory_generation_model import EndUserInfo
 from src.models.references.memory_reflection_log_model import MemoryReflectionLog
 from src.models.references.memory_statistics_model import (
-    Conversation,
     DialogueEmotionRaw,
     ForgetAudit,
     LongTermMemory,
