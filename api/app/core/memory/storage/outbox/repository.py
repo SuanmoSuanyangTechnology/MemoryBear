@@ -96,13 +96,25 @@ class OutboxRepository:
             other.c.label == events.c.label, other.c.node_id == events.c.node_id,
             other.c.status == "processing",
         ))
+        # 领取必须发生在“同节点没有更早的 pending”那一行上（每节点串行）。
         has_earlier_pending = sa.exists(sa.select(1).where(
             other.c.label == events.c.label, other.c.node_id == events.c.node_id,
             other.c.status == "pending", other.c.sequence < events.c.sequence,
         ))
+        # 队列尾：本次投影成功后可一并收敛的上界。必须和领取同一条语句取，
+        # 不能另发一条查询——两次查询之间新入队的行，其 Neo4j 提交可能晚于
+        # 本次回读，覆盖它就是丢更新。
+        node_queue = events.alias("node_queue")
+        queue_tip = sa.select(sa.func.max(node_queue.c.sequence)).where(
+            node_queue.c.label == events.c.label,
+            node_queue.c.node_id == events.c.node_id,
+            node_queue.c.status == "pending",
+        ).scalar_subquery()
         claimed = []
         with self.sessions.begin() as session:
-            rows = session.execute(sa.select(events).where(
+            rows = session.execute(sa.select(
+                events, queue_tip.label("queue_tip"),
+            ).where(
                 events.c.status == "pending", ~has_processing, ~has_earlier_pending,
             ).order_by(events.c.sequence).limit(limit).with_for_update(
                 skip_locked=True, of=events,
@@ -124,6 +136,7 @@ class OutboxRepository:
                         id=row["id"], sequence=row["sequence"], label=row["label"],
                         node_id=row["node_id"], operation=row["operation"],
                         attempt_count=row["attempt_count"], claim_token=token,
+                        queue_tip=row["queue_tip"] or row["sequence"],
                     ))
         return claimed
 
@@ -160,21 +173,49 @@ class OutboxRepository:
                     processed_at=db_now() if status == "processed" else None,
                     failed_at=db_now() if status == "failed" else None)
 
-    async def mark_processed(self, event_id: UUID, claim_token: UUID) -> bool:
-        return await self._finish(event_id, claim_token, "processed", None)
+    async def mark_processed(self, claim: ClaimedEvent) -> bool:
+        return await self._finish(claim.id, claim.claim_token, "processed", None, claim)
 
     async def mark_failed(self, event_id: UUID, claim_token: UUID, error: str) -> bool:
-        return await self._finish(event_id, claim_token, "failed", error[:self.error_max_length])
+        return await self._finish(event_id, claim_token, "failed",
+                                  error[:self.error_max_length])
 
-    async def _finish(self, event_id, token, status, error) -> bool:
-        return await asyncio.to_thread(self._finish_sync, event_id, token, status, error)
+    async def _finish(self, event_id, token, status, error, claim=None) -> bool:
+        return await asyncio.to_thread(
+            self._finish_sync, event_id, token, status, error, claim)
 
-    def _finish_sync(self, event_id, token, status, error) -> bool:
+    def _finish_sync(self, event_id, token, status, error, claim=None) -> bool:
         with self.sessions.begin() as session:
             result = session.execute(sa.update(events).where(
                 self._owner(event_id, token),
             ).values(**self._terminal(status, error)))
+            # 只有确认成功（rowcount 非零）且状态为 processed 才推进覆盖：
+            # 确认失败意味着租约已易主，绝不能顺带把别人该做的行吃掉。
+            if result.rowcount and status == "processed" and claim is not None:
+                self._supersede(session, claim)
             return bool(result.rowcount)
+
+    @staticmethod
+    def _supersede(session: Session, claim: ClaimedEvent) -> int:
+        """把本次回读已经覆盖的同节点 pending 行一并收敛为 processed。
+
+        投影回读的是 Neo4j 当前态，所以领取时已在队列里的同节点行，其写入
+        必然早于本次回读，结果为它们共享。物理删除是盲删（不回读 Neo4j），
+        不能吃掉之后可能重建该节点的状态事件，只收敛 delete 行。
+        """
+
+        if claim.queue_tip <= 0:
+            return 0
+        scope = [
+            events.c.label == claim.label,
+            events.c.node_id == claim.node_id,
+            events.c.status == "pending",
+            events.c.sequence <= claim.queue_tip,
+        ]
+        if claim.operation == "delete":
+            scope.append(events.c.operation == "delete")
+        return session.execute(sa.update(events).where(*scope)
+                               .values(**OutboxRepository._terminal("processed"))).rowcount
 
     async def mark_expired_failed(self, limit: int) -> int:
         if not 1 <= limit <= 1000:

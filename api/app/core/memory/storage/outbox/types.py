@@ -41,3 +41,7 @@ class ClaimedEvent:
     operation: str
     attempt_count: int
     claim_token: UUID
+    #: 领取瞬间该节点 pending 队列的最大序号。投影回读的是 Neo4j 当前态，
+    #: 所以序号 <= 它、且在领取前就已入队的行都已被这次回读覆盖，成功后可以
+    #: 一并用终态收敛。0 表示不覆盖（只确认自己）。
+    queue_tip: int = 0

@@ -108,6 +108,7 @@ class MemoryProfileServiceClient:
         raw_body: bool = False,
         raw: bool = False,
         timeout: float | None = None,
+        request_headers: tuple[tuple[bytes, bytes], ...] = (),
     ) -> dict[str, Any] | MemoryProfileRawResponse:
         """Forward one caller route and return its ApiResponse object.
 
@@ -179,7 +180,7 @@ class MemoryProfileServiceClient:
             response = await self._client.request(
                 http_method,
                 self._url(path),
-                headers=headers,
+                headers=[*headers.items(), *request_headers] if request_headers else headers,
                 params=params,
                 content=body if raw_body else None,
                 json=None if raw_body else payload,
