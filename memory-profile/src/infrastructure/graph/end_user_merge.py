@@ -23,8 +23,8 @@ from dataclasses import dataclass
 from typing import Any
 
 from src.common.timing import utcnow_naive
-from src.domain.legacy_metadata_merge import merge_legacy_user_properties
-from src.domain.preference import PreferenceNode
+from src.core.domain.legacy_metadata_merge import merge_legacy_user_properties
+from src.core.domain.preference import PreferenceNode
 from src.infrastructure.graph.client import Neo4jGraphWriter
 from src.repositories.outbox import (
     OutboxEnqueueError,

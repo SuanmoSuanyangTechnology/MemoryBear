@@ -28,7 +28,7 @@ from task_bridge.metadata_migration import metadata_write_column, new_metadata
 
 from src.common.timing import utcnow_naive
 from src.config import ProfileSettings
-from src.domain.metadata_merge import merge_user_meta_data
+from src.core.domain.metadata_merge import merge_user_meta_data
 from src.infrastructure.api_tasks import dispatch_layer2_reflection
 from src.infrastructure.memory_write_lock import (
     acquire_memory_write_locks,
