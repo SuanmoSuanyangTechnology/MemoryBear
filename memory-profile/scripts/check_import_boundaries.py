@@ -16,8 +16,8 @@ READ_ONLY_PG_REPOSITORIES = {
     SERVICE_ROOT / "src/repositories/forgetting.py",
     SERVICE_ROOT / "src/repositories/display.py",
     SERVICE_ROOT / "src/repositories/perceptual.py",
-    SERVICE_ROOT / "src/repositories/profile.py",
     SERVICE_ROOT / "src/repositories/implicit_memory.py",
+    SERVICE_ROOT / "src/repositories/profile.py",
     SERVICE_ROOT / "src/repositories/reflection_logs.py",
     SERVICE_ROOT / "src/repositories/end_user.py",
     SERVICE_ROOT / "src/repositories/memory_config.py",
@@ -40,6 +40,7 @@ MIGRATION_PATHS = (
 OBSOLETE_PATHS = (
     SERVICE_ROOT / "src/api",
     SERVICE_ROOT / "src/main.py",
+    SERVICE_ROOT / "src/domain",
     SERVICE_ROOT / "src/infrastructure/celery.py",
     SERVICE_ROOT / "src/models/owned/base.py",
     SERVICE_ROOT / "src/modules/analytics/repository/cache.py",
