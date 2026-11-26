@@ -5,6 +5,7 @@ never used as a migration metadata target.
 """
 
 from src.models.references.end_user_model import EndUser, EndUserMerge
+from src.models.references.file_metadata_model import FileMetadata
 from src.models.references.memory_config_model import MemoryConfigRow
 from src.models.references.memory_generation_model import (
     EndUserInfo,
@@ -15,11 +16,11 @@ from src.models.references.memory_reembed_model import (
     MemoryReembedJobRow,
     MemoryReembedJobUserRow,
 )
+from src.models.references.conversation_model import Conversation
+from src.models.references.implicit_emotions_storage_model import ImplicitEmotionsStorage
 from src.models.references.memory_statistics_model import (
-    Conversation,
     DialogueEmotionRaw,
     ForgetAudit,
-    ImplicitEmotionsStorage,
     MemoryIncrement,
     MemoryMessage,
     MemoryPerceptual,
@@ -40,6 +41,7 @@ __all__ = [
     "WorkspaceDefaultModelPreset",
     "EndUserMerge",
     "ForgetAudit",
+    "FileMetadata",
     "ImplicitEmotionsStorage",
     "MemoryMessage",
     "MemoryPerceptual",

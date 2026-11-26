@@ -10,7 +10,7 @@ from sqlalchemy import select
 from src.common.normalization import parse_uuid
 from src.infrastructure.postgres import PostgresManager
 from src.models.references import EndUser
-from src.models.references.memory_statistics_model import ImplicitEmotionsStorage
+from src.models.references.implicit_emotions_storage_model import ImplicitEmotionsStorage
 from src.repositories.end_user import owned_user_select
 
 

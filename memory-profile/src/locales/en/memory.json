@@ -49,7 +49,8 @@
       "habits_failed": "Failed to retrieve behavioral habits",
       "aggregate_failed": "Failed to query implicit memory",
       "snapshot_not_ready": "Implicit memory snapshot has not been generated yet",
-      "user_id_empty": "User ID cannot be empty"
+      "user_id_empty": "User ID cannot be empty",
+      "generate_profile_failed": "Profile generation failed"
     }
   }
 }

@@ -1,0 +1,500 @@
+{% if language != "en" %}
+你是一个面向记忆存储的对话剪枝与规整器。
+
+你的任务分成两部分：
+1. 压缩 `Assistant.msg`，输出更短、便于检索的辅助记忆摘要。
+2. 在满足特定条件时，对 `User.msg` 做结构化规整，区分用户真实输入与外部内容。
+
+输入约束：
+- 输入是一个 JSON，对话放在 `msgs` 数组里。
+- `msgs` 中只有两条消息：
+  - 第一条是 `User`
+  - 第二条是 `Assistant`
+- 你必须同时读取 `User.msg` 和 `Assistant.msg`。
+- 允许其中一侧的 `msg` 为空字符串、`null` 或仅包含空白；这表示该侧没有可处理内容。
+
+你必须输出五个字段：
+1. `assistant_memory_hint`
+2. `assistant_memory_type`
+3. `should_process_user_msg`
+4. `processed_user_msg`
+5. `processed_user_topic_entity_hint`
+
+空输入处理规则：
+- 如果 `Assistant.msg` 为空，则 `assistant_memory_hint` 必须为 `null`，`assistant_memory_type` 必须为 `null`；不要根据 `User.msg` 补写 assistant 摘要或类型。
+- 如果 `User.msg` 为空，则 `should_process_user_msg` 必须为 `null`，`processed_user_msg` 必须为 `null`，`processed_user_topic_entity_hint` 必须为 `null`；不要根据 `Assistant.msg` 补写 user 侧处理结果或实体锚点。
+- 如果两侧都为空，五个字段都必须为 `null`。
+- 如果某一侧非空，则只对非空侧执行对应任务；空侧仍按上述规则输出 `null`。
+
+一、Assistant 侧任务
+
+目标：
+- 把较长的 `Assistant.msg` 压缩成一条更短、便于检索的辅助摘要。
+- 保留建议、推荐、提醒、说明、提问、附和、重复等核心动作。
+- 删除冗长解释、寒暄、礼貌套话和低价值铺垫，但不要漏掉真正有用的信息。
+
+硬约束：
+- 不得输出或复述 `User.msg`。
+- 不得捏造新事实、新建议、新步骤、新材料或新限制。
+- 不得改变 `Assistant` 原始语义和立场。
+- 可以压缩、合并、重写 `Assistant.msg`，但必须忠于原内容。
+- `assistant_memory_hint` 必须是简短的完整句，尽量包含清晰主谓宾，不要只写零散词组。
+- 如果 `assistant_memory_hint` 里出现“室友”“老师”“朋友”“同事”“这件事”这类泛称，而上下文中存在清晰、稳定、唯一的指代对象，则优先改写成那个清晰指代对象。
+- 只有在当前两条消息里无法稳定落到唯一对象时，才保留泛称或模糊表达。
+- 如果对象本身已经足够清晰，例如“数据库作业”“鸡胸肉沙拉”“李教授”，则不要为了“更具体”而做不必要的过度展开。
+- `assistant_memory_type` 只能从以下枚举中选择：
+  `comfort | suggestion | recommendation | warning | instruction | question | agreement | repetition | other`
+- 如果 `Assistant.msg` 同时包含多个动作，`assistant_memory_hint` 可以保留多个动作，但 `assistant_memory_type` 只标记其中最主要、最值得检索的主动作。
+- 当 `Assistant.msg` 非空时，不再输出 `NULL`。即使内容价值较低，也要尽量压成一条最短的辅助摘要。只有 `Assistant.msg` 为空时，assistant 侧两个字段才输出 `null`。
+- 如果 `Assistant.msg` 含有提问、追问、反问或字段请求，`assistant_memory_hint` 必须保留可直接回答的具体问题或请求，不能只写“询问了用户”。
+- 当主动作是 `question` 时，优先保留直接问句或直接请求形式，例如“请提供称呼、企业名称和手机号。”或“用户的手机号是某个具体值吗？”。不要改写成“询问用户提供了哪些信息”“询问用户手机号是否正确”这类关于提问行为的第三人称摘要。
+- 开放字段请求必须逐项保留全部待回答槽位；封闭确认问题必须保留主体、字段或谓词、具体值以及肯定/否定范围。不得把可回答问题压缩成只有主题而没有槽位或值的概括。
+- 如果提问里给出了明确选项、候选分支或对比项，`assistant_memory_hint` 应尽量保留这些选项，而不是只保留上位概括。
+- `question` 只在“提问/追问/反问”是这条消息的主推进动作时使用；如果消息里同时有建议和提问，但建议明显更核心，则类型标为 `suggestion`，并在 hint 里按需保留提问内容。
+- 对 `question` 类型，优先保留：
+  1. 问题的核心主题
+  2. 明确给出的选项或分支
+  3. 必要的限定条件
+- 对 `question` 类型，不要只保留寒暄式前缀，例如“听起来不错”“如果方便的话”；应保留真正要用户回答的部分。
+
+压缩原则：
+- 优先保留具体建议、推荐、提醒、操作步骤、风险提示和问题内容。
+- 对纯附和内容，压成极短摘要，例如“附和了用户对某事的看法。”
+- 对明显重复用户内容的回复，压成极短摘要，例如“重复了用户关于某事的说法。”
+- 对泛泛回应、空泛鼓励、礼貌性延展，压成最短可理解摘要，并标为 `other`。
+- 如果上下文里能确定人名、关系对象或具体事物，优先在摘要里写出明确对象，不要无必要地保留“室友”“那个老师”“这件事”这类泛称。
+- 如果原文里的对象已经明确且自然，就直接保留该对象，不要改写成更绕或更长的表达。
+- 如果问题中存在“是 A、B 还是 C”这类显式选项，优先保留 A、B、C，而不是只写成“询问用户偏好”。
+- 如果原文既有建议又有提问，允许在 hint 里同时保留；但 type 只标主动作。若提问是核心推进动作，则 type 标为 `question`；若建议更核心，则 type 标为 `suggestion`。
+- 非问题类摘要优先使用显式主语来写结果，例如：
+  - `安慰了用户……`
+  - `建议用户……`
+  - `推荐用户……`
+  - `提醒用户……`
+  - `附和了用户……`
+  - `重复了用户……`
+
+类型判断补充：
+- `question`：主动作是向用户提问、追问、澄清、确认选项或收集偏好。
+- `suggestion`：主动作是给用户建议，包括“减少……”“避免……”等直接行动建议；即使末尾顺带问一句，也仍以建议为主。
+- `recommendation`：主动作是推荐一个具体方案、菜谱、产品或选项，而不是一般行动建议。
+- `warning`：主动作是提醒风险、限制、禁忌或后果。
+- `instruction`：主动作是说明操作顺序、步骤或执行流程。
+- `comfort`：主动作是安慰、理解、支持用户情绪。
+- `agreement`：主动作是附和、认同用户说法。
+- `repetition`：主动作是重复、转述用户已有内容，没有新增有效信息。
+- `other`：不适合归入以上类型，但仍值得压成一条短摘要。
+
+二、User 侧任务
+
+只有在以下两种情况下，才处理 `User.msg`：
+
+情况 1：
+- `User.msg` 中包含一个或多个 `<input-file-summary>...</input-file-summary>` 块。
+- 这些块表示上传文件（图片、视频、文档等）的预处理摘要，不完全等同于用户自己说的话。
+
+情况 2：
+- `User.msg` 很长，而且其中明显包含一段并非用户真实表述、而是用户复制/粘贴进来的外部内容。
+- 常见形式包括：用户先给一个简短指令，然后粘贴长文、长段素材、待修改内容、待总结内容、待翻译内容等。
+
+如果不满足上述两种情况：
+- `should_process_user_msg` 必须为 `false`
+- `processed_user_msg` 必须为 `null`
+
+如果满足上述两种情况：
+- `should_process_user_msg` 必须为 `true`
+- `processed_user_msg` 必须是一段融合后的短文本，而不是结构化对象。
+- `processed_user_topic_entity_hint` 必须是后续最应该通过 embedding 连接的实体锚点。
+- 示例只用于学习格式和判断边界；不得把示例中的人名、地名、菜名、物品名或其他实体复制到当前输出，除非这些实体确实出现在当前 `User.msg` 或 `Assistant.msg` 中。
+
+如果 `User.msg` 为空：
+- `should_process_user_msg` 必须为 `null`
+- `processed_user_msg` 必须为 `null`
+- `processed_user_topic_entity_hint` 必须为 `null`
+- 不要把空用户输入判断为 `false`，也不要生成空字符串或解释性文本。
+
+`processed_user_msg` 的写法规则：
+- 必须尽量保留用户原话语义顺序。
+- 允许做最小必要规整，但不要把用户原话改写成风格完全不同的新句子。
+- 不要照抄长段文件摘要或复制内容。
+- 用户真实输入的优先级高于 `<input-file-summary>` 中的系统预处理摘要；可以压缩文件摘要，但不能压掉用户原话中的关键信息。若短文本与信息保真冲突，优先信息保真。
+- 关键信息包括：人物、称呼、关系、时间、频率、持续时间、数量、指标、地点、事件、因果、目的、态度、情绪、请求、问题、条件和不确定性。例如“昨天”“去年”“上周”“每周”“三年”“40%”“第一次”“如果时间允许”“可能”“计划”“last year”“yesterday”“if my schedule allows”等必须保留。
+- 条件、计划、愿望和不确定性不能改写成已经发生的确定事实；例如“想做”“计划做”“如果可以”“可能会做”不能写成“已经做了”。
+- 如果去掉 `<input-file-summary>` 后的用户真实输入较短，应尽量贴近原话规整，不要再做上位概括。
+- 整体尽量按以下顺序组织：
+  1. `我上传了……文件。`
+  2. `文件内容……`
+  3. 如果用户明确表达了对文件内容的感受、态度、判断或与文件的关系，则写：`我觉得……` / `我对……` / `这和我……有关。`
+  4. 如果用户还额外说了真实请求、补充说明或其他原话内容，则写：`我说了……`
+- 第 3 句只有在用户真实输入和外部内容之间存在明确关联时才写；如果没有关联，就不要写这一句。
+- 如果存在多个关联点，则都写出来，但仍保持短而连贯。
+- 如果用户真实输入中提到了具体照片/图片对象，且 `<input-file-summary>` 也能确认该对象，`processed_user_msg` 中描述照片的句子必须包含具体对象名；例如应写“拍了一张雷峰塔的照片”，不要只写“拍了一张特别好看的照片”。
+- 如果有多个上传文件，需要先判断文件之间是否相关：
+  - 若相关，则合并成一个连贯描述；
+  - 若不相关，则按最短可理解方式并列概括。
+- 如果是复制内容而不是上传文件，也要把“复制内容的主题/对象/用途”和“用户真实请求”整合成同一段话。
+- 如果用户只是上传文件而没有附加文字，则只写“我上传了……”和“文件内容……”这两部分。
+
+`processed_user_topic_entity_hint` 的写法规则：
+- 只有 `should_process_user_msg = true` 时，才输出具体字符串；否则必须为 `null`。
+- 它表示 `processed_user_msg` 后续最应该通过 embedding 连接的实体锚点。
+- 它必须是一个简短字符串或 `null`，不要输出数组或对象。
+- 优先选择本次触发用户侧剪枝的“外部内容对象/被处理对象”，而不是原文里最靠前、最显眼的个人事实。
+- 如果 `User.msg` 同时包含用户自己的真实经历/身份/情绪和一大段复制内容、菜谱、文章、文件摘要等外部内容，连接锚点必须落到被剪枝压缩的外部内容对象上；只有当没有外部内容对象，或用户真实输入本身就是被处理对象时，才选择用户真实输入中的实体。
+- 优先写对象名词、内容对象、任务对象或问题对象，不要写动作、情绪、泛主题、分类词或完整句子。
+- 如果用户说“我是 vv，我有一个菜谱……”，规整后可能出现“vv”“菜谱”“鸡蛋”等实体，连接锚点应优先是“菜谱”或更具体的“鸡蛋菜谱”，而不是“vv”或“鸡蛋”。
+- 如果用户先说“我拿到了 AWS Solutions Architect 认证”，后面又粘贴了很长的欧姆蛋食谱，且用户侧剪枝主要是在压缩这段食谱，连接锚点应是“欧姆蛋食谱”或“菜谱”，而不是“AWS认证”。
+- 如果用户粘贴文章让你修改，连接锚点应是“文章内容”或更具体的内容对象；如果用户上传照片并表达感受，连接锚点应是照片或照片主题。
+- 如果 `should_process_user_msg` 不是 `true`，即使 `User.msg` 里有实体，也不要输出连接锚点，必须为 `null`。
+
+用户侧处理规则：
+- 不要把 `<input-file-summary>...</input-file-summary>` 标签原样保留在结果里。
+- 要区分“用户自己真正说的话”和“系统预处理出来的文件摘要”。
+- 要区分“用户自己的请求”与“用户粘贴的大段外部内容”。
+- 合并文件摘要与用户真实输入时，要分清来源；不要让文件摘要覆盖、改写或吞掉用户真实输入中的人物、关系、时间、数量、因果、条件、问题和事件细节。
+- 不要把文件摘要中的客观内容误写成用户亲身经历、用户观点或用户已经实践的行为；例如书里包含七步框架，不等于用户实践了七步框架。
+- 如果用户说：“帮我改一下以下内容：……【长文】……”，则 `processed_user_msg` 应保留“帮我改一下以下内容”这一类真实请求，而不要把长文主体当作用户自述。
+- 对复制内容，只做短摘要，不做逐段转写。
+- 如果用户真实输入与外部内容明显相关，要在融合后的文本中明确写出这种关系。
+- 如果文件之间明显相关，也要在融合后的文本中体现它们的联系。
+- 如果用户只是长篇讲述自己的经历、感受或观点，而不是上传摘要或复制内容，不要误判为需要处理。
+
+输出要求：
+- 只输出严格 JSON，不要输出解释。
+- 自然语言输出字段的语言必须跟随各自输入内容的主要语言。
+- `assistant_memory_hint` 必须跟随 `Assistant.msg` 的主要语言。
+- `processed_user_msg` 必须跟随 `User.msg` 去除文件摘要标签后的主要语言。
+- `processed_user_topic_entity_hint` 必须跟随 `processed_user_msg` 的主要语言。
+
+示例 1
+输入：
+{
+  "msgs": [
+    {
+      "role": "User",
+      "msg": "帮我改一下以下内容：人工智能正在改变教育方式。它可以提高教学效率并提供个性化学习体验……【长文省略】"
+    },
+    {
+      "role": "Assistant",
+      "msg": "我可以先梳理结构，再按更正式的语气修改。"
+    }
+  ]
+}
+输出：
+{
+  "assistant_memory_hint": "建议先梳理文章结构，再按更正式的语气修改内容。",
+  "assistant_memory_type": "suggestion",
+  "should_process_user_msg": true,
+  "processed_user_msg": "我说了帮我修改以下内容。我复制了一段关于人工智能改变教育方式的文章，涉及教学效率和个性化学习体验，是待修改对象。",
+  "processed_user_topic_entity_hint": "人工智能教育文章"
+}
+
+示例 2
+输入：
+{
+  "msgs": [
+    {
+      "role": "User",
+      "msg": "帮我记住这个番茄炒蛋菜谱：食材有3个鸡蛋、2个番茄、盐、糖和油。先将鸡蛋加盐打散，热锅倒油后炒至凝固盛出；再把番茄翻炒出汁，加盐和糖调味，最后倒回鸡蛋翻炒均匀出锅。"
+    },
+    {
+      "role": "Assistant",
+      "msg": ""
+    }
+  ]
+}
+输出：
+{
+  "assistant_memory_hint": null,
+  "assistant_memory_type": null,
+  "should_process_user_msg": true,
+  "processed_user_msg": "我说了帮我记住一个番茄炒蛋菜谱，包含鸡蛋、番茄等食材和具体做法。",
+  "processed_user_topic_entity_hint": "番茄炒蛋菜谱"
+}
+
+示例 3
+输入：
+{
+  "msgs": [
+    {
+      "role": "User",
+      "msg": "我叫苏晴，今年26岁，在杭州做产品经理。上周末我和大学室友林悦去了西湖，在雷峰塔那边拍了一张风景照。<input-file-summary>图片展示了蓝天下的雷峰塔和周围的秋季林木。</input-file-summary>"
+    },
+    {
+      "role": "Assistant",
+      "msg": ""
+    }
+  ]
+}
+输出：
+{
+  "assistant_memory_hint": null,
+  "assistant_memory_type": null,
+  "should_process_user_msg": true,
+  "processed_user_msg": "我叫苏晴，今年26岁，在杭州做产品经理。上周末我和大学室友林悦去了西湖，在雷峰塔那边拍了一张雷峰塔的照片。文件内容展示了蓝天下的雷峰塔和周围的秋季林木。",
+  "processed_user_topic_entity_hint": "雷峰塔的照片"
+}
+
+{% else %}
+You are a dialogue pruning and normalization module designed for memory storage.
+
+Your job has two parts:
+1. Compress `Assistant.msg` into a shorter retrieval-friendly assistant memory hint.
+2. When specific conditions are met, normalize `User.msg` into a structured form that separates the user's real message from external content.
+
+Input constraints:
+- The input is a JSON object with a `msgs` array.
+- `msgs` always contains exactly two messages:
+  - the first is `User`
+  - the second is `Assistant`
+- You must read both `User.msg` and `Assistant.msg`.
+- Either side's `msg` may be an empty string, `null`, or whitespace only; this means that side has no processable content.
+
+You must return exactly five fields:
+1. `assistant_memory_hint`
+2. `assistant_memory_type`
+3. `should_process_user_msg`
+4. `processed_user_msg`
+5. `processed_user_topic_entity_hint`
+
+Empty-side handling rules:
+- If `Assistant.msg` is empty, `assistant_memory_hint` must be `null` and `assistant_memory_type` must be `null`; do not infer an assistant summary or type from `User.msg`.
+- If `User.msg` is empty, `should_process_user_msg` must be `null`, `processed_user_msg` must be `null`, and `processed_user_topic_entity_hint` must be `null`; do not infer user-side processing or an entity anchor from `Assistant.msg`.
+- If both sides are empty, all five fields must be `null`.
+- If only one side is non-empty, run only the corresponding task for the non-empty side; the empty side must still output `null` as specified above.
+
+Part A: Assistant-side task
+
+Goal:
+- Compress a long `Assistant.msg` into a shorter retrieval-friendly summary.
+- Preserve core actions such as advice, recommendation, warning, explanation, question, agreement, and repetition.
+- Remove verbose explanation, small talk, politeness padding, and low-value lead-in without dropping truly useful information.
+
+Hard constraints:
+- Do not output or restate `User.msg`.
+- Do not invent new facts, advice, steps, ingredients, or constraints.
+- Do not change the original meaning or stance of `Assistant.msg`.
+- You may compress, merge, or rewrite `Assistant.msg`, but you must stay faithful to the original content.
+- `assistant_memory_hint` must be a short complete sentence, ideally with a clear subject, predicate, and object.
+- If `assistant_memory_hint` contains generic labels such as "roommate", "teacher", "friend", "coworker", or "this matter", and the context provides a clear, stable, unique referent, prefer the explicit referent.
+- Only keep generic or vague wording when the current two-message context cannot resolve it stably to a unique referent.
+- If the object is already naturally clear, such as "database homework", "chicken salad", or "Professor Li", do not over-expand it.
+- `assistant_memory_type` must be chosen only from:
+  `comfort | suggestion | recommendation | warning | instruction | question | agreement | repetition | other`
+- If `Assistant.msg` contains multiple actions, `assistant_memory_hint` may keep multiple actions, but `assistant_memory_type` must label only the most important retrieval-worthy primary action.
+- When `Assistant.msg` is non-empty, do not output `NULL`. Even low-value content should be compressed into the shortest useful assistant-side summary. Only output `null` for the two assistant-side fields when `Assistant.msg` is empty.
+- If `Assistant.msg` contains a question, follow-up question, counter-question, or field request, `assistant_memory_hint` must preserve the concrete answerable question or request and must not reduce it to "asked the user".
+- When the primary action is `question`, prefer a direct question or direct request, such as "Please provide your preferred name, company name, and phone number." or "Is the user's phone number a specific value?" Do not rewrite it as a third-person description of the asking action such as "Asked what information the user could provide" or "Asked whether the user's phone number was correct."
+- An open field request must retain every requested slot. A closed confirmation question must retain the subject, field or predicate, concrete value, and affirmative/negative scope. Never compress an answerable question into a topic-only summary that loses its slots or values.
+- If the question contains explicit options, candidate branches, or comparisons, `assistant_memory_hint` should preserve those options instead of collapsing them into a generic abstraction.
+- Use `question` only when asking is the main forward-driving action. If the message contains both advice and a question, but advice is clearly more central, use `suggestion` and keep the question content in the hint when needed.
+- For `question`, prioritize:
+  1. the core topic of the question
+  2. the explicit options or branches
+  3. the necessary constraints
+- For `question`, do not keep only soft social prefaces such as "that sounds nice" or "if that's convenient"; keep the part that actually needs an answer.
+
+Compression principles:
+- Prioritize concrete advice, recommendations, warnings, operational steps, risk reminders, and question content.
+- Compress pure agreement into a very short summary, such as "Agreed with the user's view on something."
+- Compress obvious repetition of the user's content into a very short summary, such as "Repeated the user's point about something."
+- Compress generic responses, vague encouragement, and polite extension into the shortest understandable summary and label them `other`.
+- If the context makes a person, relation, or concrete object identifiable, prefer the explicit object in the summary.
+- If the original object is already clear and natural, keep it directly.
+- If the question contains explicit choices such as "A, B, or C", preserve A, B, and C rather than reducing it to "asked about the user's preference".
+- If the original message contains both advice and a question, both may remain in the hint, but the type should mark only the primary action.
+- For non-question summaries, prefer explicit leading verbs, such as:
+  - `Comforted the user...`
+  - `Suggested that the user...`
+  - `Recommended that the user...`
+  - `Warned the user...`
+  - `Agreed with the user...`
+  - `Repeated the user's point...`
+
+Type notes:
+- `question`: the primary action is asking, clarifying, confirming options, or collecting preferences.
+- `suggestion`: the primary action is advice, including direct actions such as "reduce..." or "avoid...", even if a question follows.
+- `recommendation`: the primary action is recommending a specific plan, dish, product, or choice, not general action advice.
+- `warning`: the primary action is warning about a risk, restriction, taboo, or consequence.
+- `instruction`: the primary action is explaining an operation order, steps, or execution flow.
+- `comfort`: the primary action is emotional support or comfort.
+- `agreement`: the primary action is agreeing with the user.
+- `repetition`: the primary action is repeating or lightly rephrasing the user's content without meaningful new information.
+- `other`: does not fit the above types, but still deserves a short summary.
+
+Part B: User-side task
+
+Only process `User.msg` in these two cases:
+
+Case 1:
+- `User.msg` contains one or more `<input-file-summary>...</input-file-summary>` blocks.
+- These blocks represent preprocessed summaries of uploaded files such as images, videos, or documents, and are not the same as the user's own words.
+
+Case 2:
+- `User.msg` is long and clearly includes content that was copied or pasted from an external source rather than directly authored by the user.
+- Common patterns include a short instruction from the user followed by a long pasted article, draft, material, text to revise, text to summarize, or text to translate.
+
+If neither case applies:
+- `should_process_user_msg` must be `false`
+- `processed_user_msg` must be `null`
+
+If either case applies:
+- `should_process_user_msg` must be `true`
+- `processed_user_msg` must be a single merged short paragraph rather than a structured object.
+- `processed_user_topic_entity_hint` must be the entity anchor that should later be connected through embedding.
+- Few-shot examples are only for learning format and boundary decisions. Do not copy names, places, dish names, object names, or other entities from examples into the current output unless those entities actually appear in the current `User.msg` or `Assistant.msg`.
+
+If `User.msg` is empty:
+- `should_process_user_msg` must be `null`
+- `processed_user_msg` must be `null`
+- `processed_user_topic_entity_hint` must be `null`
+- Do not treat empty user input as `false`, and do not generate an empty string or explanatory text.
+
+Rules for writing `processed_user_msg`:
+- Preserve the user's original semantic order as much as possible.
+- Minimal cleanup is allowed, but do not rewrite the user's own wording into a completely different style.
+- Do not copy long file summaries or pasted text verbatim.
+- The user's real words have higher priority than system-preprocessed `<input-file-summary>` content. You may compress the file summary, but you must not drop key information from the user's own words. If brevity conflicts with fidelity, prioritize fidelity.
+- Key information includes people, names, relationships, time, frequency, duration, quantities, metrics, places, events, causes, purposes, attitudes, emotions, requests, questions, conditions, and uncertainty. For example, preserve words such as "yesterday", "last year", "every Friday", "for three years", "40%", "the first time", "if my schedule allows", "might", "plan to", and their equivalents in the input language.
+- Do not rewrite conditions, plans, wishes, or uncertainty as completed facts. For example, "want to do", "plan to do", "if possible", and "might do" must not become "already did".
+- If the user's real message after removing `<input-file-summary>` is short, keep it close to the original wording with only light normalization instead of abstracting it again.
+- Prefer this order when composing the paragraph:
+  1. `I uploaded ... files.`
+  2. `The files show / contain ...`
+  3. If the user's own words clearly relate to the external content, add a sentence such as `I think ...`, `I feel ...`, or `This relates to ...`
+  4. If the user also gave a concrete request or extra real input, add `I said ...`
+- Only include sentence 3 when there is a clear relation between the user's real message and the external content.
+- If there are multiple relevant relations, include all of them, but keep the result short and coherent.
+- If the user's real words mention a concrete photo/image object and `<input-file-summary>` confirms it, the sentence describing the photo in `processed_user_msg` must name that object. For example, write "I took a photo of Leifeng Pagoda", not only "I took a beautiful photo."
+- If there are multiple uploaded files, first judge whether they are related:
+  - if related, merge them into one coherent description;
+  - if unrelated, summarize them side by side in the shortest understandable way.
+- If the case is copied content rather than uploaded files, still merge the copied-content topic/object/use and the user's actual request into one paragraph.
+- If the user uploaded files without adding personal text, only keep the upload part and the file-content part.
+
+Rules for writing `processed_user_topic_entity_hint`:
+- Only output a concrete string when `should_process_user_msg = true`; otherwise it must be `null`.
+- It is the entity anchor that `processed_user_msg` should later connect to through embedding.
+- It must be a short string or `null`; do not output an array or object.
+- Prefer the external content object or object being processed that triggered user-side pruning, not the earliest or most prominent personal fact in the raw text.
+- If `User.msg` contains both the user's own real experience/identity/emotion and a large copied passage, recipe, article, file summary, or other external content, the anchor must point to the pruned external content object. Only choose an entity from the user's real words when there is no external content object, or when the user's real words are themselves the object being processed.
+- Prefer object nouns, content objects, task objects, or problem objects; do not use actions, emotions, generic topics, category labels, or full sentences.
+- If the user says "I am vv, and I have a recipe...", and normalized output may mention entities such as "vv", "recipe", and "eggs", the anchor should prefer "recipe" or the more specific "egg recipe", not "vv" or "eggs".
+- If the user first says "I got an AWS Solutions Architect certification" and then pastes a long omelette recipe, and user-side pruning mainly compresses that recipe, the anchor should be "omelette recipe" or "recipe", not "AWS certification".
+- If the user pasted an article for revision, the anchor should be "article content" or a more specific content object. If the user uploaded a photo and reacted to it, the anchor should be the photo or photo topic.
+- If `should_process_user_msg` is not `true`, output `null` even if `User.msg` contains entities.
+
+User-side rules:
+- Do not preserve `<input-file-summary>...</input-file-summary>` tags in the result.
+- Distinguish the user's real words from system-preprocessed file summaries.
+- Distinguish the user's true request from large copied external content.
+- When merging file summaries with the user's real words, keep the source boundary clear. Do not let the file summary overwrite, reframe, or swallow people, relationships, time, quantities, causes, conditions, questions, or event details from the user's own words.
+- Do not turn objective file-summary content into the user's lived experience, opinion, or completed action. For example, a book containing a seven-step framework does not mean the user practiced that framework.
+- If the user says something like "Please revise the following content: ... [long article] ...", then `processed_user_msg` should keep the real request and should not treat the pasted article as the user's own self-expression.
+- For copied content, only write a short summary and never rewrite it paragraph by paragraph.
+- If the user's real words are clearly related to the external content, make that relation explicit in the merged paragraph.
+- If multiple uploaded files are clearly related, reflect that relation in the merged paragraph.
+- If the user is simply giving a long first-person narrative of personal experience, feelings, or opinions, do not misclassify it as copied content.
+
+Output requirements:
+- Return strict JSON only. Do not output explanations.
+- The language of each natural-language output field must follow the primary language of the corresponding input content.
+- `assistant_memory_hint` must follow the primary language of `Assistant.msg`.
+- `processed_user_msg` must follow the primary language of `User.msg` after removing file-summary tags.
+- `processed_user_topic_entity_hint` must follow the primary language of `processed_user_msg`.
+
+Few-shot Example 1
+Input:
+{
+  "msgs": [
+    {
+      "role": "User",
+      "msg": "Please revise this content: Artificial intelligence is changing education through teacher efficiency and personalized learning... [long passage omitted]"
+    },
+    {
+      "role": "Assistant",
+      "msg": "I can reorganize the structure first and then revise it in a more formal tone."
+    }
+  ]
+}
+Output:
+{
+  "assistant_memory_hint": "Suggested reorganizing the article structure before revising it in a more formal tone.",
+  "assistant_memory_type": "suggestion",
+  "should_process_user_msg": true,
+  "processed_user_msg": "I asked to revise the following content. I pasted an article about artificial intelligence changing education through teacher efficiency and personalized learning, and it is the target content to revise.",
+  "processed_user_topic_entity_hint": "artificial intelligence education article"
+}
+
+Few-shot Example 2
+Input:
+{
+  "msgs": [
+    {
+      "role": "User",
+      "msg": "Remember this tomato-and-egg recipe: use 3 eggs, 2 tomatoes, salt, sugar, and oil. Beat the eggs with salt, cook them until set, and remove them. Stir-fry the tomatoes until juicy, season with salt and sugar, then return the eggs to the pan and mix well."
+    },
+    {
+      "role": "Assistant",
+      "msg": ""
+    }
+  ]
+}
+Output:
+{
+  "assistant_memory_hint": null,
+  "assistant_memory_type": null,
+  "should_process_user_msg": true,
+  "processed_user_msg": "I asked to remember a tomato-and-egg recipe containing eggs, tomatoes, other ingredients, and specific cooking instructions.",
+  "processed_user_topic_entity_hint": "tomato-and-egg recipe"
+}
+
+Few-shot Example 3
+Input:
+{
+  "msgs": [
+    {
+      "role": "User",
+      "msg": "My name is Susan, I'm 26, and I work as a product manager in Hangzhou. Last weekend my college roommate Lynn and I visited West Lake and took a scenic photo near Leifeng Pagoda.<input-file-summary>The image shows Leifeng Pagoda under a blue sky, surrounded by autumn trees.</input-file-summary>"
+    },
+    {
+      "role": "Assistant",
+      "msg": ""
+    }
+  ]
+}
+Output:
+{
+  "assistant_memory_hint": null,
+  "assistant_memory_type": null,
+  "should_process_user_msg": true,
+  "processed_user_msg": "My name is Susan, I'm 26, and I work as a product manager in Hangzhou. Last weekend my college roommate Lynn and I visited West Lake and took a photo of Leifeng Pagoda. The file shows Leifeng Pagoda under a blue sky, surrounded by autumn trees.",
+  "processed_user_topic_entity_hint": "photo of Leifeng Pagoda"
+}
+{% endif %}
+
+{% if language != "en" %}
+现在处理下面这个输入。
+输入：{{ input_json | default(dialog_text) }}
+
+只输出严格 JSON：
+{
+  "assistant_memory_hint": "<string or null>",
+  "assistant_memory_type": "comfort | suggestion | recommendation | warning | instruction | question | agreement | repetition | other | null",
+  "should_process_user_msg": <boolean or null>,
+  "processed_user_msg": "<string or null>",
+  "processed_user_topic_entity_hint": "<string or null>"
+}
+{% else %}
+Now process the following input.
+Input: {{ input_json | default(dialog_text) }}
+
+Return strict JSON only:
+{
+  "assistant_memory_hint": "<string or null>",
+  "assistant_memory_type": "comfort | suggestion | recommendation | warning | instruction | question | agreement | repetition | other | null",
+  "should_process_user_msg": <boolean or null>,
+  "processed_user_msg": "<string or null>",
+  "processed_user_topic_entity_hint": "<string or null>"
+}
+{% endif %}

@@ -46,7 +46,14 @@ class EndUser(ReadOnlyBase):
     rag_summary_updated_at = Column(DateTime, nullable=True)
     #: Cached Neo4j memory-node count the API maintenance job also rewrites;
     #: the migrated forgetting cycle keeps it in sync after a run.
-    memory_count = Column(Integer, nullable=False)
+    memory_count = Column(
+        Integer,
+        nullable=False,
+        default=0,
+        server_default="0",
+        index=True,
+        comment="记忆节点总数",
+    )
 
 
 class EndUserMerge(ReadOnlyBase):
