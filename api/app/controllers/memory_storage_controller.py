@@ -138,15 +138,15 @@ async def trial_run_chat_stream(
             "Connection": "keep-alive",
             "X-Accel-Buffering": "no",
         },
-    )
+    )   
 
 
 @router.get("/analytics/hot_memory_tags", response_model=ApiResponse)
 @memory_profile_proxy(
     query_fields=("limit",),
-    # 管理端沿用 /memory-storage/analytics/... 的历史路径，转发目标仍是分析域的
-    # 同一内部路由；路径映射只影响转发，不影响身份面判定。
-    target_path="/internal/v1/memory/analytics/hot_memory_tags",
+    # 路径按调用方自己的面推导：管理端 /api/memory-storage/... 落到
+    # memory-profile 的 /internal/v1/memory-storage/analytics/hot_memory_tags，
+    # API-Key 面 /v1/memory/analytics/... 落到分析域同路径，两处共用同一实现。
 )
 async def get_hot_memory_tags_api(
         limit: int = 10,

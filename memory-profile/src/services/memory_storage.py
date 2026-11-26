@@ -12,12 +12,13 @@ from uuid import UUID
 
 from neo4j.time import DateTime as Neo4jDateTime
 
-from src.common.errors import BizCode, ProfileError
+from src.common.errors import BizCode, LocalizedProfileError, ProfileError
 from src.common.datetime_utils import parse_iso_to_utc_naive, to_timestamp_ms
 from src.schemas.event_category_models import EVENT_CATEGORY_NAMES, EVENT_CATEGORY_NAME_TO_ID
 from src.emotion.emotion_buckets import emotion_valence
 from src.repositories.end_user import EndUserRepository
 from src.repositories.memory_storage import MemoryStorageRepository
+from src.repositories.profile import WorkspaceProfileRepository
 
 if TYPE_CHECKING:
     from src.runtime import ProfileRuntime
@@ -40,6 +41,9 @@ from src.schemas.message_models import DialogData
 from src.bootstrap import get_settings
 
 logger = logging.getLogger(__name__)
+
+#: 用户名片 Tag 的字符长度上限（api ``user_card_tags.USER_CARD_TAG_MAX_LENGTH`` 同值）。
+USER_CARD_TAG_MAX_LENGTH = 12
 
 TRIAL_RUN_CHAT_SYSTEM_PROMPT = """
 You are a neutral and helpful AI assistant in a trial-run conversation. Answer
@@ -104,6 +108,7 @@ class MemoryStorageService:
             runtime.neo4j, runtime.postgres, runtime.elasticsearch
         )
         self.end_users = EndUserRepository(runtime.postgres)
+        self.workspace_profile = WorkspaceProfileRepository(runtime.postgres)
 
     async def _owner(self, element_id: str, workspace_id: UUID) -> str:
         owner = await self.repository.owner(element_id)
@@ -124,6 +129,34 @@ class MemoryStorageService:
         from src.repositories.workspace import WorkspaceRepository
 
         return await WorkspaceRepository(self.runtime.postgres).workspace_row(workspace_id)
+
+    async def workspace_hot_memory_tags(
+        self, workspace_id: UUID, limit: int
+    ) -> list[dict[str, Any]]:
+        """工作空间热门记忆标签：``end_users.memory_tags`` 跨用户精确匹配合并。
+
+        ``limit <= 0`` 时按 api 语义回落 10（api 的请求参数没有上下界校验）。
+        """
+
+        effective_limit = limit if limit > 0 else 10
+        try:
+            tags = await self.workspace_profile.hot_memory_tags(
+                workspace_id, effective_limit, USER_CARD_TAG_MAX_LENGTH
+            )
+        except Exception as exc:
+            logger.error(
+                "hot memory tags failed: workspace_id=%s error=%s",
+                workspace_id,
+                type(exc).__name__,
+                exc_info=True,
+            )
+            raise LocalizedProfileError(
+                BizCode.INTERNAL_ERROR,
+                "analytics.error.hot_memory_tags_failed",
+                detail=str(exc),
+                status_code=500,
+            ) from exc
+        return [{"name": name, "frequency": frequency} for name, frequency in tags]
 
     async def get_timeline_memories_server(self, id, label, model_id, language_type, *, workspace_id):
         """

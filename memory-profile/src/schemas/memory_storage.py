@@ -1,4 +1,4 @@
-"""Memory-storage request models preserving legacy field validation."""
+"""Memory-storage request/response models preserving legacy field validation."""
 
 import uuid
 from enum import Enum, StrEnum
@@ -248,3 +248,10 @@ class ModelInfo(BaseModel):
     channel_id: str | None = Field(None, description="用量归属：渠道ID")
     # 渠道换线计划随行透传（from_api_key 读取）；exclude 防序列化泄漏，拷贝丢失语义=退化单候选
     failover_plan: Any = Field(default=None, exclude=True, repr=False)
+
+
+class HotMemoryTag(BaseModel):
+    """工作空间热门记忆标签条目（``end_users.memory_tags`` 聚合结果）。"""
+
+    name: str
+    frequency: int
