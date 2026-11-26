@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from typing import Any
 
 from error_core.codes import BizCode
 from error_core.diagnostics import format_diagnostics
@@ -103,7 +104,16 @@ def _business_http_status(request: Request, error: KnowledgeError) -> int:
         return 500
     if error.status_code == 400:
         module = getattr(endpoint, "__module__", "")
-        if module in {"src.api.routes.knowledge", "src.api.routes.document", "src.api.routes.file"}:
+        if module == "src.api.routes.file_v1":
+            return {
+                "KB_UPLOAD_FILE_EMPTY": 422,
+                "KB_UPLOAD_FILE_SIZE_LIMIT": 413,
+                "KB_PARENT_FOLDER_NOT_FOUND": 404,
+            }.get(error.code, error.status_code)
+        if module in {
+            "src.api.routes.knowledge", "src.api.routes.document", "src.api.routes.file",
+            "src.api.routes.document_v1",
+        }:
             if error.code == _RESOURCE_NOT_FOUND.get(operation):
                 return 404
             if error.code in _KNOWLEDGE_CONFLICTS.get(operation, ()):
@@ -131,11 +141,12 @@ def _response(
     message: str,
     headers: Mapping[str, str] | None = None,
     diagnostic: str = "",
+    data: dict[str, Any] | None = None,
 ) -> JSONResponse:
     response = JSONResponse(
         status_code=status_code,
         headers=dict(headers or {}),
-        content=fail(code=response_code, msg=message, error=diagnostic),
+        content=fail(code=response_code, msg=message, error=diagnostic, data=data),
     )
     response.headers[TRACE_ID_HEADER] = getattr(request.state, "trace_id", get_trace_id())
     response.headers["Content-Language"] = request_locale(request)
@@ -174,6 +185,7 @@ def render_error(
     exception: BaseException | None = None,
     validation_errors: list[dict] | None = None,
     headers: Mapping[str, str] | None = None,
+    data: dict[str, Any] | None = None,
 ) -> JSONResponse:
     """Log every business failure, including direct HTTP-200 failure responses."""
     if error.code in {
@@ -188,6 +200,9 @@ def render_error(
     else:
         message = knowledge_message(response_code, request_locale(request))
         log_message = knowledge_message(response_code, "en")
+    if error.code == "KB_KNOWLEDGE_FIELD_IMMUTABLE":
+        message = message.format(field=error.params["field"])
+        log_message = log_message.format(field=error.params["field"])
     log_request_failure(
         request,
         status_code=status_code,
@@ -205,6 +220,7 @@ def render_error(
         response_code=response_code,
         message=message,
         headers=headers,
+        data=data,
         diagnostic=format_diagnostics(
             trace_id=getattr(request.state, "trace_id", get_trace_id()),
             detail=(
@@ -277,9 +293,12 @@ def register_error_handlers(application: FastAPI) -> None:
                 "quota_limit": float(exc.limit_gb),
             },
         )
+        module = getattr(request.scope.get("endpoint"), "__module__", "")
+        if module not in {"src.api.routes.knowledge_v1", "src.api.routes.file_v1"}:
+            body = {"success": False, "message": message, "error_code": "QUOTA_EXCEEDED", **body}
         return JSONResponse(
             status_code=402,
-            content={"success": False, "message": message, "error_code": "QUOTA_EXCEEDED", **body},
+            content=body,
             headers={
                 TRACE_ID_HEADER: getattr(request.state, "trace_id", get_trace_id()),
                 "Content-Language": language,
@@ -311,6 +330,20 @@ def register_error_handlers(application: FastAPI) -> None:
             )
         endpoint = request.scope.get("endpoint")
         identity = (getattr(endpoint, "__module__", ""), getattr(endpoint, "__name__", ""))
+        if identity[0] in {
+            "src.api.routes.knowledge_v1", "src.api.routes.document_v1",
+            "src.api.routes.file_v1",
+        }:
+            errors = [
+                {"loc": error["loc"][:-1] + ("<extra>",)
+                 if error["type"] == "extra_forbidden" else error["loc"],
+                 "type": error["type"], "msg": "Invalid field"}
+                for error in exc.errors()
+            ]
+            return render_error(
+                request, KnowledgeError.from_code("KB_VALIDATION_ERROR", status_code=422),
+                validation_errors=errors,
+            )
         code = _VALIDATION_CONTRACTS.get(identity)
         if code is None:
             log_request_failure(

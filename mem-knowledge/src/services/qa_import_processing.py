@@ -8,6 +8,7 @@ import logging
 import time
 import uuid
 from dataclasses import dataclass
+from typing import cast
 
 from redbear_model import QWEN3_VL_EMBEDDING_DIMENSION
 
@@ -21,6 +22,7 @@ from ..rag.models.retrieval_unit import RetrievalUnitKind
 from ..rag.models.task_runtime import TaskModelFactory
 from ..rag.vdb.field import Field
 from ..rag.vdb.vector_store import TaskVectorStore
+from ..repositories.parser_configuration import ParserConfigurationRepository
 from ..runtime import ProcessRuntime
 from ..tasks.observability import BusinessOutcome, TaskRun
 from ..utils.datetime_utils import to_iso_z, to_timestamp_ms, utcnow, utcnow_naive
@@ -47,8 +49,9 @@ class _QAImportSnapshot:
     file_id: str
     file_name: str
     file_created_at: int | None
-    embedding_id: uuid.UUID
+    embedding_id: uuid.UUID | None
     tenant_id: uuid.UUID
+    rag_enabled: bool
 
 
 def _progress_ts() -> str:
@@ -80,15 +83,20 @@ def _mark_running(
         workspace = session.get(Workspace, knowledge.workspace_id)
         if workspace is None:
             raise _SafeQAImportError("knowledge workspace not found")
-        if knowledge.embedding_id is None:
+        configuration = ParserConfigurationRepository(session).get_effective_knowledge(kb_id)
+        if configuration is None:
+            raise _SafeQAImportError("knowledge configuration not found")
+        rag_enabled = configuration.index_strategy in {"rag", "rag_wiki"}
+        if rag_enabled and knowledge.embedding_id is None:
             raise _SafeQAImportError(f"embedding_id config error: {knowledge.id}")
 
         snapshot = _QAImportSnapshot(
             file_id=str(document.file_id),
             file_name=document.file_name,
             file_created_at=to_timestamp_ms(document.created_at),
-            embedding_id=knowledge.embedding_id,
+            embedding_id=cast(uuid.UUID | None, knowledge.embedding_id),
             tenant_id=workspace.tenant_id,
+            rag_enabled=rag_enabled,
         )
         progress_lines.append(f"{_progress_ts()} Start to import QA.")
         from .wiki.source import apply_source_update
@@ -351,18 +359,22 @@ def process_qa_import(
         )
 
         error_code = "KB_QA_MODEL_INIT_FAILED"
+        embeddings = None
+        multimodal = False
         try:
-            with run.stage("resolve_embedding"):
-                embedding_config = TaskModelFactory(runtime).resolve_embedding(
-                    snapshot.embedding_id,
-                    snapshot.tenant_id,
-                )
-                multimodal = is_qwen3_vl_embedding_view(embedding_config)
-                embeddings = RedBearEmbeddings.for_invoke_ref(
-                    ref_from_view(embedding_config, snapshot.tenant_id),
-                    pool=runtime.model_runtime,
-                    multimodal=multimodal,
-                )
+            if snapshot.rag_enabled:
+                with run.stage("resolve_embedding"):
+                    assert snapshot.embedding_id is not None
+                    embedding_config = TaskModelFactory(runtime).resolve_embedding(
+                        snapshot.embedding_id,
+                        snapshot.tenant_id,
+                    )
+                    multimodal = is_qwen3_vl_embedding_view(embedding_config)
+                    embeddings = RedBearEmbeddings.for_invoke_ref(
+                        ref_from_view(embedding_config, snapshot.tenant_id),
+                        pool=runtime.model_runtime,
+                        multimodal=multimodal,
+                    )
         except Exception:
             raise _SafeQAImportError("QA model initialization failed") from None
 
@@ -373,6 +385,7 @@ def process_qa_import(
                     runtime.elasticsearch.sync_client(),
                     normalized_kb_id,
                     embeddings,
+                    vectorize=snapshot.rag_enabled,
                     structured_multimodal=multimodal,
                     embedding_dimension=QWEN3_VL_EMBEDDING_DIMENSION if multimodal else None,
                 )

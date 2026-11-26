@@ -71,7 +71,7 @@ async def validate_requested_knowledge_model_availability(
         checked.add(model_id)
 
 
-def _matches_knowledge_model_field(field_name: str, model: ModelConfigSnapshot) -> bool:
+def matches_knowledge_model_field(field_name: str, model: ModelConfigSnapshot) -> bool:
     """Match the same media capabilities and providers used by knowledge processing."""
     if model.profile.type != _MODEL_FIELD_TYPES[field_name]:
         return False
@@ -109,5 +109,5 @@ async def validate_requested_knowledge_models(
                 raise model_error(MODEL_FIELD_ROLES[field_name], ModelFailure.CONFIG_INVALID)
             configs[model_id] = config
         model = configs[model_id]
-        if not _matches_knowledge_model_field(field_name, model):
+        if not matches_knowledge_model_field(field_name, model):
             raise model_error(MODEL_FIELD_ROLES[field_name], ModelFailure.CAPABILITY_MISMATCH)

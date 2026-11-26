@@ -11,15 +11,15 @@ from collections.abc import AsyncIterator
 from contextlib import aclosing
 from copy import deepcopy
 from dataclasses import dataclass
+from dataclasses import field as dataclass_field
 from hashlib import sha256
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any, Literal, cast
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..api.dependencies import Principal
-from ..api.schemas.document import Document as DocumentSchema
 from ..api.schemas.document import DocumentCreate
 from ..api.schemas.file import File as FileSchema
 from ..api.schemas.file import FileCreate, FileUpdate
@@ -32,18 +32,25 @@ from ..models.owned import (
     Knowledge,
     UploadFingerprint,
 )
+from ..parser_configuration import DocumentConfiguration, to_legacy
+from ..parser_configuration.legacy import document_configuration_from_legacy
 from ..rag.knowledge_graph import GraphPipelineConfigError
 from ..rag.parser_config import normalize_document_parser_config
 from ..repositories import document as document_repository
 from ..repositories import file as file_repository
+from ..repositories.parser_configuration import document_configuration, knowledge_configuration
 from . import knowledge as knowledge_service
 from .folder_hierarchy import validate_file_hierarchy
 from .knowledge_file_storage import KnowledgeFileStorage, generate_kb_file_key
+from .legacy_projection import document_to_data as document_to_data
 from .qa_export import cleanup_export_file, iter_export_file
 from .write_validation import validate_file_size_text, validate_write_fields
 
 logger = logging.getLogger(__name__)
 ZIP_STREAM_CHUNK_SIZE = 1024 * 1024
+
+if TYPE_CHECKING:
+    from ..runtime import ProcessRuntime
 
 
 @dataclass(frozen=True)
@@ -78,8 +85,12 @@ class UploadPlan:
     file_ext: str
     file_size: int
     parser_id: str
-    parser_config: dict[str, Any]
+    configuration: DocumentConfiguration
     digest: str | None = None
+
+    @property
+    def parser_config(self) -> dict[str, Any]:
+        return to_legacy(self.configuration)
 
 
 @dataclass(frozen=True)
@@ -87,6 +98,39 @@ class UploadOutcome:
     file_id: uuid.UUID
     document_id: uuid.UUID
     document_data: dict[str, Any]
+
+
+@dataclass
+class UploadSaveResult:
+    """Observed save facts, including identity when COMMIT cannot be confirmed.
+
+    object_saved records an acknowledged upload, even if legacy compensation
+    subsequently removes it. Starting COMMIT alone never proves a rollback.
+    """
+
+    file_id: uuid.UUID
+    file_key: str
+    document_id: uuid.UUID | None = None
+    object_saved: bool = False
+    commit_started: bool = False
+    committed: bool = False
+    outcome: UploadOutcome | None = dataclass_field(default=None, repr=False)
+    error: Exception | None = dataclass_field(default=None, repr=False)
+
+    @property
+    def state(self) -> Literal["not_saved", "committed", "not_committed", "commit_unknown"]:
+        if self.committed:
+            return "committed"
+        if self.commit_started:
+            return "commit_unknown"
+        return "not_committed" if self.object_saved else "not_saved"
+
+    def unwrap(self) -> UploadOutcome:
+        """Adapt back to the legacy result or original exception type."""
+        if self.error is not None:
+            raise self.error
+        assert self.outcome is not None
+        return self.outcome
 
 
 @dataclass(frozen=True)
@@ -112,10 +156,6 @@ def _not_found(code: str = "KB_FILE_NOT_FOUND") -> KnowledgeError:
 
 def file_to_data(file: File) -> dict[str, Any]:
     return FileSchema.model_validate(file).model_dump(mode="json")
-
-
-def document_to_data(document: Document) -> dict[str, Any]:
-    return DocumentSchema.model_validate(document).model_dump(mode="json")
 
 
 async def get_file(
@@ -199,6 +239,7 @@ async def list_files(
     orderby: str | None,
     desc: bool,
     keywords: str | None,
+    file_ext: str | None = None,
 ) -> tuple[int, list[dict[str, Any]]]:
     if await knowledge_service.get_knowledge(db, kb_id, principal) is None:
         raise KnowledgeError.from_code("KB_KNOWLEDGE_NOT_FOUND")
@@ -208,6 +249,8 @@ async def list_files(
         filters.append(File.parent_id == parent_id)
     if keywords:
         filters.append(File.file_name.ilike(f"%{keywords}%"))
+    if file_ext is not None:
+        filters.append(File.file_ext == file_ext)
     total, files = await file_repository.get_files_paginated_async(
         db,
         filters,
@@ -263,8 +306,8 @@ def _document_parser_config(knowledge: Knowledge, *, inherit: bool) -> dict[str,
         "auto_questions": 0,
         "html4excel": "false",
     }
-    if inherit and knowledge.parser_config:
-        config.update(dict(knowledge.parser_config))
+    if inherit:
+        config.update(to_legacy(knowledge_configuration(knowledge)))
     return config
 
 
@@ -298,6 +341,9 @@ async def upload_content(
         )
     except (ValueError, GraphPipelineConfigError) as exc:
         raise KnowledgeError.from_code("KB_DOCUMENT_PARSER_CONFIG_INVALID") from exc
+    configuration = document_configuration_from_legacy(
+        normalized_parser_config, knowledge_configuration(knowledge)
+    )
     await require_parent_folder(db, kb_id, parent_id, principal)
     file_id = uuid.uuid4()
     digest = (await to_thread(sha256, content)).hexdigest() if record_fingerprint else None
@@ -311,7 +357,7 @@ async def upload_content(
         file_ext=file_ext,
         file_size=len(content),
         parser_id=parser_id,
-        parser_config=deepcopy(normalized_parser_config),
+        configuration=configuration,
         digest=digest,
     )
 
@@ -322,9 +368,11 @@ async def persist_uploaded_content(
     principal: Principal,
     *,
     commit: bool = True,
+    save_result: UploadSaveResult | None = None,
 ) -> UploadOutcome:
     """Revalidate ownership and atomically persist a planned upload."""
 
+    save_result = save_result or UploadSaveResult(plan.file_id, plan.file_key, object_saved=True)
     if plan.created_by != principal.actor_id:
         raise KnowledgeError.from_code("KB_KNOWLEDGE_NOT_FOUND")
     if await knowledge_service.get_knowledge(db, plan.kb_id, principal) is None:
@@ -357,7 +405,9 @@ async def persist_uploaded_content(
                 parser_id=plan.parser_id,
                 parser_config=deepcopy(plan.parser_config),
             ),
+            configuration=plan.configuration,
         )
+        save_result.document_id = cast(uuid.UUID, document.id)
         if plan.digest is not None:
             db.add(UploadFingerprint(file_id=db_file.id, kb_id=plan.kb_id, digest=plan.digest))
         await db.refresh(document)
@@ -366,12 +416,50 @@ async def persist_uploaded_content(
             document_id=document.id,
             document_data=document_to_data(document),
         )
+        save_result.outcome = outcome
         if commit:
+            save_result.commit_started = True
             await db.commit()
+            save_result.committed = True
         return outcome
     except Exception:
         await db.rollback()
         raise
+
+
+async def save_upload_result(
+    runtime: ProcessRuntime,
+    storage: KnowledgeFileStorage,
+    plan: UploadPlan,
+    principal: Principal,
+    content: bytes,
+    content_type: str | None,
+) -> UploadSaveResult:
+    """Save without choosing a response or compensation policy for the caller."""
+    result = UploadSaveResult(plan.file_id, plan.file_key)
+    try:
+        await storage.upload(plan.file_key, content, content_type)
+        result.object_saved = True
+        async with runtime.database.async_session() as db:
+            await persist_uploaded_content(db, plan, principal, save_result=result)
+    except Exception as exc:
+        result.error = exc
+    return result
+
+
+async def save_upload(
+    runtime: ProcessRuntime,
+    storage: KnowledgeFileStorage,
+    plan: UploadPlan,
+    principal: Principal,
+    content: bytes,
+    content_type: str | None,
+) -> UploadOutcome:
+    """Keep ordinary/text/QA upload compensation, including uncertain commits."""
+    result = await save_upload_result(runtime, storage, plan, principal, content, content_type)
+    if result.error is not None and result.object_saved and not result.committed:
+        await compensate_storage_upload(storage, plan.file_key)
+    return result.unwrap()
 
 
 async def compensate_storage_upload(
@@ -513,7 +601,7 @@ async def get_qa_export_spec(
 ) -> QAExportSpec | None:
     result = await db.execute(select(Document).where(Document.file_id == file.id))
     document = result.scalars().first()
-    if document is None or (document.parser_config or {}).get("doc_type") != "qa":
+    if document is None or document_configuration(document).doc_type != "qa":
         return None
     return QAExportSpec(
         kb_id=file.kb_id,

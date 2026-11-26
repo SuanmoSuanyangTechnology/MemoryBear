@@ -31,9 +31,13 @@ class TaskNotPublishedError(KnowledgeError):
 class TaskDispatcher:
     """Validate and publish messages for the existing knowledge workers."""
 
-    def __init__(self, application: Any = celery_app, *, runtime: Any = None):
+    def __init__(
+        self, application: Any = celery_app, *, runtime: Any = None,
+        classify_preparation_errors: bool = False,
+    ):
         self._application = application
         self._runtime = runtime
+        self._classify_preparation_errors = classify_preparation_errors
 
     async def send(
         self,
@@ -92,7 +96,12 @@ class TaskDispatcher:
                 document_id = args[1]
             if document_id is not None:
                 task_id = task_id or str(uuid.uuid4())
-                prepare_source_dispatch(self._runtime, document_id, task_id)
+                try:
+                    prepare_source_dispatch(self._runtime, document_id, task_id)
+                except Exception as exc:
+                    if self._classify_preparation_errors:
+                        raise TaskNotPublishedError() from exc
+                    raise
         try:
             send_task_kwargs: dict[str, Any] = {
                 "args": list(args or ()),

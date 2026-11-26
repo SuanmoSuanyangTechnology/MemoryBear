@@ -3,7 +3,7 @@
 from typing import Annotated, Optional
 import uuid
 
-from fastapi import APIRouter, Body, Depends, Request, Query
+from fastapi import APIRouter, Body, Depends, Request, Query, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.controllers import knowledge_controller
@@ -12,6 +12,7 @@ from app.core.logging_config import get_business_logger
 from app.core.response_utils import success
 from app.db import get_async_db
 from app.integrations.knowledge.contracts import KnowledgeRetrievalSource
+from app.integrations.knowledge.errors import KnowledgeUnavailableError
 from app.integrations.knowledge.route_proxy import route_through_knowledge_service
 from app.models import knowledge_model
 from app.schemas import knowledge_schema
@@ -27,6 +28,19 @@ from app.services.rag_access_service import (
 router = APIRouter(prefix="/knowledges", tags=["V1 - RAG API"])
 api_logger = get_business_logger()
 knowledge_controller = unwrap_current_workspace_guard(knowledge_controller)
+
+
+# Decorators register from the bottom up, so the fixed path precedes the ID route.
+@router.get("/v1/{knowledge_id}", include_in_schema=False)
+@router.patch("/v1/{knowledge_id}", include_in_schema=False)
+@router.get("/v1/{kb_id}/documents", include_in_schema=False)
+@router.get("/v1/configuration-options", include_in_schema=False)
+@router.get("/v1", include_in_schema=False)
+@router.post("/v1", include_in_schema=False)
+@require_api_key_self_db(scopes=["rag"])
+@route_through_knowledge_service(source=KnowledgeRetrievalSource.EXTERNAL_API, require_remote=True)
+async def forward_knowledge_v1(request: Request) -> Response:
+    raise KnowledgeUnavailableError("Versioned knowledge API requires the remote service")
 
 
 @router.get("/knowledgetype", response_model=ApiResponse)

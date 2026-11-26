@@ -3,7 +3,7 @@
 from typing import Optional
 import uuid
 
-from fastapi import APIRouter, Body, Depends, Request, Query
+from fastapi import APIRouter, Body, Depends, Request, Query, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.controllers import document_controller
@@ -11,6 +11,7 @@ from app.core.api_key_auth import require_api_key_self_db
 from app.core.logging_config import get_business_logger
 from app.db import get_async_db
 from app.integrations.knowledge.contracts import KnowledgeRetrievalSource
+from app.integrations.knowledge.errors import KnowledgeUnavailableError
 from app.integrations.knowledge.route_proxy import route_through_knowledge_service
 from app.schemas import document_schema
 from app.schemas.api_key_schema import ApiKeyAuth
@@ -25,6 +26,14 @@ from app.services.rag_access_service import (
 router = APIRouter(prefix="/documents", tags=["V1 - RAG API"])
 api_logger = get_business_logger()
 document_controller = unwrap_current_workspace_guard(document_controller)
+
+
+@router.get("/v1/{document_id}", include_in_schema=False)
+@router.post("/v1/{document_id}/rechunk", include_in_schema=False)
+@require_api_key_self_db(scopes=["rag"])
+@route_through_knowledge_service(source=KnowledgeRetrievalSource.EXTERNAL_API, require_remote=True)
+async def forward_document_v1(request: Request) -> Response:
+    raise KnowledgeUnavailableError("Versioned knowledge API requires the remote service")
 
 
 @router.get("/{kb_id}/documents", response_model=ApiResponse)

@@ -8,6 +8,13 @@ import sys
 from pathlib import Path
 
 EXPECTED_OWNED_TABLES = {
+    "knowledge_parser_configs",
+    "document_parser_configs",
+    "knowledge_upload_fingerprints",
+    "wiki_faqs",
+    "wiki_faq_generation_jobs",
+    "wiki_faq_import_jobs",
+    "wiki_page_versions",
     "wiki_folders",
     "wiki_pages",
     "wiki_page_sources",
@@ -31,6 +38,13 @@ EXPECTED_REFERENCE_TABLES = {
 }
 
 OWNED_MODEL_NAMES = {
+    "KnowledgeParserConfig",
+    "DocumentParserConfig",
+    "UploadFingerprint",
+    "WikiFAQ",
+    "WikiFAQGenerationJob",
+    "WikiFAQImportJob",
+    "WikiPageVersion",
     "WikiFolder",
     "WikiPage",
     "WikiPageSource",

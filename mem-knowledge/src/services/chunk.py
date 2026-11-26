@@ -2,13 +2,12 @@
 
 from __future__ import annotations
 
-import base64
+import asyncio
 import logging
-import mimetypes
 import uuid
 from dataclasses import dataclass, field
 from functools import partial
-from typing import Any
+from typing import Any, cast
 
 from redbear_model import (
     QWEN3_VL_EMBEDDING_DIMENSION,
@@ -23,24 +22,35 @@ from ..api.dependencies import Principal
 from ..api.schemas.chunk import ChunkCreate, ChunkType
 from ..error_mapping import map_model_error
 from ..errors import KnowledgeError
-from ..integrations.model.chat import RedBearChatModel
 from ..integrations.model.embedding import RedBearEmbeddings
 from ..integrations.model.errors import ModelInvokeClientError
 from ..integrations.model.invoke_backend import ref_from_view
 from ..integrations.model.views import is_qwen3_vl_embedding_view
-from ..model_errors import ModelRole
+from ..model_errors import MODEL_FIELD_ROLES
 from ..models.owned import Document
+from ..parser_configuration import to_runtime
 from ..rag.chunk.metadata import merge_parser_metadata
-from ..rag.chunk.preview import preview_binary
 from ..rag.models.chunk import DocumentChunk
 from ..rag.retrieval.async_elasticsearch import AsyncChunkStore
 from ..repositories.model_registry import AsyncSQLModelRegistry
+from ..repositories.parser_configuration import (
+    AsyncParserConfigurationRepository,
+    document_configuration,
+)
+from ..repositories.reference import ReferenceRepository
 from ..runtime import ProcessRuntime
 from ..tasks.dispatch import TaskDispatcher
 from ..utils.datetime_utils import to_timestamp_ms
 from . import document as document_service
 from . import file as file_service
 from . import knowledge as knowledge_service
+from .document_models import resolve_document_models
+from .document_processing import (
+    ParseDocumentSnapshot,
+    build_document_vision_model,
+    document_media_field,
+    parse_document_chunks,
+)
 from .document_task_lifecycle import guard_chunk_mutation
 from .multimodal_image import resolve_storage_images_async
 
@@ -61,7 +71,13 @@ class ChunkDocumentSnapshot:
     parent_child_mode: bool
     parser_config: dict[str, Any]
     embedding_id: uuid.UUID | None
+    workspace_id: uuid.UUID
+    tenant_id: uuid.UUID
+    rag_enabled: bool
     image2text_id: uuid.UUID | None = None
+    audio2text_id: uuid.UUID | None = None
+    video2text_id: uuid.UUID | None = None
+    model_sources: dict[str, str | None] = field(default_factory=dict)
     graph_parser_config: dict[str, Any] = field(default_factory=dict)
     file_key: str | None = None
 
@@ -93,17 +109,35 @@ async def get_chunk_document_snapshot(
         if not file.file_key:
             raise _not_found("KB_FILE_STORAGE_KEY_MISSING")
         file_key = file.file_key
+    configuration = await AsyncParserConfigurationRepository(db).get_effective_knowledge(
+        knowledge_id
+    )
+    if configuration is None:
+        raise ValueError(f"Knowledge configuration {knowledge.id} not found")
+    workspace = await ReferenceRepository.get_workspace(
+        db, cast(uuid.UUID, knowledge.workspace_id)
+    )
+    if workspace is None:
+        raise ValueError(f"Workspace {knowledge.workspace_id} not found")
+    saved = document_configuration(document)
+    models = resolve_document_models(saved, configuration, workspace)
     return ChunkDocumentSnapshot(
         knowledge_id=knowledge.id,
         document_id=document.id,
         file_id=document.file_id,
         file_name=document.file_name,
         file_created_at=document.created_at,
-        parent_child_mode=document.is_parent_child_mode,
-        parser_config=dict(document.parser_config or {}),
+        parent_child_mode=saved.chunk_method == "parent_child",
+        parser_config=to_runtime(saved),
         embedding_id=knowledge.embedding_id,
-        image2text_id=knowledge.image2text_id,
-        graph_parser_config=dict(knowledge.parser_config or {}),
+        workspace_id=cast(uuid.UUID, knowledge.workspace_id),
+        tenant_id=cast(uuid.UUID, workspace.tenant_id),
+        rag_enabled=configuration.index_strategy in {"rag", "rag_wiki"},
+        image2text_id=models.vision,
+        audio2text_id=models.audio,
+        video2text_id=models.video,
+        model_sources=models.sources,
+        graph_parser_config=to_runtime(configuration),
         file_key=file_key,
     )
 
@@ -395,7 +429,9 @@ async def resolve_embedding_config(
     db: AsyncSession,
     snapshot: ChunkDocumentSnapshot,
     principal: Principal,
-) -> ModelConfigSnapshot:
+) -> ModelConfigSnapshot | None:
+    if not snapshot.rag_enabled:
+        return None
     if snapshot.embedding_id is None:
         raise KnowledgeError.from_code(
             "KB_EMBEDDING_MODEL_UNAVAILABLE",
@@ -417,122 +453,55 @@ async def resolve_embedding_config(
     return config
 
 
-async def resolve_vision_config(
-    db: AsyncSession,
-    snapshot: ChunkDocumentSnapshot,
-    principal: Principal,
-) -> ModelConfigSnapshot:
-    if snapshot.image2text_id is None:
-        raise KnowledgeError.from_code(
-            "KB_VISION_MODEL_UNAVAILABLE",
-        )
-    try:
-        config = await AsyncSQLModelRegistry(db).get_model_config(
-            snapshot.image2text_id,
-            principal.tenant_id,
-        )
-    except Exception as exc:
-        raise KnowledgeError.from_code(
-            "KB_VISION_MODEL_UNAVAILABLE",
-        ) from exc
-    if config is None or config.is_deprecated or not config.is_active:
-        raise KnowledgeError.from_code(
-            "KB_VISION_MODEL_UNAVAILABLE",
-        )
-    return config
-
-
-def _message_text(response: Any) -> str:
-    content = getattr(response, "content", response)
-    if isinstance(content, str):
-        return content.strip()
-    if isinstance(content, list):
-        return "\n".join(
-            str(item.get("text", "")).strip()
-            for item in content
-            if isinstance(item, dict) and item.get("text")
-        ).strip()
-    return str(content).strip()
-
-
-async def preview_with_vision(
+async def preview_document(
     runtime: ProcessRuntime,
     snapshot: ChunkDocumentSnapshot,
     binary: bytes,
-    vision_config: ModelConfigSnapshot,
-    *,
-    tenant_id: uuid.UUID,
 ) -> list[DocumentChunk]:
-    suffix = snapshot.file_name.rsplit(".", 1)[-1].lower() if "." in snapshot.file_name else ""
-    image_exts = {"png", "jpeg", "jpg", "webp", "gif"}
-    audio_exts = {
-        "da", "wave", "wav", "mp3", "aac", "flac", "ogg", "aiff", "au",
-        "midi", "wma", "realaudio", "vqf", "oggvorbis", "ape",
-    }
-    video_exts = {"mp4", "mov", "avi", "flv", "mpeg", "mpg", "webm", "wmv", "3gp", "3gpp", "mkv"}
-    if suffix not in image_exts | audio_exts | video_exts:
-        import asyncio
-
-        return await asyncio.to_thread(
-            preview_binary,
-            snapshot.file_name,
-            binary,
-            snapshot.parser_config,
-        )
-
-    from langchain_core.messages import HumanMessage
-
-    encoded = base64.b64encode(binary).decode("ascii")
-    media_type = mimetypes.guess_type(snapshot.file_name)[0] or "application/octet-stream"
-    if suffix in image_exts:
-        media_block = {
-            "type": "image_url",
-            "image_url": {"url": f"data:{media_type};base64,{encoded}"},
-        }
-        instruction = "Describe the image accurately for knowledge retrieval."
-    elif suffix in audio_exts:
-        media_block = {
-            "type": "input_audio",
-            "input_audio": {"data": encoded, "format": suffix},
-        }
-        instruction = "Transcribe the audio accurately for knowledge retrieval."
-    else:
-        media_block = {
-            "type": "video_url",
-            "video_url": {"url": f"data:{media_type};base64,{encoded}"},
-        }
-        instruction = "Describe and transcribe the video accurately for knowledge retrieval."
-    model = RedBearChatModel.for_invoke_ref(
-        ref_from_view(vision_config, tenant_id),
-        pool=runtime.model_runtime,
+    """Use the worker's parser and selected models, with bounded pages and no asset writes."""
+    parse_snapshot = ParseDocumentSnapshot(
+        document_id=snapshot.document_id, knowledge_id=snapshot.knowledge_id,
+        workspace_id=snapshot.workspace_id, tenant_id=snapshot.tenant_id,
+        file_id=snapshot.file_id, file_name=snapshot.file_name,
+        source_file_name=snapshot.file_name,
+        file_created_at_ms=to_timestamp_ms(snapshot.file_created_at),
+        parser_config=snapshot.parser_config, parent_child_mode=snapshot.parent_child_mode,
+        embedding_id=None, llm_id=None, image2text_id=snapshot.image2text_id,
+        audio2text_id=snapshot.audio2text_id, video2text_id=snapshot.video2text_id,
+        rag_enabled=snapshot.rag_enabled, model_sources=snapshot.model_sources,
     )
+
+    def parse():
+        vision_model = build_document_vision_model(runtime, parse_snapshot, snapshot.file_key or "")
+        return parse_document_chunks(
+            runtime, parse_snapshot, binary, lambda *args, **kwargs: None, vision_model,
+            preview=True,
+        )
+
     try:
-        response = await model.ainvoke(
-            [HumanMessage(content=[{"type": "text", "text": instruction}, media_block])]
-        )
+        parsed = await asyncio.to_thread(parse)
     except ModelInvokeClientError as exc:
-        role = (
-            ModelRole.VISION if suffix in image_exts
-            else ModelRole.AUDIO_TRANSCRIPTION if suffix in audio_exts
-            else ModelRole.VIDEO_UNDERSTANDING
-        )
+        role = MODEL_FIELD_ROLES[document_media_field(snapshot.file_name)]
         error = map_model_error(exc, model_role=role)
         if error.http_status_override == 503:
-            # Preview is GET and the gateway retries 503; avoid invoking the model twice.
+            # GET retries at the gateway must not invoke the model twice.
             error.http_status_override = 500
         raise error from exc
-    text = _message_text(response)
-    if not text:
-        raise KnowledgeError.from_code(
-            "KB_VISION_MODEL_OUTPUT_EMPTY",
-        )
-    return [
-        DocumentChunk(
-            page_content=text,
-            metadata={"chunk_type": "chunk", "sort_id": 0, "vision_text": text},
-            children=[],
-        )
-    ]
+    if snapshot.parent_child_mode:
+        from ..rag.models.chunk import ChildDocumentChunk
+
+        children, parents, parent_map = parsed
+        return [
+            DocumentChunk(
+                page_content=parent["content_with_weight"], metadata=parent.get("metadata", {}),
+                children=[ChildDocumentChunk(
+                    page_content=child["content_with_weight"], metadata=child.get("metadata", {}),
+                ) for child_index, child in enumerate(children)
+                    if parent_map[child_index] == parent_index],
+            ) for parent_index, parent in enumerate(parents)
+        ]
+    return [DocumentChunk(page_content=chunk["content_with_weight"],
+                          metadata=chunk.get("metadata", {})) for chunk in parsed]
 
 
 def build_chunk_store(
@@ -550,11 +519,12 @@ def build_chunk_store(
     image_resolver = None
     embedding_dimension = None
     multimodal = (
-        embedding_config is not None and is_qwen3_vl_embedding_view(embedding_config)
+        snapshot.rag_enabled and embedding_config is not None
+        and is_qwen3_vl_embedding_view(embedding_config)
     )
     # Read-only paths (e.g. chunk listing) only need the multimodal marker to
     # collapse unit docs; skip building the embedding model client entirely.
-    if embedding_config is not None and for_mutation:
+    if snapshot.rag_enabled and embedding_config is not None and for_mutation:
         model = RedBearEmbeddings.for_invoke_ref(
             ref_from_view(embedding_config, tenant_id),
             pool=runtime.model_runtime,
@@ -584,6 +554,7 @@ def build_chunk_store(
     return AsyncChunkStore(
         client,
         snapshot.knowledge_id,
+        vectorize=snapshot.rag_enabled,
         embed=embed,
         embed_chunks=embed_chunks,
         embed_unit_contents=embed_unit_contents,
@@ -630,8 +601,7 @@ __all__ = [
     "nest_parent_child_page",
     "require_owned_chunk",
     "resolve_embedding_config",
-    "resolve_vision_config",
-    "preview_with_vision",
+    "preview_document",
     "update_document_chunk_count",
     "validate_chunk_create",
 ]
