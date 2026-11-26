@@ -28,6 +28,7 @@ from src.core.domain.enums import SearchStrategy
 from src.core.domain.errors import EndUserNotFoundError
 from src.core.domain.models import (
     ReadContext,
+    ReadContextOverrides,
     ReadOptions,
     ReadOutcome,
     ReadPrincipal,
@@ -65,9 +66,12 @@ class ReadMemory:
         *,
         language: str | None = None,
         options: ReadOptions | None = None,
+        history: list[Any] | None = None,
+        overrides: ReadContextOverrides | None = None,
     ) -> ReadOutcome | dict[str, ReadOutcome]:
         resolved_language = language or self._language_default
         options = options or ReadOptions(record_display=True)
+        overrides = overrides or ReadContextOverrides()
         end_user_ids = list(dict.fromkeys(command.end_user_ids))
         if not end_user_ids:
             raise EndUserNotFoundError("No users found.", reason="end_user_not_found")
@@ -86,20 +90,25 @@ class ReadMemory:
                         principal=principal,
                         end_user_id=end_user_id,
                         language=resolved_language,
-                        draft=False,
+                        draft=overrides.draft,
+                        conversation_id=overrides.conversation_id,
+                        app_id=overrides.app_id,
+                        config_id=overrides.config_id,
+                        storage_type=overrides.storage_type,
+                        user_rag_memory_id=overrides.user_rag_memory_id,
                     ),
                 )
             )
 
         if len(requests) == 1:
             outcome = await self._read_one(
-                requests[0][1], command, options=options
+                requests[0][1], command, options=options, history=history
             )
             return outcome
 
         results = await asyncio.gather(
             *(
-                self._read_one(ctx, command, options=options)
+                self._read_one(ctx, command, options=options, history=history)
                 for _requested_id, ctx in requests
             ),
             return_exceptions=True,
@@ -123,12 +132,13 @@ class ReadMemory:
         command: SyncReadCommand,
         *,
         options: ReadOptions,
+        history: list[Any] | None = None,
     ) -> ReadOutcome:
         pipeline = self._pipeline_factory(ctx)
         result = await pipeline.run(
             command.message,
             command.search_switch,
-            history=[],
+            history=history or [],
             options=options,
             retrieval_operation_id=uuid4().hex,
         )
