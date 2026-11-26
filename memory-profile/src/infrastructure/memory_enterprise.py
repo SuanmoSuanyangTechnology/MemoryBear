@@ -226,6 +226,39 @@ class MemoryEnterpriseManager:
         names = payload.get("names") if isinstance(payload, dict) else None
         return {str(key): str(value) for key, value in (names or {}).items()}
 
+    async def field_labels(
+        self, *, tenant_id: UUID, scene_ids: list[str]
+    ) -> dict[str, dict[str, str]]:
+        """``{scene_id: {field_key: label}}`` for the tenant's visible scenes.
+
+        The label is the display name of a profile field; only the enterprise
+        service owns that table, so a reader that shows domain entries asks here
+        rather than rendering the bare field key.
+        """
+
+        if not scene_ids:
+            return {}
+        if not self.enabled:
+            return {}
+        response = await (await self.client()).post(
+            "/internal/v1/ontology/field-labels",
+            headers=self._auth_headers(tenant_id=tenant_id),
+            json={"scene_ids": scene_ids},
+        )
+        response.raise_for_status()
+        payload = response.json()
+        labels = payload.get("labels") if isinstance(payload, dict) else None
+        if not isinstance(labels, dict):
+            return {}
+        return {
+            str(scene_id): {
+                str(field_key): str(label)
+                for field_key, label in (fields or {}).items()
+            }
+            for scene_id, fields in labels.items()
+            if isinstance(fields, dict)
+        }
+
     async def report_retrieval_alert(
         self,
         *,
