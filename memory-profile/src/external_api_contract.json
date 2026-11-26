@@ -1431,7 +1431,7 @@
             "required": false
           },
           "data": {
-            "annotation": "list[src.modules.analytics.schemas.HotMemoryTag]",
+            "annotation": "list[src.schemas.memory_storage.HotMemoryTag]",
             "constraints": [],
             "default": null,
             "fields": {

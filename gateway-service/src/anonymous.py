@@ -53,3 +53,11 @@ def is_license_status(path: str, method: str) -> bool:
     expiry banner, including while the license middleware rejects other
     paths; the monolith route had no auth dependency either."""
     return method in _LICENSE_STATUS_METHODS and path == "/api/license/status"
+
+
+def is_home_page_version(path: str, method: str) -> bool:
+    """Anonymous home-page version card: the monolith route had no auth
+    dependency and the dashboard renders the card regardless of login state
+    (the split's public path mirrors it). Deliberately unconditional — the
+    route consumes no identity, so a stray credential must not reject it."""
+    return method == "GET" and path == "/api/home-page/version"

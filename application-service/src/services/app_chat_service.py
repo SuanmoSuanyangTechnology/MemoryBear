@@ -339,6 +339,31 @@ class AppChatService:
                 for row in result.all()
             }
 
+    async def _build_files_meta(self, files: Optional[List[FileInput]]) -> list:
+        """Serialize this turn's attachments for the user message meta.files.
+
+        Shared by success and failure persistence so a failed turn still keeps
+        the uploaded file references in history.
+        """
+        if not files:
+            return []
+        local_ids = [
+            f.upload_file_id for f in files
+            if f.transfer_method.value == "local_file" and f.upload_file_id
+            and (not f.name or not f.size)
+        ]
+        meta_map = await self._fetch_completed_file_metadata(local_ids) if local_ids else {}
+        files_meta: list = []
+        for f in files:
+            name, size = f.name, f.size
+            if f.transfer_method.value == "local_file" and f.upload_file_id and (not name or not size):
+                meta = meta_map.get(str(f.upload_file_id))
+                if meta:
+                    name = name or meta.file_name
+                    size = size or meta.file_size
+            files_meta.append(serialize_file_reference(f, name=name, size=size))
+        return files_meta
+
     async def _conversation_has_messages(self, conversation_id: uuid.UUID) -> bool:
         if self._uses_async_session():
             result = await self.db.execute(
@@ -460,21 +485,7 @@ class AppChatService:
             meta.files; history_files is non-None only when the supervisor
             actually processed attachments (used to hydrate later history).
         """
-        files_meta: list = []
-        local_ids = [
-            f.upload_file_id for f in files
-            if f.transfer_method.value == "local_file" and f.upload_file_id
-            and (not f.name or not f.size)
-        ]
-        meta_map = await self._fetch_completed_file_metadata(local_ids) if local_ids else {}
-        for f in files:
-            name, size = f.name, f.size
-            if f.transfer_method.value == "local_file" and f.upload_file_id and (not name or not size):
-                meta = meta_map.get(str(f.upload_file_id))
-                if meta:
-                    name = name or meta.file_name
-                    size = size or meta.file_size
-            files_meta.append(serialize_file_reference(f, name=name, size=size))
+        files_meta = await self._build_files_meta(files)
 
         history_files = None
         processed_files = getattr(orchestrator, "_turn_processed_files", None)
@@ -512,12 +523,15 @@ class AppChatService:
             message: str,
             start_time: float,
             execution_id: uuid.UUID | None = None,
+            files: Optional[List[FileInput]] = None,
+            history_files: Optional[dict] = None,
     ) -> None:
         try:
             from .batch_persist_queue import persist_failed_chat_turn
 
             trace_id = get_trace_id()
             error = error_payload(exc, locale=get_current_locale(), trace_id=trace_id)
+            files_meta = await self._build_files_meta(files)
             await self._release_db_connection()
             await persist_failed_chat_turn(
                 conversation_id=conversation_id,
@@ -529,6 +543,8 @@ class AppChatService:
                 trace_id=trace_id,
                 started_at=parse_timestamp_to_utc_naive(start_time),
                 execution_id=execution_id,
+                files_meta=files_meta,
+                history_files=history_files,
             )
         except Exception:
             logger.exception(
@@ -871,6 +887,7 @@ class AppChatService:
                     message_id=message_id,
                     message=message,
                     start_time=start_time,
+                    files=files,
                 )
             raise
         # Render the system prompt (variable substitution supported)
@@ -1136,7 +1153,11 @@ class AppChatService:
                             "user_message_id": str(user_message_id),
                             "message_id": str(message_id),
                             "user_message_content": message,
-                            "files_meta": [],
+                            "files_meta": await self._build_files_meta(files),
+                            "history_files": {
+                                "content": sanitize_processed_files_for_history(processed_files),
+                                "provider": api_key_obj.provider,
+                            } if processed_files else None,
                             "error_message": failure_payload["msg"],
                             "error_detail": str(e)[:2000],
                         },
@@ -1181,21 +1202,7 @@ class AppChatService:
             "suggested_questions": suggested_questions,
             "reasoning_content": result.get("reasoning_content")
         }
-        if files:
-            local_ids = [f.upload_file_id for f in files
-                         if f.transfer_method.value == "local_file" and f.upload_file_id
-                         and (not f.name or not f.size)]
-            meta_map = {}
-            if local_ids:
-                meta_map = await self._fetch_completed_file_metadata(local_ids)
-            for f in files:
-                name, size = f.name, f.size
-                if f.transfer_method.value == "local_file" and f.upload_file_id and (not name or not size):
-                    meta = meta_map.get(str(f.upload_file_id))
-                    if meta:
-                        name = name or meta.file_name
-                        size = size or meta.file_size
-                human_meta["files"].append(serialize_file_reference(f, name=name, size=size))
+        human_meta["files"] = await self._build_files_meta(files)
 
         if processed_files:
             human_meta["history_files"] = {
@@ -1765,19 +1772,7 @@ class AppChatService:
             # Long-term memory writes are taken over uniformly by
             # conversation_service.add_message → MemoryWriteDispatcher; the old
             # write_long_term path is no longer triggered here.
-            if files:
-                local_ids = [f.upload_file_id for f in files
-                             if f.transfer_method.value == "local_file" and f.upload_file_id
-                             and (not f.name or not f.size)]
-                meta_map = await self._fetch_completed_file_metadata(local_ids) if local_ids else {}
-                for f in files:
-                    name, size = f.name, f.size
-                    if f.transfer_method.value == "local_file" and f.upload_file_id and (not name or not size):
-                        meta = meta_map.get(str(f.upload_file_id))
-                        if meta:
-                            name = name or meta.file_name
-                            size = size or meta.file_size
-                    human_meta["files"].append(serialize_file_reference(f, name=name, size=size))
+            human_meta["files"] = await self._build_files_meta(files)
             if processed_files:
                 human_meta["history_files"] = {
                     "content": sanitize_processed_files_for_history(processed_files),
@@ -1979,6 +1974,7 @@ class AppChatService:
             if not save_messages_enqueued:
                 try:
                     from .batch_persist_queue import BatchPersistQueue, PersistTask
+                    _failed_processed = locals().get("processed_files")
                     await BatchPersistQueue.enqueue(PersistTask(
                         task_type="save_failed_message",
                         args={
@@ -1986,7 +1982,11 @@ class AppChatService:
                             "user_message_id": str(user_message_id) if 'user_message_id' in locals() else str(uuid.uuid4()),
                             "message_id": str(message_id) if 'message_id' in locals() else str(uuid.uuid4()),
                             "user_message_content": message if 'message' in locals() else "",
-                            "files_meta": [],
+                            "files_meta": await self._build_files_meta(files),
+                            "history_files": {
+                                "content": sanitize_processed_files_for_history(_failed_processed),
+                                "provider": locals().get("_api_key_provider"),
+                            } if _failed_processed else None,
                             "error_message": display_error,
                             "error_detail": str(e)[:2000],
                         },
@@ -2107,6 +2107,7 @@ class AppChatService:
         except ModelInvokeCancelledError:
             raise
         except Exception as exc:
+            _failed_processed = getattr(orchestrator, "_turn_processed_files", None)
             await self._persist_non_streaming_failure(
                 exc,
                 conversation_id=conversation_id,
@@ -2115,6 +2116,11 @@ class AppChatService:
                 message=message,
                 start_time=start_time,
                 execution_id=getattr(orchestrator, "current_execution_id", None),
+                files=files,
+                history_files={
+                    "content": sanitize_processed_files_for_history(_failed_processed),
+                    "provider": getattr(orchestrator, "_turn_files_provider", None),
+                } if _failed_processed else None,
             )
             raise
 
@@ -2612,6 +2618,8 @@ class AppChatService:
             if not save_messages_enqueued:
                 try:
                     from .batch_persist_queue import BatchPersistQueue, PersistTask
+                    _failed_orchestrator = locals().get("orchestrator")
+                    _failed_processed = getattr(_failed_orchestrator, "_turn_processed_files", None)
                     await BatchPersistQueue.enqueue(PersistTask(
                         task_type="save_failed_message",
                         args={
@@ -2619,7 +2627,11 @@ class AppChatService:
                             "user_message_id": str(user_message_id) if 'user_message_id' in locals() else str(uuid.uuid4()),
                             "message_id": str(message_id) if 'message_id' in locals() else str(uuid.uuid4()),
                             "user_message_content": message if 'message' in locals() else "",
-                            "files_meta": [],
+                            "files_meta": await self._build_files_meta(files),
+                            "history_files": {
+                                "content": sanitize_processed_files_for_history(_failed_processed),
+                                "provider": getattr(_failed_orchestrator, "_turn_files_provider", None),
+                            } if _failed_processed else None,
                             "error_message": failure_payload["msg"],
                             "error_detail": str(e)[:2000],
                         },

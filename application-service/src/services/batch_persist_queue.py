@@ -379,6 +379,8 @@ async def _bulk_persist_messages(
             msg_id = args.get("message_id", uuid_module.uuid4())
             user_content = args.get("user_message_content") or ""
             user_meta = {"files": args.get("files_meta", [])}
+            if args.get("history_files"):
+                user_meta["history_files"] = args["history_files"]
             error_meta = {"error": args.get("error_detail", "")}
             log_only = args.get("log_only", False)
             if log_only:
@@ -554,14 +556,17 @@ async def persist_failed_chat_turn(
     trace_id: str | None,
     started_at: datetime,
     execution_id: uuid_module.UUID | None,
+    files_meta: list | None = None,
+    history_files: dict | None = None,
 ) -> None:
     """Commit a failed turn for log readers before the non-streaming request returns."""
     error_message = sanitize_text(error_message)
-    task = PersistTask(task_type="save_failed_message", args={
+    args: dict[str, Any] = {
         "conversation_id": conversation_id,
         "user_message_id": user_message_id,
         "message_id": message_id,
         "user_message_content": sanitize_text(message),
+        "files_meta": files_meta or [],
         "error_message": error_message,
         "error_detail": error_message,
         "error_code": error_code,
@@ -569,7 +574,10 @@ async def persist_failed_chat_turn(
         "started_at": started_at,
         "finished_at": utcnow_naive(),
         "log_only": True,
-    })
+    }
+    if history_files:
+        args["history_files"] = history_files
+    task = PersistTask(task_type="save_failed_message", args=args)
     async with get_async_db_context() as db:
         await _bulk_persist_messages(db, [task])
         await db.commit()

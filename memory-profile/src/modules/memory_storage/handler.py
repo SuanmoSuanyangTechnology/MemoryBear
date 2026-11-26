@@ -11,8 +11,10 @@ from typing import TYPE_CHECKING
 
 from src.common.errors import BizCode
 from src.common.responses import ApiResponse, failure, success
+from src.i18n import message
 from src.middleware.auth import MemoryPrincipal
 from src.infrastructure.redis_lock import RedisFairLock
+from src.schemas.memory_storage import HotMemoryTag
 
 if TYPE_CHECKING:
     from src.runtime import ProfileRuntime
@@ -123,6 +125,16 @@ class MemoryStorageHandler:
         except Exception as e:
             api_logger.error(f"关系演变查询失败: id={id}, table={label}, error={str(e)}", exc_info=True)
             return failure(BizCode.INTERNAL_ERROR, "关系演变查询失败", str(e))
+
+    async def hot_memory_tags(
+        self, context: MemoryPrincipal, limit: int, language: str
+    ) -> ApiResponse[list[HotMemoryTag]]:
+        """工作空间热门记忆标签；管理端历史前缀与分析域前缀共用本实现。"""
+
+        data = await self.service.workspace_hot_memory_tags(context.workspace_id, limit)
+        return ApiResponse[list[HotMemoryTag]](
+            data=data, msg=message("analytics.msg.query_success", language)
+        )
 
     async def pilot_run(self, context, payload, language):
         # v0.3.13: 入参改为 QA 格式 messages（与 /write 接口对齐），不再接收 dialogue_text / custom_text

@@ -1366,8 +1366,6 @@ models:
   is_official: true
   input_modalities:
   - text
-  - image
-  - video
   output_modalities:
   - text
   features:

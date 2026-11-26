@@ -413,6 +413,26 @@ class AppServiceSettings(BaseSettings):
         gt=0,
         validation_alias="APPLICATION_SERVICE_UPSTREAM_TIMEOUT_SECONDS",
     )
+    # East-west write face of memory-profile (end-user merge). The merge owns
+    # the memory write locks and every derived memory artifact, so it must run
+    # there; same env names and defaults as the monolith's outbound client. An
+    # empty base URL fails the merge path closed at call time.
+    memory_profile_base_url: str = Field(
+        default="",
+        validation_alias="MEMORY_PROFILE_BASE_URL",
+    )
+    memory_profile_connect_timeout_seconds: float = Field(
+        default=5.0, gt=0, validation_alias="MEMORY_PROFILE_CONNECT_TIMEOUT_SECONDS"
+    )
+    memory_profile_pool_timeout_seconds: float = Field(
+        default=5.0, gt=0, validation_alias="MEMORY_PROFILE_POOL_TIMEOUT_SECONDS"
+    )
+    memory_profile_read_timeout_seconds: float = Field(
+        default=120.0, gt=0, validation_alias="MEMORY_PROFILE_READ_TIMEOUT_SECONDS"
+    )
+    memory_profile_write_timeout_seconds: float = Field(
+        default=600.0, gt=0, validation_alias="MEMORY_PROFILE_WRITE_TIMEOUT_SECONDS"
+    )
     # East-west direct dependency on model-service (annotation embeddings),
     # never routed through the gateway; same env name as the monolith's
     # outbound knob. Unset or unreachable degrades annotation writes to a
@@ -420,6 +440,19 @@ class AppServiceSettings(BaseSettings):
     model_service_base_url: str | None = Field(
         default=None,
         validation_alias="MODEL_SERVICE_BASE_URL",
+    )
+    # East-west read of the home-page version card (ops-service owns
+    # version_notes). Unset or unreachable degrades to SYSTEM_VERSION with
+    # empty structured intros — the monolith's last-resort fallback.
+    ops_service_base_url: str = Field(
+        default="",
+        validation_alias="OPS_SERVICE_BASE_URL",
+    )
+    ops_service_connect_timeout_seconds: float = Field(
+        default=2.0, gt=0, validation_alias="OPS_SERVICE_CONNECT_TIMEOUT_SECONDS"
+    )
+    ops_service_read_timeout_seconds: float = Field(
+        default=5.0, gt=0, validation_alias="OPS_SERVICE_READ_TIMEOUT_SECONDS"
     )
     # gRPC server (same process as FastAPI; --loop asyncio is mandatory because
     # grpc.aio cannot run on uvloop). Port 0 binds an ephemeral port in tests.
@@ -652,6 +685,8 @@ class AppServiceSettings(BaseSettings):
         default=SecretStr("a_default_secret_key_that_is_long_and_random"),
         validation_alias="SECRET_KEY",
     )
+    # A non-default absolute value is the local storage root (share it between
+    # services); the default keeps the legacy cwd-relative storage/files root.
     file_path: str = Field(default="/files", validation_alias="FILE_PATH")
     storage_type: str = Field(default="local", validation_alias="STORAGE_TYPE")
     minio_endpoint_url: str = Field(default="", validation_alias="MINIO_ENDPOINT_URL")

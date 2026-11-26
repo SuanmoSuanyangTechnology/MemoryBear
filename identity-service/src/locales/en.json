@@ -1,0 +1,728 @@
+{
+  "auth": {
+    "login": {
+      "success": "Login successful",
+      "failed": "Login failed",
+      "invalid_credentials": "Invalid username or password",
+      "account_locked": "Account has been locked",
+      "account_disabled": "Account has been disabled"
+    },
+    "logout": {
+      "success": "Logout successful",
+      "failed": "Logout failed"
+    },
+    "token": {
+      "refresh_success": "Token refreshed successfully",
+      "invalid": "Invalid token",
+      "expired": "Token has expired",
+      "blacklisted": "Token has been invalidated",
+      "invalid_refresh_token": "Invalid refresh token",
+      "refresh_token_blacklisted": "Refresh token has been invalidated"
+    },
+    "registration": {
+      "success": "Registration successful",
+      "failed": "Registration failed",
+      "email_exists": "Email already in use",
+      "username_exists": "Username already taken"
+    },
+    "password": {
+      "reset_success": "Password reset successful",
+      "reset_failed": "Password reset failed",
+      "change_success": "Password changed successfully",
+      "change_failed": "Password change failed",
+      "incorrect": "Incorrect password",
+      "too_weak": "Password is too weak",
+      "mismatch": "Passwords do not match"
+    },
+    "invite": {
+      "invalid": "Invalid or expired invite code",
+      "email_mismatch": "Invite email does not match login email",
+      "accept_success": "Invite accepted successfully",
+      "accept_failed": "Failed to accept invite",
+      "password_verification_failed": "Failed to accept invite, password verification error",
+      "bind_workspace_success": "Workspace bound successfully",
+      "bind_workspace_failed": "Failed to bind workspace"
+    },
+    "user": {
+      "not_found": "User not found",
+      "already_exists": "User already exists",
+      "created_with_invite": "User created successfully and joined workspace"
+    },
+    "session": {
+      "expired": "Session expired, please login again",
+      "invalid": "Invalid session",
+      "single_session_enabled": "Single sign-on enabled, other device sessions will be logged out"
+    }
+  },
+  "common": {
+    "success": {
+      "created": "Created successfully",
+      "updated": "Updated successfully",
+      "deleted": "Deleted successfully",
+      "retrieved": "Retrieved successfully",
+      "saved": "Saved successfully",
+      "uploaded": "Uploaded successfully",
+      "downloaded": "Downloaded successfully",
+      "sent": "Sent successfully",
+      "completed": "Completed",
+      "confirmed": "Confirmed",
+      "cancelled": "Cancelled",
+      "archived": "Archived",
+      "restored": "Restored"
+    },
+    "actions": {
+      "create": "Create",
+      "update": "Update",
+      "delete": "Delete",
+      "view": "View",
+      "edit": "Edit",
+      "save": "Save",
+      "cancel": "Cancel",
+      "confirm": "Confirm",
+      "submit": "Submit",
+      "upload": "Upload",
+      "download": "Download",
+      "send": "Send",
+      "search": "Search",
+      "filter": "Filter",
+      "sort": "Sort",
+      "export": "Export",
+      "import": "Import",
+      "refresh": "Refresh",
+      "reset": "Reset",
+      "back": "Back",
+      "next": "Next",
+      "previous": "Previous",
+      "finish": "Finish",
+      "close": "Close",
+      "open": "Open",
+      "archive": "Archive",
+      "restore": "Restore",
+      "duplicate": "Duplicate",
+      "share": "Share",
+      "invite": "Invite",
+      "remove": "Remove",
+      "add": "Add",
+      "select": "Select",
+      "clear": "Clear"
+    },
+    "validation": {
+      "required": "{field} is required",
+      "invalid_format": "{field} format is invalid",
+      "too_long": "{field} cannot exceed {max} characters",
+      "too_short": "{field} must be at least {min} characters",
+      "invalid_email": "Invalid email format",
+      "invalid_url": "Invalid URL format",
+      "invalid_phone": "Invalid phone number format",
+      "invalid_date": "Invalid date format",
+      "invalid_number": "Must be a valid number",
+      "out_of_range": "{field} must be between {min} and {max}",
+      "already_exists": "{field} already exists",
+      "not_found": "{field} not found",
+      "invalid_value": "Invalid value for {field}",
+      "password_mismatch": "Passwords do not match",
+      "weak_password": "Password is too weak, please use a stronger password",
+      "invalid_credentials": "Invalid username or password",
+      "unauthorized": "Unauthorized access",
+      "forbidden": "Permission denied",
+      "expired": "{field} has expired",
+      "invalid_token": "Invalid token",
+      "file_too_large": "File size cannot exceed {max}",
+      "invalid_file_type": "Unsupported file type",
+      "duplicate": "Duplicate {field}"
+    },
+    "status": {
+      "active": "Active",
+      "inactive": "Inactive",
+      "pending": "Pending",
+      "processing": "Processing",
+      "completed": "Completed",
+      "failed": "Failed",
+      "cancelled": "Cancelled",
+      "archived": "Archived",
+      "deleted": "Deleted",
+      "draft": "Draft",
+      "published": "Published",
+      "suspended": "Suspended",
+      "expired": "Expired"
+    },
+    "messages": {
+      "loading": "Loading...",
+      "saving": "Saving...",
+      "processing": "Processing...",
+      "uploading": "Uploading...",
+      "downloading": "Downloading...",
+      "no_data": "No data available",
+      "no_results": "No results found",
+      "confirm_delete": "Are you sure you want to delete? This action cannot be undone.",
+      "confirm_action": "Are you sure you want to perform this action?",
+      "operation_success": "Operation successful",
+      "operation_failed": "Operation failed",
+      "please_wait": "Please wait...",
+      "try_again": "Please try again",
+      "contact_support": "If the problem persists, please contact support"
+    },
+    "pagination": {
+      "page": "Page {page}",
+      "of": "of {total}",
+      "items": "{total} items",
+      "per_page": "{count} per page",
+      "showing": "Showing {from} to {to} of {total}",
+      "first": "First",
+      "last": "Last",
+      "next": "Next",
+      "previous": "Previous"
+    },
+    "time": {
+      "just_now": "Just now",
+      "minutes_ago": "{count} minutes ago",
+      "hours_ago": "{count} hours ago",
+      "days_ago": "{count} days ago",
+      "weeks_ago": "{count} weeks ago",
+      "months_ago": "{count} months ago",
+      "years_ago": "{count} years ago",
+      "today": "Today",
+      "yesterday": "Yesterday",
+      "tomorrow": "Tomorrow"
+    }
+  },
+  "enums": {
+    "workspace_role": {
+      "owner": "Owner",
+      "manager": "Manager",
+      "member": "Member",
+      "guest": "Guest"
+    },
+    "workspace_status": {
+      "active": "Active",
+      "inactive": "Inactive",
+      "archived": "Archived",
+      "suspended": "Suspended",
+      "deleted": "Deleted"
+    },
+    "invite_status": {
+      "pending": "Pending",
+      "accepted": "Accepted",
+      "rejected": "Rejected",
+      "revoked": "Revoked",
+      "expired": "Expired"
+    },
+    "user_status": {
+      "active": "Active",
+      "inactive": "Inactive",
+      "suspended": "Suspended",
+      "deleted": "Deleted",
+      "pending": "Pending"
+    },
+    "tenant_status": {
+      "active": "Active",
+      "inactive": "Inactive",
+      "suspended": "Suspended",
+      "expired": "Expired",
+      "trial": "Trial"
+    },
+    "file_status": {
+      "uploading": "Uploading",
+      "processing": "Processing",
+      "completed": "Completed",
+      "failed": "Failed",
+      "deleted": "Deleted"
+    },
+    "task_status": {
+      "pending": "Pending",
+      "running": "Running",
+      "completed": "Completed",
+      "failed": "Failed",
+      "cancelled": "Cancelled",
+      "paused": "Paused"
+    },
+    "priority": {
+      "low": "Low",
+      "medium": "Medium",
+      "high": "High",
+      "urgent": "Urgent"
+    },
+    "visibility": {
+      "public": "Public",
+      "private": "Private",
+      "internal": "Internal",
+      "shared": "Shared"
+    },
+    "permission": {
+      "read": "Read",
+      "write": "Write",
+      "delete": "Delete",
+      "admin": "Admin",
+      "owner": "Owner"
+    },
+    "notification_type": {
+      "info": "Info",
+      "warning": "Warning",
+      "error": "Error",
+      "success": "Success"
+    },
+    "language": {
+      "zh": "Chinese (Simplified)",
+      "en": "English",
+      "ja": "Japanese",
+      "ko": "Korean",
+      "fr": "French",
+      "de": "German",
+      "es": "Spanish"
+    },
+    "timezone": {
+      "utc": "UTC",
+      "asia_shanghai": "Asia/Shanghai",
+      "asia_tokyo": "Asia/Tokyo",
+      "america_new_york": "America/New_York",
+      "europe_london": "Europe/London"
+    },
+    "date_format": {
+      "short": "Short",
+      "medium": "Medium",
+      "long": "Long",
+      "full": "Full"
+    },
+    "sort_order": {
+      "asc": "Ascending",
+      "desc": "Descending"
+    },
+    "filter_operator": {
+      "equals": "Equals",
+      "not_equals": "Not Equals",
+      "contains": "Contains",
+      "not_contains": "Not Contains",
+      "starts_with": "Starts With",
+      "ends_with": "Ends With",
+      "greater_than": "Greater Than",
+      "less_than": "Less Than",
+      "greater_or_equal": "Greater or Equal",
+      "less_or_equal": "Less or Equal",
+      "in": "In",
+      "not_in": "Not In",
+      "is_null": "Is Null",
+      "is_not_null": "Is Not Null"
+    },
+    "log_level": {
+      "debug": "Debug",
+      "info": "Info",
+      "warning": "Warning",
+      "error": "Error",
+      "critical": "Critical"
+    },
+    "api_method": {
+      "get": "GET",
+      "post": "POST",
+      "put": "PUT",
+      "patch": "PATCH",
+      "delete": "DELETE"
+    }
+  },
+  "errors": {
+    "common": {
+      "internal_error": "Internal server error",
+      "network_error": "Network connection error",
+      "timeout": "Request timeout",
+      "service_unavailable": "Service temporarily unavailable",
+      "bad_request": "Bad request parameters",
+      "unauthorized": "Unauthorized access",
+      "forbidden": "Access forbidden",
+      "not_found": "Resource not found",
+      "method_not_allowed": "Method not allowed",
+      "conflict": "Resource conflict",
+      "too_many_requests": "Too many requests, please try again later",
+      "validation_failed": "Validation failed",
+      "database_error": "Database operation failed",
+      "file_operation_error": "File operation failed"
+    },
+    "llm": {
+      "authentication_failed": "Invalid API Key, please check your configuration",
+      "permission_denied": "API Key permission denied or locked",
+      "quota_exceeded": "Model quota exhausted, please contact admin to top up",
+      "rate_limited": "Too many requests, please try again later",
+      "timeout": "Model response timed out, please try again later",
+      "connection_failed": "Failed to connect to model service, please check URL configuration",
+      "invalid_request": "Invalid request parameters, please check your input or configuration",
+      "model_not_found": "Model not found or has been taken offline",
+      "capability_mismatch": "Model does not support this capability, please check configuration",
+      "server_error": "Model service error, please try again later",
+      "unknown": "An unknown error occurred during model invocation",
+      "api_key_missing": "No available API Key in the current configuration",
+      "empty_response": "Model did not return valid content",
+      "attachment_prefix": "Attachment parsing failed: ",
+      "subjects": {
+        "model": "Model",
+        "image": "Image",
+        "audio": "Audio",
+        "video": "Video",
+        "document": "Document"
+      }
+    },
+    "auth": {
+      "invalid_credentials": "Invalid username or password",
+      "token_expired": "Session expired, please login again",
+      "token_invalid": "Invalid authentication token",
+      "token_missing": "Authentication token missing",
+      "unauthorized": "Unauthorized access",
+      "forbidden": "Permission denied",
+      "account_locked": "Account has been locked",
+      "account_disabled": "Account has been disabled",
+      "account_not_verified": "Account not verified",
+      "password_incorrect": "Incorrect password",
+      "password_too_weak": "Password is too weak",
+      "password_expired": "Password expired, please change it",
+      "email_not_verified": "Email not verified",
+      "phone_not_verified": "Phone number not verified",
+      "verification_code_invalid": "Invalid verification code",
+      "verification_code_expired": "Verification code expired",
+      "login_failed": "Login failed",
+      "logout_failed": "Logout failed",
+      "session_expired": "Session expired",
+      "already_logged_in": "Already logged in",
+      "not_logged_in": "Not logged in"
+    },
+    "user": {
+      "not_found": "User not found",
+      "already_exists": "User already exists",
+      "email_already_exists": "Email already in use",
+      "phone_already_exists": "Phone number already in use",
+      "username_already_exists": "Username already taken",
+      "invalid_email": "Invalid email format",
+      "invalid_phone": "Invalid phone number format",
+      "invalid_username": "Invalid username format",
+      "create_failed": "Failed to create user",
+      "update_failed": "Failed to update user",
+      "delete_failed": "Failed to delete user",
+      "cannot_delete_self": "Cannot delete yourself",
+      "cannot_update_self_role": "Cannot update your own role",
+      "profile_update_failed": "Failed to update profile",
+      "avatar_upload_failed": "Failed to upload avatar",
+      "password_change_failed": "Failed to change password",
+      "old_password_incorrect": "Old password is incorrect"
+    },
+    "workspace": {
+      "not_found": "Workspace not found",
+      "already_exists": "Workspace already exists",
+      "name_required": "Workspace name is required",
+      "name_too_long": "Workspace name is too long",
+      "create_failed": "Failed to create workspace",
+      "update_failed": "Failed to update workspace",
+      "delete_failed": "Failed to delete workspace",
+      "permission_denied": "Permission denied to access this workspace",
+      "not_member": "Not a workspace member",
+      "already_member": "Already a workspace member",
+      "member_limit_reached": "Member limit reached",
+      "cannot_leave_last_manager": "Cannot leave, you are the last manager",
+      "cannot_remove_last_manager": "Cannot remove the last manager",
+      "cannot_remove_self": "Cannot remove yourself",
+      "invite_not_found": "Invite not found",
+      "invite_expired": "Invite has expired",
+      "invite_already_accepted": "Invite already accepted",
+      "invite_already_revoked": "Invite already revoked",
+      "invite_send_failed": "Failed to send invite",
+      "archived": "Workspace is archived",
+      "suspended": "Workspace is suspended"
+    },
+    "tenant": {
+      "not_found": "Tenant not found",
+      "already_exists": "Tenant already exists",
+      "create_failed": "Failed to create tenant",
+      "update_failed": "Failed to update tenant",
+      "delete_failed": "Failed to delete tenant",
+      "suspended": "Tenant is suspended",
+      "expired": "Tenant has expired",
+      "license_invalid": "Invalid license",
+      "license_expired": "License has expired",
+      "quota_exceeded": "Quota exceeded"
+    },
+    "file": {
+      "not_found": "File not found",
+      "upload_failed": "File upload failed",
+      "download_failed": "File download failed",
+      "delete_failed": "File deletion failed",
+      "too_large": "File size exceeds limit",
+      "invalid_type": "Unsupported file type",
+      "invalid_format": "Invalid file format",
+      "corrupted": "File is corrupted",
+      "storage_full": "Storage is full",
+      "access_denied": "Access denied to this file"
+    },
+    "api": {
+      "rate_limit_exceeded": "API rate limit exceeded",
+      "quota_exceeded": "{resource} quota exceeded",
+      "invalid_api_key": "Invalid API key",
+      "api_key_expired": "API key has expired",
+      "api_key_revoked": "API key has been revoked",
+      "endpoint_not_found": "API endpoint not found",
+      "method_not_allowed": "Method not allowed",
+      "invalid_request": "Invalid request",
+      "missing_parameter": "Missing required parameter: {param}",
+      "invalid_parameter": "Invalid parameter: {param}",
+      "api_key_rate_limit_exceeded": "API Key rate limit ({rate_limit}) exceeds tenant plan limit ({limit})"
+    },
+    "database": {
+      "connection_failed": "Database connection failed",
+      "query_failed": "Database query failed",
+      "transaction_failed": "Database transaction failed",
+      "constraint_violation": "Data constraint violation",
+      "duplicate_key": "Duplicate data",
+      "foreign_key_violation": "Foreign key constraint violation",
+      "deadlock": "Database deadlock"
+    },
+    "validation": {
+      "invalid_input": "Invalid input data",
+      "missing_field": "Missing required field: {field}",
+      "invalid_field": "Invalid field: {field}",
+      "field_too_long": "Field too long: {field}",
+      "field_too_short": "Field too short: {field}",
+      "invalid_format": "Invalid format: {field}",
+      "invalid_value": "Invalid value: {field}",
+      "out_of_range": "Value out of range: {field}"
+    },
+    "quota_resources": {
+      "workspace": "Workspace",
+      "app": "App",
+      "skill": "Skill",
+      "knowledge_capacity": "Knowledge capacity",
+      "memory_engine": "Memory engine",
+      "end_user": "End user",
+      "model": "Model",
+      "ontology_project": "Ontology project",
+      "api_ops_rate_limit": "API ops rate limit"
+    }
+  },
+  "i18n": {
+    "language": {
+      "not_found": "Language {locale} not found",
+      "already_exists": "Language {locale} already exists",
+      "add_instructions": "Language {locale} validated successfully. Please create translation files in {dir} directory to complete the addition.",
+      "update_instructions": "Language {locale} update validated successfully. Please update I18N_SUPPORTED_LANGUAGES environment variable to apply configuration changes."
+    },
+    "namespace": {
+      "not_found": "Namespace {namespace} not found in language {locale}"
+    },
+    "translation": {
+      "invalid_key_format": "Invalid translation key format: {key}. Should use format: namespace.key.subkey",
+      "update_instructions": "Translation {locale}/{key} update validated successfully. Please modify the corresponding JSON translation file to apply changes."
+    },
+    "reload": {
+      "disabled": "Translation hot reload is disabled. Please enable I18N_ENABLE_HOT_RELOAD in configuration.",
+      "success": "Translations reloaded successfully",
+      "failed": "Translation reload failed: {error}"
+    },
+    "metrics": {
+      "reset_success": "Performance metrics reset successfully"
+    },
+    "logs": {
+      "export_success": "Missing translations exported to: {file}",
+      "clear_success": "Missing translation logs cleared successfully"
+    }
+  },
+  "tenant": {
+    "info": {
+      "get_success": "Tenant information retrieved successfully",
+      "get_failed": "Failed to retrieve tenant information",
+      "update_success": "Tenant information updated successfully",
+      "update_failed": "Failed to update tenant information"
+    },
+    "create": {
+      "success": "Tenant created successfully",
+      "failed": "Failed to create tenant"
+    },
+    "delete": {
+      "success": "Tenant deleted successfully",
+      "failed": "Failed to delete tenant"
+    },
+    "status": {
+      "activate_success": "Tenant activated successfully",
+      "activate_failed": "Failed to activate tenant",
+      "deactivate_success": "Tenant deactivated successfully",
+      "deactivate_failed": "Failed to deactivate tenant"
+    },
+    "language": {
+      "get_success": "Tenant language configuration retrieved successfully",
+      "get_failed": "Failed to retrieve tenant language configuration",
+      "update_success": "Tenant language configuration updated successfully",
+      "update_failed": "Failed to update tenant language configuration",
+      "invalid_language": "Unsupported language code",
+      "default_not_in_supported": "Default language must be in the supported languages list"
+    },
+    "list": {
+      "get_success": "Tenant list retrieved successfully",
+      "get_failed": "Failed to retrieve tenant list"
+    },
+    "users": {
+      "list_success": "Tenant user list retrieved successfully",
+      "list_failed": "Failed to retrieve tenant user list",
+      "assign_success": "User assigned to tenant successfully",
+      "assign_failed": "Failed to assign user to tenant",
+      "remove_success": "User removed from tenant successfully",
+      "remove_failed": "Failed to remove user from tenant"
+    },
+    "statistics": {
+      "get_success": "Tenant statistics retrieved successfully",
+      "get_failed": "Failed to retrieve tenant statistics"
+    },
+    "validation": {
+      "name_required": "Tenant name is required",
+      "name_invalid": "Invalid tenant name format",
+      "name_too_long": "Tenant name cannot exceed {max} characters",
+      "description_too_long": "Tenant description cannot exceed {max} characters",
+      "language_code_invalid": "Invalid language code format",
+      "supported_languages_empty": "Supported languages list cannot be empty"
+    },
+    "errors": {
+      "not_found": "Tenant not found",
+      "already_exists": "Tenant name already exists",
+      "permission_denied": "Permission denied to access this tenant",
+      "has_users": "Cannot delete tenant, associated users exist",
+      "has_workspaces": "Cannot delete tenant, associated workspaces exist",
+      "already_active": "Tenant is already active",
+      "already_inactive": "Tenant is already inactive"
+    }
+  },
+  "users": {
+    "info": {
+      "get_success": "User information retrieved successfully",
+      "get_failed": "Failed to retrieve user information",
+      "update_success": "User information updated successfully",
+      "update_failed": "Failed to update user information"
+    },
+    "create": {
+      "success": "User created successfully",
+      "failed": "Failed to create user",
+      "superuser_success": "Superuser created successfully",
+      "superuser_failed": "Failed to create superuser"
+    },
+    "delete": {
+      "success": "User deleted successfully",
+      "failed": "Failed to delete user",
+      "deactivate_success": "User deactivated successfully",
+      "deactivate_failed": "Failed to deactivate user"
+    },
+    "activate": {
+      "success": "User activated successfully",
+      "failed": "Failed to activate user"
+    },
+    "language": {
+      "get_success": "Language preference retrieved successfully",
+      "get_failed": "Failed to retrieve language preference",
+      "update_success": "Language preference updated successfully",
+      "update_failed": "Failed to update language preference",
+      "invalid_language": "Unsupported language code",
+      "current": "Current language preference"
+    },
+    "email": {
+      "change_success": "Email changed successfully",
+      "change_failed": "Failed to change email",
+      "code_sent": "Verification code has been sent to your email",
+      "code_send_failed": "Failed to send verification code",
+      "code_invalid": "Invalid or expired verification code",
+      "already_exists": "Email already in use"
+    },
+    "list": {
+      "get_success": "User list retrieved successfully",
+      "get_failed": "Failed to retrieve user list",
+      "superusers_success": "Tenant superuser list retrieved successfully",
+      "superusers_failed": "Failed to retrieve tenant superuser list"
+    },
+    "validation": {
+      "username_required": "Username is required",
+      "username_invalid": "Invalid username format",
+      "username_too_long": "Username cannot exceed {max} characters",
+      "email_required": "Email is required",
+      "email_invalid": "Invalid email format",
+      "password_required": "Password is required",
+      "password_too_short": "Password must be at least {min} characters",
+      "password_too_long": "Password cannot exceed {max} characters",
+      "old_password_required": "Old password is required",
+      "new_password_required": "New password is required",
+      "verification_code_required": "Verification code is required",
+      "verification_code_invalid": "Invalid verification code format"
+    },
+    "errors": {
+      "not_found": "User not found",
+      "already_exists": "User already exists",
+      "permission_denied": "Permission denied to access this user",
+      "cannot_delete_self": "Cannot delete yourself",
+      "cannot_deactivate_self": "Cannot deactivate yourself",
+      "already_deactivated": "User is already deactivated",
+      "already_activated": "User is already activated",
+      "password_verification_failed": "Password verification failed",
+      "old_password_incorrect": "Old password is incorrect",
+      "same_as_old_password": "New password cannot be the same as old password"
+    }
+  },
+  "workspace": {
+    "list_retrieved": "Workspace list retrieved successfully",
+    "created": "Workspace created successfully",
+    "updated": "Workspace updated successfully",
+    "deleted": "Workspace deleted successfully",
+    "switched": "Workspace switched successfully",
+    "not_found": "Workspace not found or access denied",
+    "already_exists": "Workspace already exists",
+    "permission_denied": "No permission to access this workspace",
+    "name_required": "Workspace name is required",
+    "invalid_name": "Invalid workspace name format",
+    "retention_policy": {
+      "retrieved": "Workspace retention policy retrieved successfully",
+      "updated": "Workspace retention policy updated successfully"
+    },
+    "members": {
+      "list_retrieved": "Workspace members list retrieved successfully",
+      "role_updated": "Member role updated successfully",
+      "deleted": "Member deleted successfully",
+      "not_found": "Member not found",
+      "cannot_remove_self": "Cannot remove yourself",
+      "cannot_remove_last_manager": "Cannot remove the last manager",
+      "already_member": "User is already a workspace member"
+    },
+    "invites": {
+      "created": "Invite created successfully",
+      "list_retrieved": "Invite list retrieved successfully",
+      "validated": "Invite validated successfully",
+      "revoked": "Invite revoked successfully",
+      "accepted": "Invite accepted",
+      "not_found": "Invite not found",
+      "expired": "Invite has expired",
+      "already_used": "Invite has already been used",
+      "invalid_token": "Invalid invite token",
+      "email_required": "Email address is required",
+      "invalid_email": "Invalid email address format"
+    },
+    "storage": {
+      "type_retrieved": "Storage type retrieved successfully",
+      "type_updated": "Storage type updated successfully",
+      "invalid_type": "Invalid storage type"
+    },
+    "models": {
+      "config_retrieved": "Model configuration retrieved successfully",
+      "config_updated": "Model configuration updated successfully",
+      "invalid_config": "Invalid model configuration",
+      "config_verified": "Model configuration verified",
+      "default_config_updated_notice": "The workspace default model configuration has been updated.",
+      "slots": {
+        "llm": "LLM model",
+        "embedding": "Embedding model",
+        "rerank": "Rerank model",
+        "vision": "Vision model",
+        "audio": "Audio model",
+        "video": "Video model"
+      },
+      "errors": {
+        "save_failed": "Failed to save model configuration ({count} issue(s)): {reasons}",
+        "not_configured": "{slot} is not configured, please select an available model",
+        "not_found": "{slot}: the selected model does not exist (model id: {model_id})",
+        "inactive": "{slot}: the selected model \"{model_name}\" is disabled, please enable it in Model Management first",
+        "not_accessible": "{slot}: the selected model \"{model_name}\" is not available for the current tenant, please choose another one",
+        "deprecated": "{slot}: the selected model \"{model_name}\" is deprecated, please choose another one",
+        "capability_mismatch": "{slot} does not support the selected model \"{model_name}\" (model type: {model_type}), please choose a matching model",
+        "no_api_key": "{slot} \"{model_name}\" has no available API key, please configure one in Model Management",
+        "api_verify_failed": "{slot} \"{model_name}\" connectivity check failed: {error}",
+        "verify_failed": "{slot} \"{model_name}\" validation error: {error}",
+        "unsupported_dimension": "{slot}: the vector dimension of \"{model_name}\" is not supported ({error}), please pick a supported embedding model",
+        "embedding_switch_in_progress": "{slot} is switching, please wait until the existing memory vectors finish rebuilding before switching again"
+      }
+    }
+  }
+}

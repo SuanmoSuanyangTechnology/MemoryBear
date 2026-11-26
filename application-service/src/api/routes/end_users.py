@@ -4,10 +4,9 @@ path set after the gateway rewrite).
 Wires the monolith ``end_user_controller`` (manager, JWT) and
 ``service/end_user_api_controller`` (API-key) endpoints onto one router: both
 faces arrive as ``/internal/v1/end_user/*`` with the claims-injected identity,
-and the workspace always comes from the principal. Writes that carry
-memory-side effects (a merge hit on identity update, an alias change on info
-update) are forwarded to the monolith internal callback face; the PG-only
-paths run locally.
+and the workspace always comes from the principal. Identity merge, the
+info-update alias sync and the domain display projection all run inside
+memory-profile; the plain PG paths run locally.
 """
 
 from __future__ import annotations
@@ -21,7 +20,11 @@ from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 
 from ...errors import BizCode, BusinessException, InternalServerError
-from ...infrastructure.upstream import MonolithUpstream, UpstreamUnavailableError
+from ...integrations.memory_profile import (
+    MemoryProfileClient,
+    MemoryProfileProtocolError,
+    MemoryProfileUnavailableError,
+)
 from ...memory.metadata_models import project_display_profile
 from ...quota.alerts import report_quota_change_sync
 from ...quota.usage import require_end_user_quota
@@ -30,8 +33,14 @@ from ...repositories.end_user_info_repository import EndUserInfoRepository
 from ...repositories.end_user_repository import EndUserRepository
 from ...schemas import end_user_info_schema, end_user_schema
 from ...services.end_user_service import EndUserService
+from ...trace import get_trace_id
 from ...utils.datetime_utils import to_timestamp_ms
-from ..dependencies import Principal, get_principal, get_sync_db, get_upstream
+from ..dependencies import (
+    Principal,
+    get_memory_profile,
+    get_principal,
+    get_sync_db,
+)
 from ..schemas.common import fail, success
 from ..schemas.response_schema import ApiResponse, PageMeta
 
@@ -44,70 +53,62 @@ logger = logging.getLogger(__name__)
 
 DbSession = Annotated[Session, Depends(get_sync_db)]
 Caller = Annotated[Principal, Depends(get_principal)]
-Upstream = Annotated[MonolithUpstream, Depends(get_upstream)]
+MemoryProfile = Annotated[MemoryProfileClient, Depends(get_memory_profile)]
 EndUserQuota = Annotated[None, Depends(require_end_user_quota)]
 
 
-def _forward_response(
-    upstream: MonolithUpstream, path: str, payload: dict[str, Any], workspace_id: UUID
-) -> JSONResponse:
-    """Replay a write on the monolith internal callback face and pass its
-    response back unchanged (the caller has no open transaction at this
-    point). The workspace rides the explicit header: the callback channel has
-    no credential-bound workspace to fall back on."""
-
-    result = upstream.forward(
-        "POST",
-        path,
-        json_body=payload,
-        headers={"X-Workspace-Id": str(workspace_id)},
-    )
-    return JSONResponse(status_code=result.status_code, content=result.body)
-
-
 def _fetch_domain_projection(
-    upstream: MonolithUpstream, end_user_id: UUID, workspace_id: UUID
+    memory_profile: MemoryProfileClient,
+    principal: Principal,
+    end_user_id: UUID,
+    workspace_id: UUID,
 ) -> dict[str, Any]:
-    """取单体组装好的 ``domain_specific_info`` 投影，供本服务拼进响应。
+    """取记忆域组装好的 ``domain_specific_info`` 投影，供本服务拼进响应。
 
-    场景名和字段展示名来自本体配置表，只有单体的企业插件能读，本服务不重复
-    实现翻译：条目解析、按场景归组、同名合并去重、每字段截 10 条都在单体完成，
-    这里只拿成品。
+    场景名和字段展示名来自本体配置表，只有记忆域的企业插件能读，本服务不重复
+    实现翻译：条目解析、按场景归组、同名合并去重、每字段截 10 条都在
+    memory-profile 完成，这里只拿成品。
 
     降级策略：取不到就返回空字典，不阻断主响应。
-    - 未配置 upstream：属于部署缺配置，打 ERROR（补齐即可恢复）；
-    - 调用失败 / 单体返回非成功：属于运行期异常，打 WARNING 并带上状态码和业务码；
-    - 两种情况下响应里都是 ``domain_specific_info: {}``，与"该用户本来就没有领域
+    - 未配置 memory-profile：属于部署缺配置，打 ERROR（补齐即可恢复）；
+    - 调用失败 / 返回非成功 / 结构异常：属于运行期异常，打 WARNING 并带上业务码；
+    - 各种情况下响应里都是 ``domain_specific_info: {}``，与"该用户本来就没有领域
       数据"表现一致，前端不需要区分。
     """
 
-    if not upstream.configured:
+    if not memory_profile.configured:
         logger.error(
-            "Domain projection skipped: monolith upstream is not configured "
-            "(APPLICATION_SERVICE_UPSTREAM_BASE_URL / APPLICATION_SERVICE_CALLBACK_SECRET)"
+            "Domain projection skipped: memory-profile is not configured "
+            "(MEMORY_PROFILE_BASE_URL)"
         )
         return {}
     try:
-        result = upstream.forward(
-            "POST",
-            "/api/internal/app-service/end-user/domain-info",
-            json_body={"end_user_id": str(end_user_id)},
-            headers={"X-Workspace-Id": str(workspace_id)},
+        envelope = memory_profile.fetch_domain_profile(
+            end_user_id=end_user_id,
+            workspace_id=workspace_id,
+            tenant_id=principal.tenant_id,
+            actor_id=principal.actor_id,
+            trace_id=get_trace_id(),
         )
-    except UpstreamUnavailableError:
+    except MemoryProfileUnavailableError:
         logger.warning(
             "Domain projection callback unavailable for end_user=%s", end_user_id, exc_info=True
         )
         return {}
-    body = result.body if isinstance(result.body, dict) else {}
-    data = body.get("data")
-    domains = data.get("domain_specific_info") if isinstance(data, dict) else None
-    if result.status_code != 200 or body.get("code") != 0 or not isinstance(domains, dict):
+    except MemoryProfileProtocolError:
         logger.warning(
-            "Domain projection callback rejected: status=%s code=%s msg=%s",
-            result.status_code,
-            body.get("code"),
-            body.get("msg"),
+            "Domain projection callback returned an invalid envelope for end_user=%s",
+            end_user_id,
+            exc_info=True,
+        )
+        return {}
+    data = envelope.get("data")
+    domains = data.get("domain_specific_info") if isinstance(data, dict) else None
+    if envelope.get("code") != 0 or not isinstance(domains, dict):
+        logger.warning(
+            "Domain projection callback rejected: code=%s msg=%s",
+            envelope.get("code"),
+            envelope.get("msg"),
         )
         return {}
     return domains
@@ -118,7 +119,7 @@ def get_end_user_info(
     end_user_id: str,
     db: DbSession,
     principal: Caller,
-    upstream: Upstream,
+    memory_profile: MemoryProfile,
 ):
     workspace_id = principal.workspace_id
     if workspace_id is None:
@@ -167,11 +168,11 @@ def get_end_user_info(
     filtered_meta = project_display_profile(
         raw_meta, limit_per_key=END_USER_INFO_PROFILE_KEY_LIMIT
     )
-    # The domain projection needs ontology configuration only the monolith can
-    # query, so it comes back already assembled (parsing, grouping, dedupe and
-    # the 10-value cap all happen there).
+    # The domain projection needs ontology configuration only the memory domain
+    # can query, so it comes back already assembled (parsing, grouping, dedupe
+    # and the 10-value cap all happen inside memory-profile).
     filtered_meta["domain_specific_info"] = _fetch_domain_projection(
-        upstream, end_user.id, workspace_id
+        memory_profile, principal, end_user.id, workspace_id
     )
 
     response_data = {
@@ -190,7 +191,7 @@ def update_end_user_info(
     payload: end_user_info_schema.EndUserInfoUpdate,
     db: DbSession,
     principal: Caller,
-    upstream: Upstream,
+    memory_profile: MemoryProfile,
 ):
     workspace_id = principal.workspace_id
     end_user_id = payload.end_user_id
@@ -227,14 +228,19 @@ def update_end_user_info(
     outcome = EndUserService(db).update_end_user_info(str(end_user.id), update_data)
 
     if outcome.forward:
+        # An alias change carries a memory-side effect (the graph user entity
+        # and its outbox event), so the whole update runs inside memory-profile
+        # instead of locally; the caller has no open transaction at this point.
         try:
-            return _forward_response(
-                upstream,
-                "/api/internal/app-service/end-user/info-update",
-                payload.model_dump(exclude_unset=True),
+            envelope = memory_profile.update_end_user_info(
+                end_user_id=str(end_user.id),
+                update_data=update_data,
                 workspace_id=workspace_id,
+                tenant_id=principal.tenant_id,
+                actor_id=principal.actor_id,
+                trace_id=get_trace_id(),
             )
-        except UpstreamUnavailableError as error:
+        except (MemoryProfileUnavailableError, MemoryProfileProtocolError) as error:
             logger.error(
                 "Alias-sync forward failed: end_user_id=%s, error=%s",
                 end_user_id,
@@ -242,6 +248,9 @@ def update_end_user_info(
                 exc_info=True,
             )
             return fail(BizCode.INTERNAL_ERROR.value, "终端用户信息更新失败", str(error))
+        # Replay the memory-profile envelope unchanged (business failures keep
+        # their code/msg, exactly like the previous monolith replay).
+        return JSONResponse(status_code=200, content=envelope)
 
     if outcome.error is not None:
         if outcome.error == "终端用户信息记录不存在":
@@ -265,7 +274,7 @@ def update_end_user_identity(
     payload: end_user_schema.EndUserIdentityUpdate,
     db: DbSession,
     principal: Caller,
-    upstream: Upstream,
+    memory_profile: MemoryProfile,
 ):
     workspace_id = principal.workspace_id
     source_end_user_id = payload.end_user_id
@@ -300,21 +309,13 @@ def update_end_user_identity(
                 "end_user workspace mismatch",
             )
 
-        outcome = EndUserService(db).confirm_identity(
+        outcome = EndUserService(db, memory_profile=memory_profile).confirm_identity(
             workspace_id=workspace_id,
+            tenant_id=principal.tenant_id,
+            actor_id=principal.actor_id,
             current_end_user=end_user,
             identity_features=payload.identity_features,
         )
-        if outcome.forward:
-            # Merge hit: the cross-channel merge (PG reference migration, Neo4j
-            # reassignment, reflection dispatch) runs on the monolith; this
-            # transaction was rolled back and holds no lock.
-            return _forward_response(
-                upstream,
-                "/api/internal/app-service/end-user/identity-update",
-                payload.model_dump(),
-                workspace_id=workspace_id,
-            )
 
         raw_features = payload.identity_features
         clean_features = raw_features.strip() if raw_features and raw_features.strip() else None

@@ -197,6 +197,64 @@ class KnowledgeServiceClient:
             headers=self._transport.response_headers(upstream.headers, status_code=upstream.status_code),
         )
 
+    async def download_document(
+        self,
+        document_id: str,
+        context: KnowledgeCallContext,
+    ) -> StreamingResponse:
+        """Stream the original file behind a document from the internal face.
+
+        The knowledge service decides the not-found contract (404 envelope);
+        this method translates only the transport/carriage, raising the shared
+        knowledge errors so callers do not reimplement envelope parsing.
+        """
+
+        path = f"/internal/v1/documents/{document_id}/download"
+        self._validate_internal_path(path)
+        url = self._transport.internal_url(path)
+        headers = self._transport.request_headers(
+            {},
+            context,
+            CallProfile.STREAM_DOWNLOAD,
+        )
+        upstream = await self._transport.send(
+            method="GET",
+            url=url,
+            headers=headers,
+            profile=CallProfile.STREAM_DOWNLOAD,
+        )
+        status_code = upstream.status_code
+        trace_id = upstream.headers.get("X-Trace-Id", context.trace_id)
+        response_headers = self._transport.response_headers(
+            upstream.headers, status_code=status_code
+        )
+        if status_code >= 400:
+            try:
+                raw = await upstream.aread()
+            finally:
+                await upstream.aclose()
+            parse_envelope(
+                raw,
+                status_code=status_code,
+                trace_id=trace_id,
+                headers=response_headers,
+            )
+            # parse_envelope only returns for a 2xx success envelope.
+            raise KnowledgeProtocolError("Knowledge document download failed")
+
+        async def body_iterator() -> AsyncIterator[bytes]:
+            try:
+                async for chunk in upstream.aiter_raw():
+                    yield chunk
+            finally:
+                await upstream.aclose()
+
+        return StreamingResponse(
+            body_iterator(),
+            status_code=status_code,
+            headers=response_headers,
+        )
+
     async def retrieval_policy(
         self,
         *,

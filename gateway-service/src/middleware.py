@@ -64,6 +64,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse
 
 from .anonymous import (
+    is_home_page_version,
     is_license_status,
     is_storage_public_read,
     is_storage_share_upload,
@@ -279,6 +280,13 @@ class GatewayMiddleware(BaseHTTPMiddleware):
         # and anonymous here (monolith parity: no auth dependency on the
         # route). Unconditional; identity namespace stripped.
         if is_license_status(request.url.path, request.method):
+            self._anonymous_headers(request)
+            return await call_next(request)
+        # Home-page version card: anonymous by host contract (no auth
+        # dependency on the monolith route; the dashboard shows it regardless
+        # of login state). Unconditional and identity-namespace-stripped, same
+        # mechanics as the license status read.
+        if is_home_page_version(request.url.path, request.method):
             self._anonymous_headers(request)
             return await call_next(request)
         # File-service public reads (permanent/public/signed URL/status/info):

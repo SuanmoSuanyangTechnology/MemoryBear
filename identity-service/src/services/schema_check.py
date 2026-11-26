@@ -1,9 +1,9 @@
-"""启动期只读表契约校验（受控复制保障）。
+"""启动期共享表契约校验（受控复制保障）。
 
-identity 的 5 张只读模型是 core 表的本地副本（表结构唯一真源在 core，现阶段
-core 管理、未来随拆分迁入微服务）。core 改列名/删列时，副本在运行时才会报错；
-本模块在启动时对 information_schema 做列存在性检查，缺列即 fail-fast，把
-「运行时神秘报错」提前为「启动即明确失败」。
+identity 的 SharedBase 写镜像与 ReadOnlyBase 只读镜像都是 core 表的本地副本（表结构
+唯一真源在老单体迁移链，现阶段 core 管理、未来随拆分迁入微服务）。core 改列名/删列时，
+副本在运行时才会报错；本模块在启动时对 information_schema 做列存在性检查，缺列即
+fail-fast，把「运行时神秘报错」提前为「启动即明确失败」。
 """
 import logging
 
@@ -13,11 +13,16 @@ logger = logging.getLogger(__name__)
 
 
 async def verify_readonly_schema(session) -> list[str]:
-    """对 ReadOnlyBase 全部只读表做列存在性检查，返回缺失列清单（空 = 通过）。"""
-    from src.models.base import ReadOnlyBase
+    """对 SharedBase/ReadOnlyBase 全部镜像表做列存在性检查（空 = 通过）。"""
+    from src.models.base import ReadOnlyBase, SharedBase
+
+    overlap = set(SharedBase.metadata.tables) & set(ReadOnlyBase.metadata.tables)
+    if overlap:
+        raise RuntimeError(f"共享表镜像重复声明：{sorted(overlap)}")
 
     missing: list[str] = []
-    for table in ReadOnlyBase.metadata.sorted_tables:
+    tables = (*SharedBase.metadata.sorted_tables, *ReadOnlyBase.metadata.sorted_tables)
+    for table in tables:
         result = await session.execute(
             text("SELECT column_name FROM information_schema.columns WHERE table_name = :t"),
             {"t": table.name},
@@ -34,6 +39,7 @@ async def assert_readonly_schema(session) -> None:
     missing = await verify_readonly_schema(session)
     if missing:
         raise RuntimeError(
-            "只读表契约校验失败：core 表缺少本地模型声明的列，请同步 "
-            "identity/models/*（列清单：" + ", ".join(sorted(missing)) + "）"
+            "镜像表契约校验失败：core 表缺少本地模型声明的列，请同步 "
+            "identity/models/*（SharedBase 写镜像 / ReadOnlyBase 只读镜像；列清单："
+            + ", ".join(sorted(missing)) + "）"
         )

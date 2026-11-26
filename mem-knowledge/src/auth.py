@@ -48,10 +48,15 @@ _PUBLIC_PATHS = {
     "/internal/v1/knowledges/parsertype",
 }
 
-# 公开例外仅限精确单文件下载 GET /internal/v1/files/{uuid}（浏览器 <img> 渲染
-# 无鉴权头，评审稿 4.3.4）。必须精确匹配整段路径：列表等其余 /files/* 路由若公开，
-# 攻击者可伪造 X-KB-* 头跨工作区拉取文件。
+# 公开例外仅限精确下载路径：单文件 GET /internal/v1/files/{uuid}（浏览器 <img>
+# 渲染无鉴权头，评审稿 4.3.4）与引用文档原文件
+# GET /internal/v1/documents/{uuid}/download（应用引用下载是能力 URL，公开契约）。
+# 必须精确匹配整段路径：列表等其余 /files/*、/documents/* 路由若公开，攻击者可
+# 伪造 X-KB-* 头跨工作区拉取文件。
 _SINGLE_FILE_DOWNLOAD_RE = re.compile(r"/internal/v1/files/[0-9a-fA-F-]{36}")
+_SINGLE_DOCUMENT_DOWNLOAD_RE = re.compile(
+    r"/internal/v1/documents/[0-9a-fA-F-]{36}/download"
+)
 
 
 @dataclass
@@ -73,8 +78,13 @@ class KbAuthConfig:
     acl_rules_changed_channel: str = "acl:rules:changed"
 
 
-def _is_single_file_download(path: str, method: str) -> bool:
-    return method == "GET" and _SINGLE_FILE_DOWNLOAD_RE.fullmatch(path) is not None
+def _is_public_download(path: str, method: str) -> bool:
+    if method != "GET":
+        return False
+    return (
+        _SINGLE_FILE_DOWNLOAD_RE.fullmatch(path) is not None
+        or _SINGLE_DOCUMENT_DOWNLOAD_RE.fullmatch(path) is not None
+    )
 
 
 def _has_credentials(request: Request) -> bool:
@@ -93,7 +103,7 @@ def _has_identity_headers(request: Request) -> bool:
 def is_public_path(path: str, method: str) -> bool:
     if path in _PUBLIC_PATHS:
         return True
-    return _is_single_file_download(path, method)
+    return _is_public_download(path, method)
 
 
 def _load_gateway_auth(kb_auth: KbAuthConfig):
@@ -160,15 +170,16 @@ class KbAuthMiddleware(BaseHTTPMiddleware):
             return await call_next(request)
         path = request.url.path
         if is_public_path(path, request.method):
-            # Single-file download exemption: only requests with neither
-            # credentials nor identity headers short-circuit (browser <img>
-            # rendering / the monolith's public-download proxy sends only the
+            # Public download exemptions (single file / cited document): only
+            # requests with neither credentials nor identity headers
+            # short-circuit (browser <img> rendering / the app citation
+            # download / the monolith's public-download proxy sends only the
             # X-KB-Source header). Requests carrying credentials (channel-1
             # internal token) must run the gateway dispatch; requests carrying
             # the injected X-KB-* headers (gateway direct mode) must run the
             # trust path — letting them through would leave principal=None with
             # source=GENERAL → 400 KB_PRINCIPAL_INVALID.
-            if (not _is_single_file_download(path, request.method)
+            if (not _is_public_download(path, request.method)
                     or (not _has_credentials(request) and not _has_identity_headers(request))):
                 return await call_next(request)
         if self._kb_auth.auth_mode == "gateway":

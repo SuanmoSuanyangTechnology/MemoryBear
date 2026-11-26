@@ -18,7 +18,6 @@ from src.modules.analytics.schemas import (
     GenerateCacheBody,
     GenerateCacheUserResult,
     GraphDataResponse,
-    HotMemoryTag,
     InterestItem,
     MemoryInsightData,
     MemoryTypeStatistic,
@@ -132,20 +131,6 @@ async def scene_community_graph(
     ),
 ) -> GraphResponse:
     return await _handler(request).scene_community_graph(context, end_user_id)
-
-
-@router.get("/hot_memory_tags", response_model=ApiResponse[list[HotMemoryTag]])
-@external_api
-async def hot_memory_tags(
-        request: Request,
-        context: Context,
-        limit: int = 10,
-) -> ApiResponse[list[HotMemoryTag]]:
-    """工作空间热门记忆标签（api 侧参数无上下界；``limit <= 0`` 回落 10）。"""
-
-    return await _handler(request).hot_memory_tags(
-        context, limit, get_request_language(request)
-    )
 
 
 @router.get("/user_profile", response_model=ObjectApiResponse)

@@ -6,14 +6,24 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, Header, Query, Request
 from fastapi.responses import StreamingResponse
 
+from src.common.external_api import external_api
 from src.common.responses import ApiResponse
 from src.common.language_utils import get_language_from_header
+from src.i18n import get_request_language
 from src.middleware.auth import MemoryPrincipal
 from src.middleware.identity import require_memory_context
 from src.modules.memory_storage.handler import MemoryStorageHandler
-from src.schemas.memory_storage import DeleteNodeRequest, PilotRunInput, TrialRunChatInput
+from src.schemas.memory_storage import (
+    DeleteNodeRequest,
+    HotMemoryTag,
+    PilotRunInput,
+    TrialRunChatInput,
+)
 
 router = APIRouter(prefix="/memory-storage", tags=["Memory Storage"])
+#: 单体把热门标签声明在 memory_storage 控制器，但 API-Key 面的对外路径在分析域
+#: （``/v1/memory/analytics/hot_memory_tags``）；同一实现在两个前缀下注册。
+analytics_router = APIRouter(prefix="/memory/analytics", tags=["Profile Analytics"])
 Context = Annotated[MemoryPrincipal, Depends(require_memory_context)]
 
 
@@ -84,6 +94,33 @@ async def memory_space_entity_timeline(
 @router.get("/memory_space/relationship_evolution", response_model=ApiResponse[Any])
 async def memory_space_relationship_evolution(request: Request, context: Context, id: str, label: str):
     return await _handler(request).relationship_evolution(context, id, label)
+
+
+@router.get("/analytics/hot_memory_tags", response_model=ApiResponse[list[HotMemoryTag]])
+async def memory_storage_hot_memory_tags(
+    request: Request,
+    context: Context,
+    limit: int = 10,
+) -> ApiResponse[list[HotMemoryTag]]:
+    """管理端历史前缀下的热门记忆标签（单体 ``memory_storage_controller`` 的路径）。"""
+
+    return await _handler(request).hot_memory_tags(
+        context, limit, get_request_language(request)
+    )
+
+
+@analytics_router.get("/hot_memory_tags", response_model=ApiResponse[list[HotMemoryTag]])
+@external_api
+async def hot_memory_tags(
+    request: Request,
+    context: Context,
+    limit: int = 10,
+) -> ApiResponse[list[HotMemoryTag]]:
+    """工作空间热门记忆标签（API-Key 面的原始路径，进入外部契约快照）。"""
+
+    return await _handler(request).hot_memory_tags(
+        context, limit, get_request_language(request)
+    )
 
 
 @router.post("/pilot_run", response_model=None)
