@@ -65,9 +65,14 @@ async def publish_dashboard_tasks(
         for task in tasks:
             payload = {field: page[field] for field in task.payload_fields}
             try:
-                task_id = await runtime.task_bridge.submit(
-                    task.name, kwargs=payload, queue=task.queue, priority=task.priority
-                )
+                if task.queue == QueueName.MEMORY_JOBS.value:
+                    task_id = await runtime.task_bridge.submit(
+                        task.name, kwargs=payload, queue=task.queue, priority=task.priority
+                    )
+                else:
+                    task_id = await runtime.api_tasks.submit(
+                        task.name, kwargs=payload, queue=task.queue
+                    )
             except Exception:
                 logger.exception(
                     "Dashboard publish failed trace=%s workspace=%s hosts=%s task=%s",
