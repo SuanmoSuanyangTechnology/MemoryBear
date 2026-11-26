@@ -1,12 +1,15 @@
-"""Sync HTTP client of memory-profile's internal end-user faces.
+"""HTTP client of memory-profile's internal faces called by this service.
 
 The end-user memory-side effects execute inside memory-profile: it owns the
 memory write locks (``memory_write:<end_user_id>``, shared with the monolith),
 every derived memory artifact (graph reassignment, RAG migration, reflection
-dispatch), the alias graph sync and the assembled domain display projection.
-This client carries the three end-user callbacks and validates the ApiResponse
-envelope; every failure is raised so the caller decides the posture (the merge
-and info-update paths fail closed, the projection read degrades to empty).
+dispatch), the alias graph sync, the assembled domain display projection and
+the long-term memory read pipeline. The end-user callbacks run on the
+management plane (sync); the read callback runs inside the agent runtime
+(async), so this client carries one sync and one async transport. Every failure
+is raised so the caller decides the posture (the merge and info-update paths
+fail closed, the projection read degrades to empty, the memory read fails the
+tool call visibly).
 """
 
 from __future__ import annotations
@@ -19,6 +22,7 @@ import httpx
 from ...config import AppServiceSettings
 
 MERGE_PATH = "/internal/v1/memory/merge"
+READ_APP_SERVICE_PATH = "/internal/v1/memory/read/app-service"
 DOMAIN_PROFILE_PATH = "/internal/v1/end-user/domain-profile"
 INFO_UPDATE_PATH = "/internal/v1/end-user/info-update"
 _SOURCE_INTERNAL = "in_api"
@@ -45,6 +49,7 @@ class MemoryProfileClient:
         read_timeout_seconds: float = 120.0,
         write_timeout_seconds: float = 600.0,
         transport: httpx.BaseTransport | None = None,
+        async_transport: httpx.AsyncBaseTransport | None = None,
     ) -> None:
         self._base_url = (base_url or "").strip().rstrip("/")
         # Read stays the default phase; connect/pool keep their own short
@@ -57,7 +62,9 @@ class MemoryProfileClient:
             write=write_timeout_seconds,
         )
         self._transport = transport
+        self._async_transport = async_transport
         self._client: httpx.Client | None = None
+        self._async_client: httpx.AsyncClient | None = None
 
     @classmethod
     def from_settings(cls, settings: AppServiceSettings) -> MemoryProfileClient:
@@ -83,6 +90,16 @@ class MemoryProfileClient:
             )
         return self._client
 
+    def _get_async_client(self) -> httpx.AsyncClient:
+        if self._async_client is None:
+            self._async_client = httpx.AsyncClient(
+                base_url=self._base_url,
+                timeout=self._timeout,
+                transport=self._async_transport,
+                trust_env=False,
+            )
+        return self._async_client
+
     def merge_users(
         self,
         *,
@@ -105,6 +122,35 @@ class MemoryProfileClient:
         }
         return self._post(
             MERGE_PATH,
+            payload,
+            self._internal_headers(
+                workspace_id=workspace_id,
+                tenant_id=tenant_id,
+                actor_id=actor_id,
+                trace_id=trace_id,
+            ),
+        )
+
+    async def read_app_service_memory(
+        self,
+        *,
+        payload: dict[str, Any],
+        workspace_id: UUID,
+        tenant_id: UUID,
+        actor_id: UUID,
+        trace_id: str,
+    ) -> dict[str, Any]:
+        """Run the long-term memory read callback; returns the raw envelope.
+
+        ``payload`` is the host ``MemoryReadRequest`` the read stores carried
+        (``end_user_id`` / ``query`` / ``search_switch`` / caller-owned
+        options); the face honours every field. Business failures keep the
+        legacy envelope (HTTP 200 + non-zero ``code``); only transport and
+        malformed responses raise here.
+        """
+
+        return await self._apost(
+            READ_APP_SERVICE_PATH,
             payload,
             self._internal_headers(
                 workspace_id=workspace_id,
@@ -195,34 +241,75 @@ class MemoryProfileClient:
             raise MemoryProfileUnavailableError(
                 f"memory profile call failed: {error}"
             ) from error
+        return _parse_envelope(response)
+
+    async def _apost(
+        self, path: str, payload: dict[str, Any], headers: dict[str, str]
+    ) -> dict[str, Any]:
+        """Async twin of :meth:`_post` for the runtime-plane read callback."""
+
+        if not self.configured:
+            raise MemoryProfileUnavailableError("memory profile service is not configured")
 
         try:
-            envelope = response.json()
-        except ValueError as error:
-            raise MemoryProfileProtocolError(
-                "memory profile returned invalid JSON"
-            ) from error
-        if (
-            not isinstance(envelope, dict)
-            or not _REQUIRED_ENVELOPE_FIELDS.issubset(envelope)
-            or not isinstance(envelope.get("code"), int)
-        ):
-            raise MemoryProfileProtocolError(
-                "memory profile returned an invalid ApiResponse envelope"
+            response = await self._get_async_client().post(
+                path, json=payload, headers=headers
             )
-        return envelope
+        except httpx.HTTPError as error:
+            raise MemoryProfileUnavailableError(
+                f"memory profile call failed: {error}"
+            ) from error
+        return _parse_envelope(response)
 
     def close(self) -> None:
         if self._client is not None:
             self._client.close()
             self._client = None
 
+    async def aclose(self) -> None:
+        if self._async_client is not None:
+            await self._async_client.aclose()
+            self._async_client = None
+
+
+def _parse_envelope(response: httpx.Response) -> dict[str, Any]:
+    """Validate the ApiResponse envelope; transport failures raise."""
+
+    try:
+        envelope = response.json()
+    except ValueError as error:
+        raise MemoryProfileProtocolError(
+            "memory profile returned invalid JSON"
+        ) from error
+    if (
+        not isinstance(envelope, dict)
+        or not _REQUIRED_ENVELOPE_FIELDS.issubset(envelope)
+        or not isinstance(envelope.get("code"), int)
+    ):
+        raise MemoryProfileProtocolError(
+            "memory profile returned an invalid ApiResponse envelope"
+        )
+    return envelope
+
+
+def get_memory_profile_client() -> MemoryProfileClient | None:
+    """Runtime-owned memory-profile client; ``None`` when the runtime is not assembled."""
+
+    from ...runtime import get_process_runtime
+
+    try:
+        return get_process_runtime().memory_profile
+    except Exception:
+        return None
+
 
 __all__ = [
     "DOMAIN_PROFILE_PATH",
     "INFO_UPDATE_PATH",
     "MERGE_PATH",
+    "READ_APP_SERVICE_PATH",
     "MemoryProfileClient",
     "MemoryProfileProtocolError",
     "MemoryProfileUnavailableError",
+    "get_memory_profile_client",
 ]

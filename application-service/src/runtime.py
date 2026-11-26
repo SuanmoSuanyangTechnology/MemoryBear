@@ -37,6 +37,7 @@ class ProcessRuntime:
             self.redis.aclose,
             self.database.aclose_async,
             self.upstream.aclose,
+            self.memory_profile.aclose,
         ):
             try:
                 await close()
