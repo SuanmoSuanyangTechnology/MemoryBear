@@ -1,5 +1,6 @@
 """Versioned management over the shared knowledge rules and configuration rows."""
 
+import logging
 from datetime import datetime
 from typing import Any, cast
 from uuid import UUID
@@ -29,6 +30,8 @@ from .knowledge_model_validation import (
     validate_requested_knowledge_model_availability,
     validate_requested_knowledge_models,
 )
+
+logger = logging.getLogger(__name__)
 
 MODEL_FIELDS = ("embedding", "reranker", "llm")
 MULTIMODAL_MODEL_FIELDS = ("image2text", "audio2text", "video2text")
@@ -189,7 +192,16 @@ def folder_path(parent_id: UUID | None, folders: dict) -> list[dict[str, Any]]:
 
 async def folder_tree(
     db: AsyncSession, principal: Principal, parent_id: UUID | None = None,
+    keywords: str | None = None,
 ) -> dict[str, Any]:
+    keywords = (keywords or "").strip()
+    if keywords:
+        if parent_id is not None:
+            raise KnowledgeError.from_code(
+                "KB_VALIDATION_ERROR", status_code=422,
+                diagnostic="query.parent_id: cannot be combined with folder search keywords",
+            )
+        return await _search_folder_tree(db, principal.workspace_id, keywords)
     if parent_id is not None and await directory_repository.get_folder(
         db, principal.workspace_id, parent_id,
     ) is None:
@@ -210,6 +222,68 @@ async def folder_tree(
             for folder in folders
         ],
     }
+
+
+async def _search_folder_tree(
+    db: AsyncSession, workspace_id: UUID, keywords: str,
+) -> dict[str, Any]:
+    matches = await directory_repository.search_folders(db, workspace_id, keywords)
+    if not matches:
+        return {"folders": []}
+    folders = await directory_repository.get_ancestor_folders(
+        db, workspace_id, {folder.parent_id for folder in matches},
+    )
+    folders.update((folder.id, folder) for folder in matches)
+    valid_paths = {}
+    for match in matches:
+        path = set()
+        current = match.id
+        while current in folders and current not in valid_paths and current not in path:
+            path.add(current)
+            parent_id = folders[current].parent_id
+            current = None if parent_id == workspace_id else parent_id
+        valid = current not in path and valid_paths.get(current, True)
+        valid_paths.update((folder_id, valid) for folder_id in path)
+    skipped = sum(not valid_paths[match.id] for match in matches)
+    if skipped:
+        logger.warning(
+            "Skip folder search matches with ancestor cycle: workspace_id=%s count=%s",
+            workspace_id, skipped,
+        )
+    ordered = sorted(
+        (folder for folder_id, folder in folders.items() if valid_paths.get(folder_id)),
+        key=lambda folder: (
+            folder.created_at is None, folder.created_at or datetime.min, folder.id,
+        ),
+        reverse=True,
+    )
+    counts, children = await directory_repository.directory_counts(
+        db, workspace_id, [folder.id for folder in ordered],
+    )
+    match_ids = {folder.id for folder in matches}
+    nodes = {
+        folder.id: {
+            "id": folder.id,
+            "name": folder.name,
+            "parent_id": (
+                folder.parent_id
+                if folder.parent_id != workspace_id and valid_paths.get(folder.parent_id)
+                else None
+            ),
+            "knowledge_count": counts.get(folder.id, 0),
+            "has_children": folder.id in children,
+            "is_match": folder.id in match_ids,
+            "children": [],
+        }
+        for folder in ordered
+    }
+    roots = []
+    for node in nodes.values():
+        if node["parent_id"] is None:
+            roots.append(node)
+        else:
+            nodes[node["parent_id"]]["children"].append(node)
+    return {"folders": roots}
 
 
 async def list_knowledges(db: AsyncSession, principal: Principal, **query) -> dict[str, Any]:

@@ -25,7 +25,7 @@ def visible_knowledge_filters(workspace_id: UUID) -> list:
 
 
 def folder_query(workspace_id: UUID):
-    return select(Knowledge.id, Knowledge.name, Knowledge.parent_id).where(
+    return select(Knowledge.id, Knowledge.name, Knowledge.parent_id, Knowledge.created_at).where(
         Knowledge.workspace_id == workspace_id,
         Knowledge.type == "Folder",
         Knowledge.permission_id.not_in((PermissionType.Share, PermissionType.Memory)),
@@ -50,6 +50,11 @@ async def get_folder_children(db: AsyncSession, workspace_id: UUID, parent_id: U
     stmt = folder_query(workspace_id).where(
         root_filter(workspace_id) if parent_id is None else Knowledge.parent_id == parent_id,
     ).order_by(Knowledge.created_at.desc(), Knowledge.id.desc())
+    return (await db.execute(stmt)).all()
+
+
+async def search_folders(db: AsyncSession, workspace_id: UUID, keywords: str):
+    stmt = folder_query(workspace_id).where(Knowledge.name.icontains(keywords, autoescape=True))
     return (await db.execute(stmt)).all()
 
 
