@@ -5097,7 +5097,7 @@ def do_extract_ai_personality_for_user(
         self,
         end_user_id: str,
         workspace_id: str,
-        expected_source_version: str,
+        expected_source_version: str | None,
         lock_token: str,
 ) -> Dict[str, Any]:
     """通过企业插件读取证据，提取人格条目并发布企业 pending 批次。"""
@@ -5112,6 +5112,9 @@ def do_extract_ai_personality_for_user(
     from app.core.memory.pipelines.base_pipeline import ModelClientMixin
     from app.schemas.memory_config_schema import ConfigurationError
 
+    from premium.memory.ai_personality.errors import StaleBatchError
+
+    is_manual = expected_source_version is None
     started_at = time.time()
     redis_client = get_sync_redis_client()
     inflight_key = AI_PERSONALITY_INFLIGHT_KEY_FMT.format(end_user_id=end_user_id)
@@ -5122,7 +5125,8 @@ def do_extract_ai_personality_for_user(
     # 排队超过派发去重窗口也可执行；运行锁在启动时获取并覆盖任务硬超时。
     acquired = redis_client.set(running_key, lock_token, nx=True, ex=AI_PERSONALITY_RUNNING_TTL_SEC)
     if not acquired:
-        redis_client.eval(UNLOCK_SCRIPT, 1, inflight_key, lock_token)
+        if not is_manual:
+            redis_client.eval(UNLOCK_SCRIPT, 1, inflight_key, lock_token)
         return {"status": "skipped_inflight", "entry_count": 0}
 
     async def _run() -> Dict[str, Any]:
@@ -5136,7 +5140,7 @@ def do_extract_ai_personality_for_user(
                 if memory_config is None:
                     logger.info("AI人格do跳过未启用空间 user=%s workspace=%s", end_user_id, workspace_id)
                     return {"status": "skipped_disabled", "entry_count": 0}
-            except (BusinessException, ValueError) as exc:
+            except (BusinessException, ConfigurationError, ValueError) as exc:
                 logger.warning("AI人格do跳过无可用配置 user=%s workspace=%s: %s", end_user_id, workspace_id, exc)
                 return {"status": "skipped_no_config", "entry_count": 0}
 
@@ -5156,7 +5160,7 @@ def do_extract_ai_personality_for_user(
         if (
             snapshot.end_user_id != end_user_id
             or snapshot.workspace_id != workspace_id
-            or snapshot.source_version != expected_source_version
+            or (not is_manual and snapshot.source_version != expected_source_version)
         ):
             raise RuntimeError("Enterprise evidence snapshot identity or source version mismatch")
 
@@ -5182,7 +5186,7 @@ def do_extract_ai_personality_for_user(
                     expires_at=expires_at,
                     outcome=outcome,
                     entries=entries,
-                ))
+                ), allow_repeat=is_manual)
             except SourceChangedError:
                 return False
             return True
@@ -5239,9 +5243,12 @@ def do_extract_ai_personality_for_user(
             "expires_at": to_iso_z(expires_at),
         }
 
-    loop = set_asyncio_event_loop()
+    loop = None
     try:
+        loop = set_asyncio_event_loop()
         result = loop.run_until_complete(_run())
+    except StaleBatchError:
+        result = {"status": "skipped_stale_batch", "entry_count": 0}
     except Exception as exc:
         logger.error(
             "AI人格提取失败 user=%s workspace=%s error_type=%s",
@@ -5252,9 +5259,11 @@ def do_extract_ai_personality_for_user(
         )
         raise
     finally:
-        _shutdown_loop_gracefully(loop)
-        # 仅释放本任务持有的锁，避免误删后续任务的 token。
-        for key in (running_key, inflight_key):
+        if loop is not None:
+            _shutdown_loop_gracefully(loop)
+        # 仅释放本任务持有的锁；手动任务没有派发锁。
+        lock_keys = (running_key,) if is_manual else (running_key, inflight_key)
+        for key in lock_keys:
             try:
                 redis_client.eval(UNLOCK_SCRIPT, 1, key, lock_token)
             except Exception:

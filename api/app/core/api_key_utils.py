@@ -142,19 +142,20 @@ def validate_end_user_in_workspace(
 
 async def validate_end_user_in_workspace_async(
         db: AsyncSession,
-        end_user_id: str,
+        end_user_id: str | _uuid.UUID,
         workspace_id,
         *,
         locale: str | None = None,
 ) -> _EndUser:
     locale = locale or get_current_locale()
-    try:
-        end_user_id = _uuid.UUID(end_user_id)
-    except (ValueError, AttributeError):
-        raise _BusinessException(
-            t("memory.errors.invalid_end_user_id", locale, value=end_user_id),
-            _BizCode.INVALID_PARAMETER,
-        )
+    if not isinstance(end_user_id, _uuid.UUID):
+        try:
+            end_user_id = _uuid.UUID(end_user_id)
+        except (ValueError, AttributeError):
+            raise _BusinessException(
+                t("memory.errors.invalid_end_user_id", locale, value=end_user_id),
+                _BizCode.INVALID_PARAMETER,
+            )
 
     end_user_repo = _EndUserRepository(db)
     end_user = await end_user_repo.get_end_user_by_id_async(end_user_id)
