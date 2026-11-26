@@ -287,6 +287,19 @@
             "level": 1,
             "sort": 0,
             "subs": null
+          },
+          {
+            "id": 223,
+            "parent": 21,
+            "code": "spatiotemporalEngine",
+            "label": "时空维度记忆锚定引擎",
+            "i18nKey": "menu.spatiotemporalEngine",
+            "path": "/memory-engine/spatiotemporal-engine/:id",
+            "enable": true,
+            "display": false,
+            "level": 1,
+            "sort": 0,
+            "subs": null
           }
         ]
       },
