@@ -74,6 +74,10 @@ from src.schemas.scene_community import (
     CommunityPreviewResult,
 )
 from src.schemas.scene_demo import SceneSplitDemoResponse
+from src.schemas.spatiotemporal_anchor_config import (
+    SpatiotemporalAnchorData,
+    SpatiotemporalAnchorUpdate,
+)
 from src.services.memory_config import (
     ConfigAccessDeniedError,
     ConfigNotFoundError,
@@ -154,6 +158,27 @@ class MemoryConfigHandler:
                 failure(BizCode.INTERNAL_ERROR, "查询失败", "场景查询失败，请稍后重试"),
             )
         return success(data, "查询成功")
+
+    async def read_spatiotemporal_anchor(
+        self, principal: MemoryPrincipal, config_id: UUID, request: Request
+    ) -> ApiResponse[SpatiotemporalAnchorData] | JSONResponse:
+        try:
+            data = await self.query.spatiotemporal_anchor(config_id, principal.workspace_id)
+        except ConfigNotFoundError:
+            return error_response(
+                request,
+                200,
+                failure(
+                    BizCode.MEMORY_CONFIG_NOT_FOUND,
+                    translate_request(request, "memory_config.error.not_found_or_denied"),
+                ),
+            )
+        except Exception:
+            logger.exception("read_config_spatiotemporal_anchor failed")
+            return server_error_response(
+                request, translate_request(request, "memory_config.error.query_failed")
+            )
+        return success(data, translate_request(request, "memory_config.success.query"))
 
     async def read_personality_anchor(
         self, principal: MemoryPrincipal, config_id: Any, request: Request
@@ -497,6 +522,27 @@ class MemoryConfigHandler:
         return success(data, translate_request(request, "memory_config.success.query"))
 
     # ── Writes ───────────────────────────────────────────────────────────
+
+    async def update_spatiotemporal_anchor(
+        self, principal: MemoryPrincipal, body: SpatiotemporalAnchorUpdate, request: Request
+    ) -> ApiResponse[SpatiotemporalAnchorData] | JSONResponse:
+        try:
+            data = await self.mutation.update_spatiotemporal_anchor(body, principal.workspace_id)
+        except ConfigNotFoundError:
+            return error_response(
+                request,
+                200,
+                failure(
+                    BizCode.MEMORY_CONFIG_NOT_FOUND,
+                    translate_request(request, "memory_config.error.not_found_or_denied"),
+                ),
+            )
+        except Exception:
+            logger.exception("update_config_spatiotemporal_anchor failed")
+            return server_error_response(
+                request, translate_request(request, "memory_config.error.update_failed")
+            )
+        return success(data, translate_request(request, "memory_config.success.update"))
 
     async def update_personality_anchor(
         self,

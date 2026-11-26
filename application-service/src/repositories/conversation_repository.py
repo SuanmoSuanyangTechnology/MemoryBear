@@ -17,6 +17,25 @@ from ..models.conversation_model import Conversation, Message
 logger = logging.getLogger(__name__)
 
 
+def select_first_log_user_message(conversation_id):
+    """Select the first visible user message with a non-blank body."""
+    return (
+        select(Message.content)
+        .where(
+            Message.conversation_id == conversation_id,
+            Message.role == "user",
+            Message.is_deleted.is_not(True),
+            or_(
+                Message.is_current.is_not(False),
+                Message.meta_data["log_only"].as_string() == "true",
+            ),
+            Message.content.op("~")("[^[:space:]]"),
+        )
+        .order_by(Message.created_at.asc().nulls_last(), Message.id)
+        .limit(1)
+    )
+
+
 class ConversationRepository:
     """Conversation table reads (app-log / share faces) plus the chat-kernel writes."""
 

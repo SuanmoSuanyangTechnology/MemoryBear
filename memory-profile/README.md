@@ -475,6 +475,15 @@ uv run python -m compileall -q src scripts migrations
 uv run python scripts/check_import_boundaries.py
 ```
 
+The reflection-log contract tests seed their own throwaway PostgreSQL database
+and drop it afterwards. Point them at any database whose role can
+`CREATE DATABASE`; they are skipped when the variable is unset:
+
+```bash
+PROFILE_TEST_DATABASE_URL=postgresql+asyncpg://postgres:postgres@127.0.0.1:5432/postgres \
+  uv run pytest tests
+```
+
 Build from the repository root so Docker can use the service-specific ignore file:
 
 ```bash

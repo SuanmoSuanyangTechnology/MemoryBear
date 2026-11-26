@@ -22,6 +22,7 @@ from sqlalchemy import (
     insert as sa_insert,
     update as sa_update,
     case as sa_case,
+    func as sa_func,
     text as sa_text,
 )
 from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -349,11 +350,11 @@ async def _bulk_persist_messages(
     rows actually inserted (via ``RETURNING id``).
     """
     from ..models.conversation_model import Message, Conversation
+    from ..repositories.conversation_repository import select_first_log_user_message
     from .chat_context import StreamResult
 
     rows: list[dict[str, Any]] = []
     row_conv: dict[uuid_module.UUID, uuid_module.UUID] = {}
-    conv_titles: dict[uuid_module.UUID, str | None] = {}
 
     def _add_row(row: dict[str, Any], conv_id: uuid_module.UUID) -> None:
         rows.append(row)
@@ -376,7 +377,7 @@ async def _bulk_persist_messages(
         if task.task_type == "save_failed_message":
             user_msg_id = args.get("user_message_id", uuid_module.uuid4())
             msg_id = args.get("message_id", uuid_module.uuid4())
-            user_content = args.get("user_message_content", "")
+            user_content = args.get("user_message_content") or ""
             user_meta = {"files": args.get("files_meta", [])}
             if args.get("history_files"):
                 user_meta["history_files"] = args["history_files"]
@@ -397,7 +398,6 @@ async def _bulk_persist_messages(
                 status="failed", parent_message_id=user_msg_id if log_only else None,
                 created_at=args.get("finished_at"), is_current=not log_only,
             ), conv_id)
-            conv_titles[conv_id] = None
             continue
 
         # --- save_messages ---
@@ -482,11 +482,6 @@ async def _bulk_persist_messages(
                       status=args.get("assistant_status", "completed"),
                       parent_message_id=user_msg_id), conv_id)
 
-        conv_titles[conv_id] = (
-            user_content[:50] + ("..." if len(user_content) > 50 else "")
-            if user_content else None
-        )
-
     # --- dedupe rows within the batch (same task enqueued twice, or success +
     # failed tasks sharing one message pair) ---
     seen_ids: set[uuid_module.UUID] = set()
@@ -526,17 +521,25 @@ async def _bulk_persist_messages(
     for mid in inserted_ids:
         actual_deltas[row_conv[mid]] += 1
 
+    content = sa_func.regexp_replace(Message.content, "^[[:space:]]+|[[:space:]]+$", "", "g")
+    title = sa_func.concat(
+        sa_func.left(content, 50),
+        sa_case((sa_func.length(content) > 50, "..."), else_=""),
+    )
     for conv_id, delta in actual_deltas.items():
-        if delta <= 0:
-            continue
+        first_title = select_first_log_user_message(conv_id).with_only_columns(title).scalar_subquery()
         values: dict[str, Any] = {
             "message_count": Conversation.message_count + delta,
-        }
-        if conv_titles.get(conv_id):
-            values["title"] = sa_case(
-                (Conversation.message_count <= 1, conv_titles[conv_id]),
+            "title": sa_case(
+                (
+                    (Conversation.message_count <= 1)
+                    | Conversation.title.is_(None)
+                    | Conversation.title.in_(("", "New Conversation")),
+                    sa_func.coalesce(first_title, Conversation.title),
+                ),
                 else_=Conversation.title,
-            )
+            ),
+        }
         await db.execute(
             sa_update(Conversation).where(Conversation.id == conv_id).values(**values)
         )
