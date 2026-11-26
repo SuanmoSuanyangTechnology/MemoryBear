@@ -1,7 +1,9 @@
 /**
- * Chat / ChatToolbar 公共 props 配置
- * 桌面端与移动端布局共用的 Chat、ChatToolbar 属性集中在此，避免两处重复维护。
- * 差异项（empty、labelFormat、用户/助手头像、left/rightExtra 等）仍由各布局自行传入。
+ * Shared Chat / ChatToolbar props configuration.
+ * Chat and ChatToolbar props shared by desktop and mobile layouts are
+ * centralized here to avoid duplicated maintenance.
+ * Divergent items (empty, labelFormat, user/assistant avatars, left/rightExtra,
+ * etc.) are still passed by each layout.
  */
 import clsx from 'clsx'
 
@@ -10,7 +12,7 @@ import { shareFileUploadUrlWithoutApiPrefix } from '@/api/fileStorage'
 
 import type { ConversationCtx } from '../hooks/useConversation'
 
-/** 桌面端与移动端共用的 Chat props */
+/** Chat props shared by desktop and mobile layouts */
 export const buildSharedChatProps = (ctx: ConversationCtx) => {
   const {
     conversation_id, chatList, fileList, setFileList, toolbarRef, config, isShare,
@@ -52,10 +54,11 @@ export const buildSharedChatProps = (ctx: ConversationCtx) => {
     handleInterventionActionClick,
     loadEarlierMessages: chatHasNext ? loadEarlierMessages : undefined,
     loadingEarlier,
+    source: config?.app_type
   } satisfies Partial<ChatProps>
 }
 
-/** 桌面端与移动端共用的 ChatToolbar props（ref、leftExtra/rightExtra 由各布局自行传入） */
+/** ChatToolbar props shared by desktop and mobile layouts (ref, leftExtra/rightExtra passed by each layout) */
 export const buildSharedToolbarProps = (ctx: ConversationCtx) => {
   const { features, shareToken, setFileList, handleChangeVariables } = ctx
 

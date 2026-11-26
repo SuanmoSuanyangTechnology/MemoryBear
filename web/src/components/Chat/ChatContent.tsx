@@ -12,6 +12,8 @@ import MoreDropdown from '@/components/MoreDropdown'
 import InterventionList from './InterventionList'
 import MemoryRecall from './MemoryRecall'
 import WaitingModelResponse from './WaitingModelResponse'
+import LogDetailTimeline from '@/views/ApplicationConfig/components/LogDetailTimeline'
+import { isMemoryStageStep, type TimelineChatItem } from '@/views/ApplicationConfig/utils/logTimeline'
 
 const getFileUrl = (file: any) => {
   return file.thumbUrl || file.url || (file.originFileObj ? URL.createObjectURL(file.originFileObj) : undefined)
@@ -33,6 +35,7 @@ const ChatContent: FC<ChatContentProps> = ({
   labelFormat,
   errorDesc,
   renderRuntime,
+  source,
   onSend,
   userIcon,
   assistantIcon,
@@ -92,7 +95,7 @@ const ChatContent: FC<ChatContentProps> = ({
   const isInterventionExpanded = (messageIndex: number, interventionIndex: number, resolved_action_id?: string) => {
     const key = `${messageIndex}-${interventionIndex}`
     if (manualToggledInterventions.has(key)) return expandedInterventions.has(key)
-    // 如果有 resolved_action_id，默认收起；否则默认展开
+    // Collapse by default when resolved_action_id is present, otherwise expand
     return !resolved_action_id
   }
 
@@ -192,7 +195,16 @@ const ChatContent: FC<ChatContentProps> = ({
     return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#039;')
   }
 
+  const getTimeline = (item: ChatItem) => (item as TimelineChatItem).timeline
+
+  const getTimelineText = (item: ChatItem) =>
+    (getTimeline(item)?.steps || [])
+      .filter(step => step.type === 'text')
+      .map(step => step.content || '')
+      .join('\n')
+
   const formatContent = (item: ChatItem) => {
+    if (getTimeline(item)?.steps?.length) return getTimelineText(item)
     return renderRuntime && item.meta_data?.outputs && item.meta_data?.outputs?.length > 1
       ? item.meta_data?.outputs.map(vo => vo.content).join('\n')
       : renderRuntime && item.content && item.content.length > 0
@@ -270,19 +282,25 @@ const ChatContent: FC<ChatContentProps> = ({
           const item: ChatItem | undefined = Array.isArray(vo) ? vo?.find(v => v.is_current) : vo;
           const isNotSupportRegenerate = typeof regenerateMaxCount === 'number' && regenerateMaxCount <= (Array.isArray(vo) ? vo.length : 1)
           const isActiveStream = memoryRecallStreaming && index === data.length - 1
-          const hasMemoryRecall = Boolean(item?.meta_data?.memory_retrieval?.tool_calls?.length)
-          const shouldShowMemoryRecall = hasMemoryRecall && (!isActiveStream || showMemoryRecall)
-          const shouldShowStreamSpinner = isActiveStream && item?.content === '' && !renderRuntime && !shouldShowMemoryRecall
+          const memoryRetrieval = item?.meta_data?.memory_retrieval
+          const hasMemoryRecall = Boolean(memoryRetrieval?.tool_calls?.length)
           if (!item) return null
           const outputs = item.meta_data?.outputs?.filter(output => output.content && output.content.trim() !== '')
+          const timelineSteps = getTimeline(item)?.steps || []
+          const hasTimeline = Boolean(timelineSteps.length)
+          // A long_term_memory step with memory_stage frames renders the recall
+          // panel in place, so skip the standalone panel after the timeline.
+          const memoryRecallInTimeline = hasTimeline && timelineSteps.some(step => isMemoryStageStep(step, memoryRetrieval))
+          const shouldShowMemoryRecall = hasMemoryRecall && !memoryRecallInTimeline && (!isActiveStream || showMemoryRecall)
+          const shouldShowStreamSpinner = isActiveStream && item?.content === '' && !renderRuntime && !shouldShowMemoryRecall && !hasTimeline
           return (
             <div key={index} className={clsx("rb:relative", {
               'rb:mt-6': index !== 0, // Add top margin for non-first messages
               'rb:right-0 rb:text-right': item.role === 'user', // User messages right-aligned
               'rb:left-0 rb:text-left': item.role === 'assistant', // Assistant messages left-aligned
             })}>
-              {/* 流式过程中若尚无可展示内容，则显示加载状态 */}
-              {shouldShowStreamSpinner || (streamLoading && index === data.length - 1 && item.content === '' && !renderRuntime && !shouldShowMemoryRecall)
+              {/* Show a loading state while streaming has no content to display yet */}
+              {shouldShowStreamSpinner || (streamLoading && index === data.length - 1 && item.content === '' && !renderRuntime && !shouldShowMemoryRecall && !hasTimeline)
                 ? <Spin />
                 : <>
                   <Flex
@@ -304,7 +322,7 @@ const ChatContent: FC<ChatContentProps> = ({
                       {/* Message bubble */}
                       <div className={clsx('rb:text-left rb:leading-5 rb:inline-block rb:wrap-break-word rb:relative', item.role === 'user' ? contentClassNames : '', {
                         // Error message style (content is null and not assistant message)
-                        'rb:text-red-500': (item.status && !['completed', 'waiting_human', 'running'].includes(item.status as string)) || (errorDesc && item.role === 'assistant' && item.content === null && !renderRuntime) || (item.role === 'assistant' && typeof item.meta_data?.error === 'string'),
+                        
                         // Assistant message style
                         'rb:bg-[#E3EBFD] rb:p-[10px_12px_2px_12px] rb:rounded-lg rb:max-w-130': item.role === 'user',
                         'rb:max-w-full rb:w-full': item.role === 'assistant',
@@ -314,10 +332,12 @@ const ChatContent: FC<ChatContentProps> = ({
                         'rb:mb-1': labelPosition === 'bottom',
                         'rb:pl-7': item.role === 'assistant' && typeof item.meta_data?.error === 'string' && typeof renderRuntime !== 'function',
                       })}>
-                        {item.subContent && renderRuntime && renderRuntime(item, index)}
-                        {shouldShowMemoryRecall && item.meta_data?.memory_retrieval && (
+                        {hasTimeline
+                          ? <LogDetailTimeline item={item as TimelineChatItem} source={source || ''} isStreaming={isActiveStream} />
+                          : item.subContent && renderRuntime && renderRuntime(item, index)}
+                        {shouldShowMemoryRecall && memoryRetrieval && (
                           <MemoryRecall
-                            retrieval={item.meta_data.memory_retrieval}
+                            retrieval={memoryRetrieval}
                             assistantContent={item.content}
                             isStreaming={isActiveStream}
                           />
@@ -370,8 +390,8 @@ const ChatContent: FC<ChatContentProps> = ({
                           />
                         )}
                         {/* Render message content using Markdown component */}
-                        {/* 一问多答区分展示 */}
-                        {outputs && outputs?.length > 1
+                        {/* Distinguish rendering for multi-answer responses */}
+                        {!hasTimeline && (outputs && outputs?.length > 1
                           ? <Flex vertical gap={8} align="start">
                             {outputs?.map((output, idx: number) => (
                               <div key={idx} className="rb:bg-gray-100 rb:rounded-xl rb:px-3 rb:pt-2.5 rb:pb-0.5">
@@ -379,6 +399,7 @@ const ChatContent: FC<ChatContentProps> = ({
                                 <Markdown
                                   content={formatContent(output)}
                                   onFormSubmit={onFormSubmit}
+                                  className={clsx({ 'rb:text-red-500': (item.status && !['completed', 'waiting_human', 'running'].includes(item.status as string)) || (errorDesc && item.role === 'assistant' && item.content === null && !renderRuntime) || (item.role === 'assistant' && typeof item.meta_data?.error === 'string'), })}
                                 />
                               </div>
                             ))}
@@ -386,8 +407,9 @@ const ChatContent: FC<ChatContentProps> = ({
                           : <Markdown
                             content={formatContent(item)}
                             onFormSubmit={onFormSubmit}
+                            className={clsx({ 'rb:text-red-500': (item.status && !['completed', 'waiting_human', 'running'].includes(item.status as string)) || (errorDesc && item.role === 'assistant' && item.content === null && !renderRuntime) || (item.role === 'assistant' && typeof item.meta_data?.error === 'string'), })}
                           />
-                        }
+                        )}
                         {item.role === 'assistant' && !isEnded && index === data.length - 1 && (
                           <WaitingModelResponse />
                         )}

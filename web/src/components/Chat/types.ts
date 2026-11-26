@@ -1,9 +1,3 @@
-/*
- * @Author: ZhaoYing 
- * @Date: 2025-12-10 16:45:54 
- * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-06-05 20:01:24
- */
 import { type ReactNode } from 'react'
 import { type ButtonProps } from 'antd'
 import type { EndUserMetaData } from '@/views/UserMemoryDetail/types';
@@ -51,13 +45,15 @@ export interface MemoryStage {
 }
 
 export interface MemoryToolCall {
-  /** 仅用于流式阶段归属，后端持久化结构不会返回该字段 */
+  /** Only used to attribute stream stages; not returned in backend-persisted structures */
   step_id?: string;
   name: string;
   input: Record<string, unknown>;
   status: 'running' | 'completed' | 'failed';
   error?: string;
   stages: MemoryStage[];
+  /** Tool step sequence; the key that links a call to its timeline step in persisted records. */
+  seq?: number;
 }
 
 export interface MemoryRetrieval {
@@ -75,6 +71,7 @@ export interface MemoryTraceEventData {
   status?: string;
   data?: MemoryStageData;
   error?: string;
+  seq?: number;
   meta?: {
     tool_type?: string;
     [key: string]: unknown;
@@ -231,6 +228,8 @@ export interface ChatContentProps {
   labelFormat: (item: ChatItem) => any;
   errorDesc?: string;
   renderRuntime?: (item: ChatItem, index: number) => ReactNode;
+  /** Application source used by timeline runtime step cards */
+  source?: string;
   /** Send message callback */
   onSend?: (msg: string) => void;
   userIcon?: ReactNode;

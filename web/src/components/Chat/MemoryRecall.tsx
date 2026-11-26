@@ -16,6 +16,11 @@ interface MemoryRecallProps {
   retrieval: MemoryRetrieval
   assistantContent?: string | null
   isStreaming?: boolean
+  /** When embedded in a timeline step, only render the call owning that step. */
+  stepId?: string
+  /** Timeline step seq; the persisted key that links a call to its step. */
+  stepSeq?: number
+  className?: string;
 }
 
 interface StageRowProps {
@@ -565,12 +570,18 @@ const ToolCallRecall: FC<{
   )
 }
 
-const MemoryRecall: FC<MemoryRecallProps> = ({ retrieval, assistantContent, isStreaming = false }) => {
-  const calls = retrieval.tool_calls.filter(call => call.name === 'long_term_memory')
+const MemoryRecall: FC<MemoryRecallProps> = ({ retrieval, assistantContent, isStreaming = false, stepId, stepSeq, className = '' }) => {
+  const calls = retrieval.tool_calls.filter(call => {
+    if (call.name !== 'long_term_memory') return false
+    // Prefer seq (persisted key); fall back to step_id (streaming), else keep the call.
+    if (stepSeq != null && typeof call.seq === 'number') return call.seq === stepSeq
+    if (stepId && call.step_id) return call.step_id === stepId
+    return true
+  })
   if (calls.length === 0) return null
 
   return (
-    <div className="rb:mb-4 rb:w-full">
+    <div className={`rb:mb-4 rb:w-full ${className}`}>
       {calls.map((call, index) => (
         <ToolCallRecall
           key={call.step_id || `${call.name}-${index}`}
