@@ -31,7 +31,6 @@ if TYPE_CHECKING:
     from src.runtime import ProfileRuntime
 
 import asyncio
-import base64
 import json
 import os
 import time
@@ -1240,50 +1239,13 @@ class MemoryStorageService:
             text = f"[附件 {position}：类型={file_type}，名称={file_name}]"
         return {"type": "text", "text": text}
 
-    @staticmethod
-    def _replace_local_media_url(
-            parts: list[dict[str, Any]],
-            content: bytes,
-            mime_type: str,
-    ) -> None:
-        """将 URL 型多模态 part 中的本地地址替换为 Base64 Data URL。"""
-        data_url: str | None = None
-
-        def get_data_url() -> str:
-            nonlocal data_url
-            if data_url is None:
-                encoded = base64.b64encode(content).decode("ascii")
-                data_url = f"data:{mime_type};base64,{encoded}"
-            return data_url
-
-        for part in parts:
-            if not isinstance(part, dict):
-                continue
-            part_type = part.get("type")
-            if part_type == "image_url" and isinstance(part.get("image_url"), dict):
-                part["image_url"]["url"] = get_data_url()
-            elif part_type == "image" and isinstance(part.get("image"), str):
-                part["image"] = get_data_url()
-            elif part_type == "audio_url" and isinstance(part.get("audio_url"), dict):
-                part["audio_url"]["url"] = get_data_url()
-            elif part_type == "audio" and isinstance(part.get("audio"), str):
-                part["audio"] = get_data_url()
-            elif part_type == "video_url" and isinstance(part.get("video_url"), dict):
-                part["video_url"]["url"] = get_data_url()
-            elif part_type == "video" and isinstance(part.get("video"), str):
-                part["video"] = get_data_url()
-
     async def _process_trial_run_files(
             self,
             files,
             multimodal_service,
             workspace_id: uuid.UUID,
-            tenant_id: uuid.UUID,
             input_modalities,
             language: str,
-            *,
-            actor_id: UUID,
-            actor_kind: str,
     ) -> list[dict[str, Any]]:
         """按请求顺序处理附件，对模型不支持的类型生成可见文本提示。"""
         normalized_modalities = self._normalize_modalities(input_modalities)
@@ -1300,23 +1262,12 @@ class MemoryStorageService:
                 processed_parts.append(self._unsupported_file_part(file.type, language))
                 continue
 
-            local_media: tuple[bytes, str] | None = None
             if file.transfer_method == TransferMethod.LOCAL_FILE:
                 try:
-                    content, mime_type = await self._load_trial_run_local_file(
-                        file,
-                        workspace_id,
-                        tenant_id,
-                        actor_id=actor_id,
-                        actor_kind=actor_kind,
-                    )
-                    if file.type in {FileType.IMAGE, FileType.AUDIO, FileType.VIDEO}:
-                        local_media = (content, mime_type)
-                except asyncio.CancelledError:
-                    raise
+                    file = await multimodal_service.resolve_uploaded_file_url(file, workspace_id)
                 except Exception:
                     logger.error(
-                        "[TRIAL_RUN_CHAT_STREAM] Failed to load local attachment: file_id=%s",
+                        "[TRIAL_RUN_CHAT_STREAM] Failed to resolve attachment URL: file_id=%s",
                         file.upload_file_id,
                         exc_info=True,
                     )
@@ -1324,14 +1275,16 @@ class MemoryStorageService:
                     processed_parts.append(self._local_file_error_part(language))
                     continue
 
-            parts = await multimodal_service.process_files(
-                [file],
-                workspace_id=workspace_id,
-                document_image_recognition=False,
-                include_processing_errors=True,
-            )
-            if local_media:
-                self._replace_local_media_url(parts, *local_media)
+                if file.type == FileType.AUDIO:
+                    processed_parts.append(self._file_marker_part(file, position, language))
+                    processed_parts.append(multimodal_service.format_audio_url(file))
+                    continue
+                if multimodal_service.provider in {"bedrock", "anthropic"}:
+                    processed_parts.append(self._file_marker_part(file, position, language))
+                    processed_parts.append(self._unsupported_file_part(file.type, language))
+                    continue
+
+            parts = await multimodal_service.process_files([file], workspace_id=workspace_id)
             processed_parts.append(self._file_marker_part(file, position, language))
             processed_parts.extend(parts)
         return processed_parts
@@ -1607,11 +1560,8 @@ class MemoryStorageService:
                     [ref["file"] for ref in refs],
                     multimodal_service,
                     config_workspace_id,
-                    config_tenant_id,
                     model_info.input_modalities,
                     language,
-                    actor_id=actor_id,
-                    actor_kind=actor_kind,
                 )
 
                 mapping = "\n".join(
@@ -1669,20 +1619,26 @@ class MemoryStorageService:
                 documents: list[str] = []
                 # 文档字节在短会话关闭后下载和解析，避免长时间占用连接。
                 multimodal_service = MultimodalService(
-                    None, final_model_info,
+                    self.repository, final_model_info,
                     attachment_storage=self.runtime.attachment_storage,
                     download_attachment=download_attachment,
                 )
                 for ref in refs:
                     file = ref["file"]
                     if file.transfer_method == TransferMethod.LOCAL_FILE:
-                        await self._load_trial_run_local_file(
-                            file,
-                            config_workspace_id,
-                            config_tenant_id,
-                            actor_id=actor_id,
-                            actor_kind=actor_kind,
-                        )
+                        try:
+                            file = await multimodal_service.resolve_uploaded_file_url(
+                                file, config_workspace_id
+                            )
+                        except Exception:
+                            logger.error(
+                                "[TRIAL_RUN_CHAT_STREAM] Failed to resolve document URL: file_id=%s",
+                                file.upload_file_id,
+                                exc_info=True,
+                            )
+                            error = self._local_file_error_part(language)
+                            documents.append(f"{attachment_label(ref)}\n{error['text']}")
+                            continue
                     text = await multimodal_service.extract_document_text(file)
                     documents.append(f"{attachment_label(ref)}\n{text}")
                 return {"text": "\n\n".join(documents), "tokens": 0}

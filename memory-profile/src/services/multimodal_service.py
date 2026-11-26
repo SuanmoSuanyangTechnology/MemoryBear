@@ -894,7 +894,47 @@ class MultimodalService:
         # 铸预签名 URL 前先做归属/租户范围校验。
         metadata = await self._get_local_file_metadata(file.upload_file_id, workspace_id)
         # 不传 file_name：避免强制 Content-Disposition: attachment。
-        return await storage.get_signed_url(metadata.file_key, expires=86400)
+        return await self._sign_attachment_url(metadata.file_key)
+
+    async def _sign_attachment_url(self, file_key: str) -> str:
+        return await self.attachment_storage.backend.get_signed_url(file_key, expires=86400)
+
+    async def resolve_uploaded_file_url(
+        self, file: FileInput, workspace_id: uuid.UUID | str | None
+    ) -> FileInput:
+        metadata = await self._get_local_file_metadata(file.upload_file_id, workspace_id)
+        if isinstance(self.attachment_storage.backend, LocalStorage):
+            raise _file_error("试运行附件需要模型可访问的对象存储地址", BizCode.FILE_READ_ERROR)
+        url = await self._sign_attachment_url(metadata.file_key)
+        if urlparse(url).scheme not in {"http", "https"} or _model_cannot_reach_url(url):
+            raise _file_error("试运行附件地址不可访问", BizCode.FILE_READ_ERROR)
+        file_type = metadata.content_type
+        if file.type == FileType.AUDIO and metadata.file_ext:
+            file_type = f"audio/{metadata.file_ext.lstrip('.').lower()}"
+        return file.model_copy(update={
+            "transfer_method": TransferMethod.REMOTE_URL,
+            "upload_file_id": None,
+            "url": url,
+            "name": file.name or metadata.file_name,
+            "file_type": file_type,
+            "size": metadata.file_size,
+        })
+
+    def format_audio_url(self, file: FileInput) -> dict[str, Any]:
+        if self.provider != "dashscope":
+            return {"type": "text", "text": "[当前模型提供商未配置音频 URL 输入]"}
+        file_type = file.file_type or ""
+        if file_type.startswith("audio/"):
+            audio_format = file_type.split("/", 1)[1].split(";", 1)[0].lower()
+        else:
+            audio_format = urlparse(file.url).path.rsplit(".", 1)[-1].lower()
+        return {
+            "type": "input_audio",
+            "input_audio": {
+                "data": file.url,
+                "format": OPENAI_AUDIO_FORMAT_ALIASES.get(audio_format, audio_format),
+            },
+        }
 
     async def get_file_url(self, file: FileInput) -> str:
         """
@@ -957,6 +997,9 @@ class MultimodalService:
                 return await self._extract_json_text(file_content)
             else:
                 return f"[Unsupported file type: {file_mime_type}]"
+        except httpx.HTTPError as exc:
+            logger.error("Failed to fetch document: %s", type(exc).__name__)
+            return "[Failed to load file.]"
         except Exception as e:
             logger.error(f"Failed to load file. - {e}")
             return "[Failed to load file.]"
