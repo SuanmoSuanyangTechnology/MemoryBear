@@ -1,0 +1,57 @@
+=== Task ===
+Generate a concise title, classify the episodic memory, and produce a faithful summary from the input.
+
+=== Input ===
+{{ chunk_texts }}
+
+=== Requirements ===
+
+1. Title
+- Capture the core subject or event concisely.
+- The title must follow the primary language of `chunk_texts`.
+- For Chinese input, use 10-20 Chinese characters.
+- For English or other space-delimited languages, use 3-10 words.
+- Do not add information merely to satisfy the length requirement. Faithfulness takes priority.
+
+2. Type
+Classify the input into exactly one of the following types:
+
+- `conversation`: Daily communication, casual chat, discussion, social interaction, or content that cannot be clearly assigned to another type.
+- `project_work`: Work tasks, projects, meetings, clients, business activities, or professional collaboration.
+- `learning`: Learning, reading, research, training, knowledge acquisition, or skill development.
+- `decision`: A decision, choice, evaluation, trade-off, or plan in which selecting a course of action is the primary focus.
+- `important_event`: A major event, milestone, celebration, achievement, or memorable life experience.
+
+Classification rules:
+- Classify by the primary meaning of the input, not by isolated keywords.
+- Use `decision` only when making or recording a choice is the main point.
+- Use `important_event` only when the input clearly describes a milestone or significant event.
+- If multiple types apply, select the type that best represents the main intent or outcome.
+- If no other type clearly applies, use `conversation`.
+- The `type` value must always use the fixed English enum value.
+
+3. Summary
+- Summarize only information explicitly stated in `chunk_texts`.
+- Preserve factual statements, user preferences, relationships, and salient temporal context.
+- Do not infer, embellish, explain, or introduce new facts.
+- Avoid repetition and filler.
+- If the input is already concise, the summary may remain close to the original sentence.
+- The summary must follow the primary language of `chunk_texts`.
+- Keep the summary under {{ max_words or 200 }} words.
+
+=== Output Requirements ===
+- Return exactly one valid JSON object.
+- Include exactly three fields in this order: `title`, `type`, and `summary`.
+- All three field values must be strings.
+- Use only standard ASCII double quotes (`"`).
+- Escape quotation marks inside string values with backslashes (`\"`).
+- Do not include line breaks inside string values.
+- Do not output Markdown code fences, explanations, comments, or additional fields.
+
+Return only:
+
+{
+  "title": "Generated title",
+  "type": "conversation",
+  "summary": "Generated summary"
+}
