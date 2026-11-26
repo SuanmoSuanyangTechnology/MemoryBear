@@ -1,4 +1,4 @@
-"""Resolve a single emotion and render the system-default reply policy."""
+"""Resolve emotion reply policies for external callers and applications."""
 
 from __future__ import annotations
 
@@ -6,6 +6,7 @@ import logging
 from collections.abc import Awaitable, Callable
 from uuid import UUID
 
+from src.common.vocabulary import normalize_emotion_type
 from src.schemas.emotion_reply import EmotionPolicy, EmotionReplyData
 
 logger = logging.getLogger(__name__)
@@ -33,6 +34,21 @@ def _prompt_fragment(policy: EmotionPolicy) -> str | None:
     if len(strategy) == 1:
         return None
     return _FIXED_PRINCIPLES + "\n\n" + "\n".join(strategy)
+
+
+async def resolve_app_emotion_policy[Strategy](
+    load_policy: Callable[[UUID, UUID, UUID, str], Awaitable[Strategy | None]],
+    *,
+    app_id: UUID,
+    tenant_id: UUID,
+    workspace_id: UUID,
+    emotion_code: str,
+) -> Strategy | None:
+    """Look up a detected emotion through an app- and tenant-scoped policy reader."""
+    normalized_code = normalize_emotion_type(emotion_code)
+    if normalized_code is None:
+        return None
+    return await load_policy(app_id, tenant_id, workspace_id, normalized_code)
 
 
 class EmotionReplyService:

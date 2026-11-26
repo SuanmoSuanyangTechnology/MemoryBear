@@ -1,4 +1,5 @@
 import type { ChatItem } from '../types'
+import { buildTimelineSteps, type Timeline } from '@/views/ApplicationConfig/utils/logTimeline'
 
 /**
  * Shared pure helpers for chat lists that support regenerate version arrays,
@@ -122,6 +123,23 @@ export const buildVersionMessages = (
   const { node_executions_map, messages = [], pending_intervention } = res || {}
   const enrichMessage = (msg: any) => {
     const base = { ...msg, status: msg.role === 'user' ? null : msg.status }
+
+    // New timeline shape: render text chunks and tool/agent steps in server order.
+    const timeline = msg?.meta_data?.timeline as Timeline | undefined
+    if (timeline?.steps?.length) {
+      const executions: any[] = (msg.id && node_executions_map?.[msg.id]) || []
+      const interventions: any[] = (msg.id && pending_intervention?.[msg.id]?.interventions) || []
+      const built = buildTimelineSteps(timeline, executions)
+      return {
+        ...base,
+        timeline: built,
+        subContent: built.steps,
+        // Text is rendered chunk by chunk from the timeline; avoid duplicating the full content.
+        content: '',
+        interventions,
+      }
+    }
+
     if (!msg.id || !(node_executions_map?.[msg.id] || pending_intervention?.[msg.id])) {
       return base
     }

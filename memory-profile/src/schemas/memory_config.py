@@ -796,3 +796,7 @@ class MemoryConfig(BaseModel):
             return self.rerank_model_id is not None
         else:
             raise ValueError(f"Unknown model type: {model_type}")
+class WorkspaceActiveConfigData(BaseModel):
+    """The workspace's active memory configuration id (``workspace-config``)."""
+
+    config_id: str

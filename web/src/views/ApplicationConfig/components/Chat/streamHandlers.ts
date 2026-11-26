@@ -4,7 +4,7 @@ import type { ChatItem } from '@/components/Chat/types'
 import type { ChatData } from '../../types'
 import type { SSEMessage } from '@/utils/stream'
 import { mapLastVersion } from '@/components/Chat/utils/messageVersions'
-import { createClusterStreamProcessor } from '../../utils/clusterStream'
+import { createClusterStreamProcessor } from '@/components/Chat/utils/clusterStream'
 import { getFileStatusById } from '@/api/fileStorage'
 import {
   updateAssistantReasoningMessage,
@@ -72,6 +72,7 @@ export const createCompareStreamHandler = (deps: CompareStreamDeps) => {
         case 'model_tool_start':
           updateChatList(prev => addRunStartMessage(prev, item.data))
           break
+        case 'model_tool_error':
         case 'model_tool_end':
           updateChatList(prev => addRunEndMessage(prev, item.data))
           break

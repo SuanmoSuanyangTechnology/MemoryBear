@@ -350,9 +350,11 @@ class ReadPrincipal:
     """Caller identity resolved by the transport layer (never by the core)."""
 
     workspace_id: UUID
-    tenant_id: UUID
-    actor_id: str
-    source: str
+    #: ``None`` for channels that carry no credential-bound tenant (the
+    #: application-service callback): the config's tenant is used verbatim.
+    tenant_id: UUID | None = None
+    actor_id: str = ""
+    source: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -404,6 +406,23 @@ class ReadOptions:
     enable_rerank: bool = False
     record_display: bool = False
     include_metadata: bool = True
+
+
+@dataclass(frozen=True, slots=True)
+class ReadContextOverrides:
+    """Per-caller overrides of what the read context factory resolves.
+
+    Only the application-service callback names these facts explicitly; every
+    other face keeps the workspace-level resolution. ``None`` means "resolve as
+    usual", so an unset field never changes the existing faces.
+    """
+
+    config_id: UUID | None = None
+    storage_type: str | None = None
+    draft: bool = False
+    conversation_id: str | None = None
+    app_id: UUID | None = None
+    user_rag_memory_id: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

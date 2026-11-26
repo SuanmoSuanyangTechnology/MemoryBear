@@ -1,17 +1,15 @@
 """Async client for the standalone file service (upload delegation).
 
 memory-profile no longer owns object storage or writes ``file_metadata``: the
-``file-service`` owns both. An upload is forwarded with an internal JWT
-(RS256, ``aud=file-service``) signed by the same issuer key gateway and
-identity-service use, so file-service verifies it through the JWKS identity
-publishes. The matching identity headers are sent as well: the service's
-``direct`` auth mode trusts them, and its ``gateway`` mode rejects a header
-that disagrees with the token claims.
+``file-service`` owns both. An upload is forwarded to the token-guarded internal
+API (``POST /internal/v1/files/upload``) with the shared
+``X-File-Service-Token`` credential; ``X-Tenant-Id`` / ``X-Workspace-Id`` /
+``X-Actor-Id`` carry the caller identity, exactly like the application service's
+client.
 
-The target is the storage upload route (``POST /internal/v1/storage/files``),
-which streams the body, enforces its own size limit and writes the
-``file_metadata`` row. Its success payload is the ``{file_id, file_key}`` pair
-the host upload response needs.
+The target enforces its own size limit and writes the ``file_metadata`` row. Its
+success payload is the ``{file_id, file_key}`` pair the host upload response
+needs.
 """
 
 from __future__ import annotations
@@ -21,16 +19,23 @@ from typing import Any
 from uuid import UUID
 
 import httpx
-from auth_sdk.schema import UserContext
-from auth_sdk.token import LocalTokenIssuer
 
 from src.config import ProfileSettings
 
 logger = logging.getLogger(__name__)
 
-#: Upload on file-service; the bearer token is accepted by gateway auth mode.
-UPLOAD_PATH = "/internal/v1/storage/files"
+#: Upload on file-service's token-guarded internal API.
+UPLOAD_PATH = "/internal/v1/files/upload"
 DEFAULT_CONTENT_TYPE = "application/octet-stream"
+
+
+def _secret_value(value: object) -> str:
+    """Read a plain string or a ``SecretStr`` without importing pydantic here."""
+
+    getter = getattr(value, "get_secret_value", None)
+    if callable(getter):
+        return str(getter())
+    return str(value or "")
 
 
 class FileServiceError(RuntimeError):
@@ -49,39 +54,24 @@ class FileServiceClient:
         self,
         settings: ProfileSettings,
         *,
-        issuer: Any | None = None,
         transport: httpx.AsyncBaseTransport | None = None,
     ) -> None:
         self._settings = settings
         self._transport = transport
-        self._issuer = issuer
-        if self._issuer is None:
-            key = getattr(settings, "internal_issuer_private_key", None)
-            private_key = (
-                key.get_secret_value()
-                if hasattr(key, "get_secret_value")
-                else str(key or "")
-            )
-            if private_key:
-                self._issuer = LocalTokenIssuer(
-                    private_key=private_key,
-                    kid=settings.internal_issuer_kid,
-                    ttl=settings.internal_token_ttl_seconds,
-                    issuer=settings.service_name,
-                )
+        self._token = _secret_value(settings.file_service_internal_token)
 
     @property
     def enabled(self) -> bool:
-        """Whether both the service URL and the issuer key are configured."""
+        """Whether both the service URL and the shared token are configured."""
 
-        return bool(self._settings.file_service_base_url and self._issuer is not None)
+        return bool(self._settings.file_service_base_url and self._token)
 
     def _ensure_configured(self) -> None:
         if not self._settings.file_service_base_url:
             raise FileServiceError("File service is not configured", status_code=503)
-        if self._issuer is None:
+        if not self._token:
             raise FileServiceError(
-                "Internal issuer key is not configured", status_code=503
+                "FILE_SERVICE_INTERNAL_TOKEN is not configured", status_code=503
             )
 
     def _headers(
@@ -92,28 +82,17 @@ class FileServiceClient:
         actor_id: UUID,
         actor_kind: str,
     ) -> dict[str, str]:
-        """Sign one request for the acting actor and carry the same identity headers.
+        """Authenticate one upload and carry the acting actor's identity.
 
-        The token ``sub`` is the actor this request acts for (the API-key id for
-        a keyed caller, the same value the host passed as ``x-user-id`` /
-        ``x-api-key-id``). ``api_key_id`` stays a separate claim so downstream
-        attribution can tell the credential from the person.
+        The actor is the API-key id for a keyed caller, the same value the host
+        passed as ``x-user-id`` / ``x-api-key-id``; ``X-Actor-Id`` is what the
+        file service records as the uploader.
         """
 
-        identity = UserContext(
-            user_id=str(actor_id),
-            tenant_id=str(tenant_id),
-            workspace_id=str(workspace_id) if workspace_id else "",
-            auth_type="api_key" if actor_kind == "apikey" else None,
-            api_key_id=str(actor_id) if actor_kind == "apikey" else None,
-        )
-        token = self._issuer.issue_internal_token(
-            identity, self._settings.file_service_audience
-        )
         headers = {
-            "Authorization": f"Bearer {token}",
+            "X-File-Service-Token": self._token,
             "X-Tenant-Id": str(tenant_id),
-            "X-User-Id": str(actor_id),
+            "X-Actor-Id": str(actor_id),
         }
         if workspace_id is not None:
             headers["X-Workspace-Id"] = str(workspace_id)

@@ -12,7 +12,7 @@ from collections.abc import Iterable
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import String, cast, desc, select, true
+from sqlalchemy import String, cast, desc, func, select, true
 
 from src.infrastructure.postgres import PostgresManager
 from src.models.references import (
@@ -78,6 +78,21 @@ PERSONALITY_COLUMNS = _columns(
     "personality_anchor_read_preferences",
     "personality_anchor_sync_cycle",
     "personality_anchor_base_principles",
+)
+SPATIOTEMPORAL_ANCHOR_COLUMNS = (
+    func.coalesce(MemoryConfigRow.is_default, False).label("is_default"),
+    *_columns(
+        "config_id",
+        "spatiotemporal_enabled",
+        "spatiotemporal_auto_extract",
+        "scene_merge_window_minutes",
+        "scene_location_normalize_enabled",
+        "geo_coordinate_enabled",
+        "temporal_chain_enabled",
+        "temporal_chain_interval_minutes",
+        "temporal_chain_rebuild_limit",
+        "scene_label_vocabulary",
+    ),
 )
 EXTRACTED_COLUMNS = _columns(
     "is_default",

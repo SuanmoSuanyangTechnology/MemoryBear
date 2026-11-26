@@ -23,7 +23,6 @@ from dataclasses import dataclass
 
 import httpx
 from auth_sdk.schema import UserContext
-from error_core.knowledge_upload import is_versioned_upload
 from fastapi import HTTPException, Request
 from pydantic import ValidationError
 from redis.exceptions import ConnectionError as RedisConnectionError
@@ -33,6 +32,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse
 
 from .api.dependencies import Principal, _principal_from_headers
+from .api.upload_contract import is_knowledge_upload
 from .errors import TRANSIENT_DEPENDENCY_HTTP_STATUSES, KnowledgeError
 from .request_logging import log_request_failure, safe_failure_detail
 from .trace import TRACE_ID_HEADER
@@ -115,7 +115,7 @@ def _auth_error(
     request: Request, status_code: int, detail: object, *, exception: BaseException | None = None,
 ) -> JSONResponse:
     """Record early rejections without changing authentication decisions."""
-    if is_versioned_upload(request, internal=True):
+    if is_knowledge_upload(request):
         from .api.error_handlers import render_upload_error
 
         headers = dict(exception.headers or {}) if isinstance(exception, HTTPException) else {}
@@ -196,7 +196,7 @@ class KbAuthMiddleware(BaseHTTPMiddleware):
             # 验签失败 401 / ACL 拒绝 403 / 配置缺失 500，按 SDK 语义原样返回
             return _auth_error(request, exc.status_code, exc.detail, exception=exc)
         except Exception as exc:
-            if is_versioned_upload(request, internal=True):
+            if is_knowledge_upload(request):
                 transient = isinstance(exc, (ConnectionError, TimeoutError, OperationalError))
                 status = 503 if transient else 500
                 return _auth_error(request, status, "auth dependency failed", exception=exc)

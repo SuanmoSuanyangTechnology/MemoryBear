@@ -34,6 +34,7 @@ from src.repositories.memory_config import (
     REFLECTION_COLUMNS,
     SCENE_COLUMNS,
     SCENE_COMMUNITY_COLUMNS,
+    SPATIOTEMPORAL_ANCHOR_COLUMNS,
     WORKSPACE_LLM_COLUMN,
     WORKSPACE_MODEL_COLUMNS,
     MemoryConfigReadRepository,
@@ -52,7 +53,9 @@ from src.schemas.memory_config import (
     SceneConfigData,
     SimpleSceneData,
 )
+from src.schemas.spatiotemporal_anchor_config import SpatiotemporalAnchorData
 from src.services.memory_config.errors import (
+    ConfigNotFoundError,
     ConfigQueryError,
     ConfigValidationError,
 )
@@ -97,6 +100,16 @@ class MemoryConfigQueryService:
             SimpleSceneData(scene_id=row["scene_id"], scene_name=row["scene_name"])
             for row in rows
         ]
+
+    async def spatiotemporal_anchor(
+        self, config_id: UUID, workspace_id: UUID
+    ) -> SpatiotemporalAnchorData:
+        row = await self.repository.get_owned(
+            config_id, workspace_id, columns=SPATIOTEMPORAL_ANCHOR_COLUMNS
+        )
+        if row is None:
+            raise ConfigNotFoundError(str(config_id))
+        return SpatiotemporalAnchorData.model_validate(row)
 
     async def personality_anchor(
         self, config_id: UUID | str, workspace_id: UUID

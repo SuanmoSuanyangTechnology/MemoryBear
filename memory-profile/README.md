@@ -150,10 +150,10 @@ Required direct-mode headers are `x-tenant-id`, `x-workspace-id`, `x-source`, an
 
 Emotion reply uses the trusted API proxy channel. Route its public face through
 the API to verify the API key type, workspace binding, and tenant context.
-With `MEMORY_ENTERPRISE_BASE_URL` and `INTERNAL_ISSUER_PRIVATE_KEY` configured,
+With `MEMORY_ENTERPRISE_BASE_URL` and `MEMORY_INTERNAL_TOKEN` configured,
 memory-profile sends the emotion code to memory-enterprise after BERT classification.
-The identity ACL must allow the memory-profile issuer to call
-`GET /internal/v1/ontology/default-emotion-policies/*` on `mem-enterprise`.
+memory-enterprise compares the token against its own `MEMORY_INTERNAL_TOKEN` and
+reads the tenant from `X-Tenant-Id`; no identity ACL rule is involved.
 
 The legacy response envelope is exactly:
 
@@ -376,11 +376,9 @@ Quota limits are owned by this service: the community free plan comes from
 `QUOTA_PRE_USER_MEMORY_WRITE_QPS_LIMIT` (same names as the API). When
 `MEMORY_ENTERPRISE_BASE_URL` points at the closed-source `memory-enterprise`
 service, the effective plan and resource-pack grants are queried over HTTP with
-a service-to-service internal JWT (`iss=memory-profile`,
-`aud=MEMORY_ENTERPRISE_AUDIENCE`) signed by the shared
-`INTERNAL_ISSUER_PRIVATE_KEY`; the target verifies it through identity's JWKS
-and its caller ACL. An unconfigured or unreachable service falls back to the
-free plan.
+the shared `MEMORY_INTERNAL_TOKEN` (`X-Internal-Token`); the tenant travels in
+`X-Tenant-Id`. An unconfigured or unreachable service falls back to the free
+plan.
 
 This service must use the same Redis logical DB as the API (the shared
 deployment uses `REDIS_DB=3`) so keys written by API workers stay visible.
@@ -543,6 +541,15 @@ uv run uvicorn src.entry:app --host 0.0.0.0 --port 8082 --http zttp --http2 --no
 uv run ruff check .
 uv run python -m compileall -q src scripts migrations
 uv run python scripts/check_import_boundaries.py
+```
+
+The reflection-log contract tests seed their own throwaway PostgreSQL database
+and drop it afterwards. Point them at any database whose role can
+`CREATE DATABASE`; they are skipped when the variable is unset:
+
+```bash
+PROFILE_TEST_DATABASE_URL=postgresql+asyncpg://postgres:postgres@127.0.0.1:5432/postgres \
+  uv run pytest tests
 ```
 
 Build from the repository root so Docker can use the service-specific ignore file:

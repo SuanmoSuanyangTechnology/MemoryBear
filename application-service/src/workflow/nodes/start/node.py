@@ -8,6 +8,7 @@ import json
 import logging
 from typing import Any
 
+from ....errors import BizCode, BusinessException
 from ...engine.state_manager import WorkflowState
 from ...engine.variable_pool import VariablePool
 from ..base_node import BaseNode
@@ -92,7 +93,7 @@ class StartNode(BaseNode):
             Dictionary of processed custom variables
         
         Raises:
-            ValueError: A required variable is missing
+            BusinessException: A required variable is missing
         """
         # Read custom variables from the input data
         input_variables = pool.get_value("sys.input_variables", default={}, strict=False)
@@ -104,6 +105,7 @@ class StartNode(BaseNode):
             var_name = var_def.name
             var_type = var_def.type
             ui_type = var_def.ui_type
+            default = var_def.default
 
             # Boolean (boolean/checkbox) types: the frontend submits `false` (not `None`)
             # when unchecked, while API callers may omit the field or pass `null`.
@@ -112,15 +114,20 @@ class StartNode(BaseNode):
             # "missing required variable" error, matching frontend behavior.
             provided = var_name in input_variables
             value = input_variables.get(var_name) if provided else None
+            if var_def.required and var_type == VariableType.STRING:
+                if isinstance(default, str) and not default.strip():
+                    default = None
+                if value is None or (isinstance(value, str) and not value.strip()):
+                    provided = False
             if var_type == VariableType.BOOLEAN and value is None:
-                value = var_def.default if var_def.default is not None else DEFAULT_VALUE(VariableType.BOOLEAN)
+                value = default if default is not None else DEFAULT_VALUE(VariableType.BOOLEAN)
                 provided = True
 
             # An explicit `null` is valid input but every non-FILE variable type
             # rejects None. Fall back to the default value (same as a missing field)
             # instead of letting the downstream typed variable raise TypeError.
             if provided and value is None and var_type != VariableType.FILE:
-                value = var_def.default if var_def.default is not None else DEFAULT_VALUE(var_type)
+                value = default if default is not None else DEFAULT_VALUE(var_type)
 
             # Check whether the variable was provided
             if provided:
@@ -170,14 +177,15 @@ class StartNode(BaseNode):
                                     f"变量 '{var_name}' 中包含不允许的文件类型 '{file_type}'"
                                 )
 
-            elif var_def.required and var_def.default is None:
-                raise ValueError(
-                    f"缺少必需的输入变量: {var_name}"
-                    + (f" ({var_def.description})" if var_def.description else "")
+            elif var_def.required and default is None:
+                raise BusinessException(
+                    f"Missing required workflow input: {var_name}",
+                    BizCode.MISSING_PARAMETER,
+                    context={"field": var_name},
                 )
 
             else:
-                value = var_def.default if var_def.default is not None else DEFAULT_VALUE(var_type)
+                value = default if default is not None else DEFAULT_VALUE(var_type)
 
             processed[var_name] = value
             self.output_var_types[var_name] = var_type

@@ -21,6 +21,7 @@ from src.common.observability.runtime_metrics import (
 )
 from src.config import ProfileSettings
 from src.infrastructure.attachment_storage import AttachmentStorageManager
+from src.infrastructure.api_tasks import ApiTaskPublisher
 from src.infrastructure.elasticsearch import ElasticsearchManager
 from src.infrastructure.emotion_classifier import EmotionClassifier
 from src.infrastructure.file_service import FileServiceClient
@@ -31,7 +32,6 @@ from src.infrastructure.postgres import PostgresManager
 from src.infrastructure.redis import RedisManager
 from src.infrastructure.scene_continuity import SceneContinuityClient
 from src.infrastructure.task_bridge import TaskBridgeManager
-from src.infrastructure.write_gateway import WriteGatewayClient
 from src.services.emotion_reply import EmotionReplyService
 from src.services.quota import QuotaEntitlements
 
@@ -56,8 +56,8 @@ class ProfileRuntime:
         self.task_bridge = TaskBridgeManager(settings)
         # 文件上传转发给独立 file-service（存储后端 + file_metadata 由其持有）。
         self.file_service = FileServiceClient(settings)
-        # 合并走 api worker 网关。
-        self.write_gateway = WriteGatewayClient(settings)
+        # 工作空间重嵌入重试仍派发 API worker 的下游重算子任务。
+        self.api_tasks = ApiTaskPublisher(settings)
         self.memory_enterprise = MemoryEnterpriseManager(settings)
         self.quota = QuotaEntitlements(settings, self.memory_enterprise)
         self.emotion_classifier = EmotionClassifier(settings)
@@ -204,7 +204,7 @@ class ProfileRuntime:
             self.emotion_classifier.aclose(),
             self.task_bridge.aclose(),
             self.file_service.aclose(),
-            self.write_gateway.aclose(),
+            self.api_tasks.aclose(),
             self.memory_enterprise.aclose(),
         )
 

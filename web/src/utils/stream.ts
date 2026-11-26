@@ -90,8 +90,8 @@ export interface SSEErrorFrame {
  * Handles the following SSE line types:
  * - `event: <name>`   — event type tag
  * - `data: <payload>` — JSON / string payload (possibly multi-line)
- * - `: <comment>`     — comment line (e.g. heartbeat / connected). Emitted as a
- *                       message with the `comment` field set.
+ * - `: <comment>`     — comment line (e.g. heartbeat / connected). Skipped: these
+ *                       carry no `event:`/`data:` and must not reach consumers.
  *
  * @param sseString - Raw SSE string data (one or more events separated by `\n\n`)
  * @returns Array of parsed SSE messages
@@ -114,14 +114,13 @@ export function parseSSEToJSON(sseString: string) {
   let dataContent = ''
 
   for (const line of lines) {
-    console.log('line', line)
-    // SSE comment line (`: heartbeat`, `: connected`, ...) — emit as a comment event.
+    // SSE comment line (`: heartbeat`, `: connected`, ...) — keep-alive frames with
+    // no `event:`/`data:`. Skip them: routing them as business events would yield an
+    // `undefined` payload downstream and abort the stream.
     if (line.startsWith(':')) {
       flushCurrent(currentEvent, dataContent)
       currentEvent = {}
       dataContent = ''
-      const comment = line.slice(1).trim()
-      if (comment) events.push({ comment })
       continue
     }
 
@@ -136,7 +135,6 @@ export function parseSSEToJSON(sseString: string) {
   }
 
   flushCurrent(currentEvent, dataContent)
-  console.log('events', events)
   return events
 }
 

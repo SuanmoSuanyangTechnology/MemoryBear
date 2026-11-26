@@ -162,6 +162,30 @@ class EndUserRepository:
         async with self.postgres.session() as session:
             return await session.scalar(statement)
 
+    async def resolve_id_by_other_id(self, workspace_id: UUID, other_id: str) -> UUID | None:
+        """Match the earliest active user, then the latest merge within the workspace."""
+        direct = (
+            select(EndUser.id)
+            .where(*active_users_in_workspace(workspace_id), EndUser.other_id == other_id)
+            .order_by(EndUser.created_at.asc())
+            .limit(1)
+        )
+        latest_target = (
+            select(EndUserMerge.target_id)
+            .where(
+                EndUserMerge.workspace_id == workspace_id,
+                EndUserMerge.origin_other_id == other_id,
+            )
+            .order_by(EndUserMerge.id.desc())
+            .limit(1)
+            .scalar_subquery()
+        )
+        merged = select(EndUser.id).where(
+            *active_users_in_workspace(workspace_id), EndUser.id == latest_target
+        )
+        async with self.postgres.session() as session:
+            return (await session.scalar(direct)) or (await session.scalar(merged))
+
     async def user_exists_in_workspace(self, end_user_id: UUID, workspace_id: UUID) -> bool:
         """Strict membership check: active user of an active workspace.
 
