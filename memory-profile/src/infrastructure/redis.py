@@ -52,6 +52,8 @@ class RedisManager:
                     decode_responses=True,
                     max_connections=self._settings.redis_pool_size,
                     health_check_interval=30,
+                    socket_connect_timeout=5,
+                    socket_timeout=10,
                 )
                 self._loop = current_loop
             return self._client

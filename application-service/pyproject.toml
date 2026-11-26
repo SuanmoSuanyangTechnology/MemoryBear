@@ -74,11 +74,11 @@ dev = [
 ]
 
 [tool.uv.sources]
-auth-sdk = { path = "../packages/auth-sdk" }
-mem-storage-core = { path = "../packages/storage-core" }
-memorybear-grpc = { path = "../packages/memorybear-grpc" }
-redbear-model = { path = "../packages/redbear-model" }
-error-core = { path = "../packages/error-core" }
+auth-sdk = { path = "../packages/auth-sdk", editable = true }
+mem-storage-core = { path = "../packages/storage-core", editable = true }
+memorybear-grpc = { path = "../packages/memorybear-grpc", editable = true }
+redbear-model = { path = "../packages/redbear-model", editable = true }
+error-core = { path = "../packages/error-core", editable = true }
 
 [tool.hatch.build.targets.wheel]
 packages = ["src"]

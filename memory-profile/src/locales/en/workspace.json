@@ -1,0 +1,7 @@
+{
+  "retention_policy": {
+    "retrieved": "Workspace retention policy retrieved successfully",
+    "updated": "Workspace retention policy updated successfully",
+    "forbidden": "You do not have permission to perform this action"
+  }
+}

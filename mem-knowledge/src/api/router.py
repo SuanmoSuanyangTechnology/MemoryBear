@@ -5,6 +5,7 @@ from fastapi import APIRouter
 
 from .routes import upload_v2
 from .routes.chunk import router as chunk_router
+from .routes.document import download_router as document_download_router
 from .routes.document import router as document_router
 from .routes.document_v1 import router as document_v1_router
 from .routes.faq_import import router as faq_import_router
@@ -27,6 +28,7 @@ internal_v1_router.include_router(chunk_router)
 internal_v1_router.include_router(document_v1_router)
 internal_v1_router.include_router(document_router)
 internal_v1_router.include_router(file_v1_router)
+internal_v1_router.include_router(document_download_router)
 internal_v1_router.include_router(file_router)
 internal_v1_router.include_router(knowledge_v1_router)
 internal_v1_router.include_router(knowledge_router)

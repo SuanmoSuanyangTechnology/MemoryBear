@@ -49,7 +49,8 @@
       "habits_failed": "行为习惯获取失败",
       "aggregate_failed": "隐性记忆查询失败",
       "snapshot_not_ready": "隐性记忆快照尚未生成",
-      "user_id_empty": "用户ID不能为空"
+      "user_id_empty": "用户ID不能为空",
+      "generate_profile_failed": "画像生成失败"
     }
   }
 }

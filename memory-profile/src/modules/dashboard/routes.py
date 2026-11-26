@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Annotated, Literal
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, Query, Request
 
 from src.common.external_api import external_api
 from src.common.responses import ApiResponse
@@ -14,6 +14,7 @@ from src.middleware.auth import MemoryPrincipal
 from src.middleware.identity import require_memory_context
 from src.modules.dashboard.handler import DashboardHandler
 from src.modules.dashboard.schemas import GenerateRAGProfileRequest, MemoryCountsRequest
+from src.modules.dashboard.tasks import publish_dashboard_tasks
 from src.schemas.dashboard import (
     ChunkInsightData,
     ChunkSummaryData,
@@ -39,15 +40,22 @@ def _handler(request: Request) -> DashboardHandler:
 async def end_users(
     request: Request,
     context: Context,
+    background_tasks: BackgroundTasks,
     page: int = Query(1, ge=1),
     pagesize: int = Query(10, ge=1),
     keyword: str | None = None,
     label: str | None = None,
     workspace_id: UUID | None = None,
 ):
-    return await _handler(request).dispatch(
+    response = await _handler(request).dispatch(
         "end_users", context, page, pagesize, keyword, label, workspace_id
     )
+    if isinstance(response, ApiResponse) and response.data["items"]:
+        end_user_ids = list(dict.fromkeys(item["end_user_id"] for item in response.data["items"]))
+        background_tasks.add_task(
+            publish_dashboard_tasks, request.app.state.runtime, context, end_user_ids
+        )
+    return response
 
 
 @router.get("/total_memory_count", response_model=ApiResponse[TotalMemoryData])

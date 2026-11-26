@@ -21,6 +21,8 @@ from src.modules.memory_config import (
 )
 from src.modules.memory_config import router as memory_config_router
 from src.modules.memory_read import router as memory_read_router
+from src.modules.memory_storage import analytics_router as memory_storage_analytics_router
+from src.modules.memory_storage import router as memory_storage_router
 from src.modules.perceptual import router as perceptual_router
 from src.modules.preference_recall.routes import router as preference_recall_router
 from src.modules.reflection import router as reflection_router
@@ -33,6 +35,8 @@ from src.modules.write import router as write_router
 
 router = APIRouter(prefix="/internal/v1")
 router.include_router(health_router)
+router.include_router(memory_storage_router)
+router.include_router(memory_storage_analytics_router)
 router.include_router(analytics_router)
 router.include_router(dashboard_router)
 router.include_router(memory_config_router)

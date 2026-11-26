@@ -17,6 +17,19 @@ from .exceptions import StorageConfigError
 logger = logging.getLogger(__name__)
 
 
+def _resolve_local_base_path(file_path: str) -> Path:
+    """Storage root for ``STORAGE_TYPE=local``.
+
+    A non-default absolute ``FILE_PATH`` is used directly as the storage root,
+    so locally running services can share one directory. The historical
+    default ``/files`` keeps the legacy cwd-relative ``storage/files`` layout.
+    """
+    configured = Path(file_path)
+    if configured.is_absolute() and configured != Path("/files"):
+        return configured
+    return Path("storage") / file_path.lstrip("/")
+
+
 class StorageFactory:
     """
     Factory class for creating storage backend instances.
@@ -64,7 +77,7 @@ class StorageFactory:
         if storage_type == "local":
             from .local import LocalStorage
 
-            base_path = Path("storage") / current_settings().file_path.lstrip("/")
+            base_path = _resolve_local_base_path(current_settings().file_path)
             return LocalStorage(base_path=str(base_path))
 
         elif storage_type == "oss":

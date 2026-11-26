@@ -10,7 +10,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /code
 
-RUN if [ "$NEED_MIRROR" == "1" ]; then \
+RUN if [ "$NEED_MIRROR" = "1" ]; then \
         sed -i 's|http://deb.debian.org|http://mirrors.tuna.tsinghua.edu.cn|g' /etc/apt/sources.list.d/*.sources 2>/dev/null || true; \
         pip3 config set global.index-url https://pypi.tuna.tsinghua.edu.cn/simple && \
         pip3 config set global.trusted-host pypi.tuna.tsinghua.edu.cn; \
@@ -23,7 +23,7 @@ RUN if [ "$NEED_MIRROR" == "1" ]; then \
       curl && \
     rm -rf /var/lib/apt/lists/*
 
-RUN if [ "$NEED_MIRROR" == "1" ]; then \
+RUN if [ "$NEED_MIRROR" = "1" ]; then \
         pip3 install --no-cache-dir uv==0.10.11; \
     else \
         pip install --no-cache-dir --index-url "${PYPI_INDEX_URL}" uv==0.10.11; \
@@ -35,7 +35,7 @@ COPY packages/error-core /code/packages/error-core
 COPY model-service/pyproject.toml model-service/uv.lock /code/model-service/
 
 WORKDIR /code/model-service
-RUN if [ "$NEED_MIRROR" == "1" ]; then \
+RUN if [ "$NEED_MIRROR" = "1" ]; then \
         sed -i 's|pypi.org|pypi.tuna.tsinghua.edu.cn|g' uv.lock; \
     fi
 RUN --mount=type=cache,target=/root/.cache/uv \
@@ -64,7 +64,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /code/model-service
 
-RUN if [ "$NEED_MIRROR" == "1" ]; then \
+RUN if [ "$NEED_MIRROR" = "1" ]; then \
         sed -i 's|http://deb.debian.org|http://mirrors.tuna.tsinghua.edu.cn|g' /etc/apt/sources.list.d/*.sources 2>/dev/null || true; \
     fi; \
     apt-get update && \

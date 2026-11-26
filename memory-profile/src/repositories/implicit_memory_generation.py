@@ -121,7 +121,7 @@ class ImplicitProfileGenerationRepository:
         from sqlalchemy import select
 
         from src.common.timing import utcnow_naive
-        from src.models.references.memory_statistics_model import ImplicitEmotionsStorage
+        from src.models.references.implicit_emotions_storage_model import ImplicitEmotionsStorage
 
         async with self.postgres.session() as session:
             try:

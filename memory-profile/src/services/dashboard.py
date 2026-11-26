@@ -73,6 +73,7 @@ class DashboardService:
     ):
         if workspace_id is not None and workspace_id != context.workspace_id:
             raise ProfileError(BizCode.WORKSPACE_ACCESS_DENIED, "工作空间不可访问")
+        pagesize = min(pagesize, 100)
         workspace = await self._workspace(context)
         is_rag = workspace.get("storage_type") == "rag"
         rag_counts = (

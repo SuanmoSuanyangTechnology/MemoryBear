@@ -1,0 +1,7 @@
+{
+  "retention_policy": {
+    "retrieved": "工作空间保留策略获取成功",
+    "updated": "工作空间保留策略更新成功",
+    "forbidden": "无权执行此操作"
+  }
+}
