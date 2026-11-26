@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from src.core.domain.metadata_merge import (
+from src.domain.metadata_merge import (
     LEGACY_METADATA_FIELDS,
     normalize_legacy_metadata_values,
 )

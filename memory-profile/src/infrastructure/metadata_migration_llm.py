@@ -16,7 +16,7 @@ from typing import Any
 import sqlalchemy as sa
 
 from src.config import ProfileSettings
-from src.core.domain.metadata_migration import prepare_migration_metadata
+from src.domain.metadata_migration import prepare_migration_metadata
 from src.infrastructure.model_service import ModelServiceManager
 from src.infrastructure.postgres import PostgresManager
 from src.models.references import Workspace
