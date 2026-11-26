@@ -29,9 +29,10 @@ import httpx
 from auth_sdk.schema import UserContext
 from auth_sdk.token import LocalTokenIssuer
 
+from src.common.observability.context import get_trace_id
 from src.common.responses import ApiResponse
 from src.config import ProfileSettings
-from src.schemas.emotion_reply import EmotionPolicy
+from src.schemas.emotion_reply import AppEmotionStrategy, EmotionPolicy
 
 logger = logging.getLogger(__name__)
 
@@ -173,6 +174,23 @@ class MemoryEnterpriseManager:
         reply = ApiResponse[EmotionPolicy | None].model_validate(response.json(), strict=True)
         if reply.code != 0:
             raise ValueError("memory-enterprise returned an unsuccessful emotion policy response")
+        return reply.data
+
+    async def app_emotion_policy(
+        self, app_id: UUID, tenant_id: UUID, workspace_id: UUID, emotion_code: str
+    ) -> AppEmotionStrategy | None:
+        headers = self._auth_headers(tenant_id=tenant_id, workspace_id=workspace_id)
+        headers["X-Trace-Id"] = get_trace_id()
+        async with asyncio.timeout(self._settings.memory_enterprise_timeout_seconds):
+            response = await (await self.client()).get(
+                "/internal/v1/ontology/app-emotion-policy",
+                params={"app_id": str(app_id), "emotion_code": emotion_code},
+                headers=headers,
+            )
+        response.raise_for_status()
+        reply = ApiResponse[AppEmotionStrategy | None].model_validate(response.json(), strict=True)
+        if reply.code != 0:
+            raise ValueError("memory-enterprise rejected the application policy lookup")
         return reply.data
 
     async def metadata_scope(

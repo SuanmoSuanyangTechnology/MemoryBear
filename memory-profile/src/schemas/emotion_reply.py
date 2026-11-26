@@ -1,6 +1,7 @@
 """Request and result shapes for emotion replies."""
 
-from typing import Annotated
+from typing import Annotated, Literal
+from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 
@@ -26,3 +27,19 @@ class EmotionPolicy(BaseModel):
     tone: str
     do: list[str]
     avoid: list[str]
+
+
+class AppEmotionPolicyRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    app_id: UUID
+    emotion_code: str = Field(min_length=1, max_length=50)
+
+
+class AppEmotionStrategy(BaseModel):
+    ontology_id: str
+    ontology_source: Literal["custom", "system_default"]
+    emotion_code: str
+    tone: str
+    do_list: list[str]
+    avoid_list: list[str]
