@@ -126,10 +126,18 @@ class FileServiceClient:
             tenant_id=tenant_id, workspace_id=workspace_id, actor_id=actor_id,
             actor_kind=actor_kind,
         )
-        async with self._http_client() as client:
-            response = await client.get(CONTENT_PATH.format(file_id=file_id), headers=headers)
-            response.raise_for_status()
-            return response.content
+        try:
+            async with self._http_client() as client:
+                response = await client.get(CONTENT_PATH.format(file_id=file_id), headers=headers)
+                response.raise_for_status()
+        except httpx.HTTPStatusError as exc:
+            status = exc.response.status_code
+            raise FileServiceError(
+                f"File service returned HTTP {status}", status_code=404 if status == 404 else 502
+            ) from exc
+        except httpx.HTTPError as exc:
+            raise FileServiceError("File service is unavailable", status_code=503) from exc
+        return response.content
 
     async def upload(
         self,

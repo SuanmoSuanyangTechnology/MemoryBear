@@ -1117,9 +1117,14 @@ class MemoryStorageService:
                     continue
 
             extracted_result, result_bytes = await pipeline_task
+            result_data = {
+                "config_id": cid,
+                "time_log": None,
+                "extracted_result": extracted_result,
+            }
             with BytesIO(result_bytes) as content:
                 try:
-                    await self.runtime.file_service.upload(
+                    stored = await self.runtime.file_service.upload(
                         file=UploadFile(
                             content,
                             filename=f"pilot-run-{uuid.uuid4()}.json",
@@ -1130,15 +1135,10 @@ class MemoryStorageService:
                         actor_id=actor_id,
                         actor_kind=actor_kind,
                     )
+                    result_data["result_file_id"] = stored["file_id"]
                 except FileServiceError:
                     logger.warning("Pilot run result upload failed", exc_info=True)
-
-            # 步骤 6: 组装结果（试运行不做额外覆盖率后处理）
-            result_data = {
-                "config_id": cid,
-                "time_log": None,
-                "extracted_result": extracted_result,
-            }
+                    result_data["result_storage_error"] = {"code": "PILOT_RESULT_UPLOAD_FAILED"}
 
             yield format_sse_message("result", result_data)
 
@@ -1845,7 +1845,12 @@ class MemoryStorageService:
             actor_kind=actor_kind,
         )
 
-        async def one(index, message, file):
+        async def one(index, file_index, message, file):
+            failure = {
+                "message_index": index,
+                "file_index": file_index,
+                "file_type": file.type.value,
+            }
             try:
                 model_id = {
                     FileType.IMAGE: config.vision_model_id,
@@ -1855,7 +1860,7 @@ class MemoryStorageService:
                 }.get(file.type)
                 view = views.get(model_id)
                 if view is None:
-                    return None
+                    return None, {**failure, "code": "ATTACHMENT_MODEL_UNAVAILABLE"}
                 file = file.model_copy(deep=True)
                 media = MultimodalService(
                     self.repository, view,
@@ -1868,9 +1873,11 @@ class MemoryStorageService:
                         actor_id=actor_id, actor_kind=actor_kind,
                     )
                     file.url = await media.get_file_url(file)
-                parts = await media.process_files([file], workspace_id=config.workspace_id)
+                parts = await media.process_files(
+                    [file], workspace_id=config.workspace_id, include_processing_errors=False
+                )
                 if not parts:
-                    return None
+                    return None, {**failure, "code": "ATTACHMENT_PROCESSING_FAILED"}
                 prompt = prompt_env.get_template("perceptual_summary_system.jinja2").render(
                     file_type=file.type,
                     language=langid.classify(message.content)[0] if message.content else "zh",
@@ -1940,23 +1947,26 @@ class MemoryStorageService:
                         "modalities": modalities,
                     },
                 )
-                return index, snapshot, file.type.value, file.url
+                return (index, snapshot, file.type.value, file.url), None
             except asyncio.CancelledError:
                 raise
             except Exception:
                 logger.warning(
                     "Pilot attachment processing failed: message_index=%s", index, exc_info=True
                 )
-                return None
+                return None, {**failure, "code": "ATTACHMENT_PROCESSING_FAILED"}
 
         tasks = [
-            one(index, message, file)
+            one(index, file_index, message, file)
             for index, message in enumerate(messages)
             if message.role == "user"
-            for file in message.files or []
+            for file_index, file in enumerate(message.files or [])
         ]
         results = await asyncio.gather(*tasks)
-        return [result for result in results if result is not None]
+        return (
+            [snapshot for snapshot, _ in results if snapshot is not None],
+            [failure for _, failure in results if failure is not None],
+        )
 
 
 
@@ -2157,14 +2167,17 @@ class MemoryStorageService:
             step_start = time.time()
             await emit("perceptual_extract", "开始提取感知记忆", None)
 
-            perceptual_snapshots = await self._pilot_snapshots(
+            perceptual_snapshots, attachment_errors = await self._pilot_snapshots(
                 messages, memory_config, model_views or {},
                 actor_id=actor_id, actor_kind=actor_kind,
             )
 
             await emit(
                 "perceptual_result", "感知记忆结果",
-                {"perceptual_nodes": _collect_perceptual_nodes_data(perceptual_snapshots)},
+                {
+                    "perceptual_nodes": _collect_perceptual_nodes_data(perceptual_snapshots),
+                    "attachment_errors": attachment_errors,
+                },
             )
             await emit("perceptual_complete", "感知记忆提取完成", {"count": len(perceptual_snapshots)})
             timing_logger.info("✓ %s: %.2fs", "Perceptual Snapshot Generation", time.time() - step_start)

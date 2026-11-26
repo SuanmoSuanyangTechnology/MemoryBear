@@ -593,7 +593,7 @@ class MultimodalService:
 
             try:
                 content = await self.download_attachment(file.upload_file_id)
-            except (FileServiceError, httpx.HTTPError) as exc:
+            except FileServiceError as exc:
                 raise _file_error("文件读取失败", BizCode.FILE_READ_ERROR) from exc
             if len(content) != file_size:
                 logger.error(
