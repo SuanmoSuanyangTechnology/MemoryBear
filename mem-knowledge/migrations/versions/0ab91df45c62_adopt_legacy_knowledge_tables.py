@@ -1,13 +1,11 @@
-"""建立与生产 72e42a8c6d19 一致的知识库基线。"""
+"""接管旧 API 创建的知识库表，或在空库创建同一结构。"""
 
-from pathlib import Path
 from typing import NamedTuple
 
 import sqlalchemy as sa
 from alembic import op
-from alembic.script import ScriptDirectory
 
-revision = "72e42a8c6d19"
+revision = "0ab91df45c62"
 down_revision = None
 branch_labels = None
 depends_on = None
@@ -467,7 +465,7 @@ def verify_owned_tables(connection: sa.Connection) -> None:
     )
 
 
-def _adopt_legacy_knowledge_tables() -> None:
+def upgrade() -> None:
     if op.get_context().as_sql:
         raise RuntimeError("知识库表接管需要在线核对 PostgreSQL 结构")
     connection = op.get_bind()
@@ -485,14 +483,5 @@ def _adopt_legacy_knowledge_tables() -> None:
     verify_owned_tables(connection)
 
 
-def upgrade() -> None:
-    """按生产基线的顺序初始化表、列和索引。"""
-    _adopt_legacy_knowledge_tables()
-    # 复用发布版脚本，主版本目录只登记最后抵达的生产基线。
-    archive = ScriptDirectory(str(Path(__file__).resolve().parents[1] / "legacy"))
-    for step in reversed(list(archive.iterate_revisions(revision, "base"))):
-        step.module.upgrade()
-
-
 def downgrade() -> None:
-    raise RuntimeError("生产知识库基线不可降级，避免删除已有数据")
+    raise RuntimeError("知识库表接管基线不可降级，避免删除已有数据")

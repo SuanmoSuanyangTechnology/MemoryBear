@@ -1,7 +1,7 @@
 """create wiki generation and navigation tables
 
 Revision ID: c3b66ad8e01c
-Revises:
+Revises: 0ab91df45c62
 """
 
 import sqlalchemy as sa
@@ -9,7 +9,7 @@ from alembic import op
 from sqlalchemy.dialects import postgresql
 
 revision = "c3b66ad8e01c"
-down_revision = None
+down_revision = "0ab91df45c62"
 branch_labels = None
 depends_on = None
 

@@ -14,8 +14,8 @@ def upgrade() -> None:
     context = op.get_context()
     if context.as_sql:
         raise RuntimeError("Wiki 批量投递迁移需要在线校验生产基线")
-    baseline = context.script.get_revision(down_revision).module
-    baseline.verify_owned_tables(op.get_bind())
+    ownership = context.script.get_revision("0ab91df45c62").module
+    ownership.verify_owned_tables(op.get_bind())
 
     op.add_column("wiki_document_states", sa.Column("batch_id", UUID()))
     op.add_column("wiki_document_states", sa.Column("claimed_at", sa.DateTime()))
