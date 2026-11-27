@@ -179,30 +179,26 @@ class ChunkUpdate(BaseModel):
         return {}
 
 
-class ChunkRetrieve(BaseModel):
+class _ChunkRetrieveBase(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
     query: RetrievalQuery
     kb_ids: list[uuid.UUID] = Field(default_factory=list)
     ex_ids: list[str] | None = None
-    knowledge_bases: list[KnowledgeBaseConfig] = Field(default_factory=list)
     file_names_filter: list[str] | None = None
     similarity_threshold: float | None = Field(None, ge=0, le=1)
     vector_similarity_weight: float | None = Field(None, ge=0, le=1)
     top_k: int = Field(20, ge=1, le=100)
-    top_n: int | None = Field(20, ge=1, le=100)
     retrieve_type: RetrieveType | None = Field(
         None,
         description="检索方式，忽略大小写及首尾空格；FAQ 使用 wiki-faq，兼容历史 wiki-FAQ。",
     )
     enable_graph_retrieval: int = Field(0, ge=0, le=1)
-    rerank_id: uuid.UUID | None = None
     rerank_score_threshold: float | None = Field(None, ge=0, le=1)
     rerank_mode: RerankMode | None = None
     rerank_weights: RerankWeights | None = None
     metadata_filters: list[FilterGroup] | None = None
     metadata_filter_mode: MetadataFilterMode = MetadataFilterMode.MANUAL
-    metadata_filters_resolved: bool = False
 
     @field_validator("query")
     @classmethod
@@ -217,6 +213,23 @@ class ChunkRetrieve(BaseModel):
     @property
     def normalized_query(self) -> TextRetrievalQuery | ImageRetrievalQuery:
         return normalize_retrieval_query(self.query)
+
+
+class HttpChunkRetrieve(_ChunkRetrieveBase):
+    """管理端与 V1 HTTP 公开检索只接收已发布字段。"""
+
+    @model_validator(mode="after")
+    def validate_knowledge_ids(self) -> "HttpChunkRetrieve":
+        if not self.kb_ids and not self.ex_ids:
+            raise ValueError("kb_ids and ex_ids cannot both be empty")
+        return self
+
+
+class ChunkRetrieve(_ChunkRetrieveBase):
+    knowledge_bases: list[KnowledgeBaseConfig] = Field(default_factory=list)
+    top_n: int | None = Field(20, ge=1, le=100)
+    rerank_id: uuid.UUID | None = None
+    metadata_filters_resolved: bool = False
 
     @model_validator(mode="after")
     def resolve_top_n(self) -> "ChunkRetrieve":

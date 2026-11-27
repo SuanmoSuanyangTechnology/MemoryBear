@@ -37,6 +37,7 @@ from ..repositories.parser_configuration import (
     knowledge_configuration,
 )
 from ..repositories.reference import ReferenceRepository
+from ..repositories.wiki.deliveries import clear_deliveries_for_knowledge
 from ..utils.datetime_utils import to_timestamp_ms, utcnow_naive
 from .folder_hierarchy import validate_knowledge_hierarchy
 from .knowledge_model_validation import validate_requested_knowledge_models
@@ -816,6 +817,8 @@ async def apply_knowledge_update(
         if field != "parser_config" and hasattr(knowledge, field):
             setattr(knowledge, field, value)
     knowledge.updated_at = utcnow_naive()
+    if update_fields.get("status") == 2:
+        await clear_deliveries_for_knowledge(db, knowledge.id)
     await db.flush()
     await db.refresh(knowledge)
     outcome = replace(
@@ -898,11 +901,15 @@ async def soft_delete_knowledge(
     knowledge_id: uuid.UUID,
     principal: Principal,
 ) -> KnowledgeMutationOutcome:
-    knowledge = await get_knowledge(db, knowledge_id, principal)
+    knowledge = await knowledge_repository.get_knowledge_by_id_in_workspace_async(
+        db, knowledge_id, principal.workspace_id, for_update=True,
+    )
     if knowledge is None:
         raise _not_found()
     knowledge.status = 2
     knowledge.updated_at = utcnow_naive()
+    # 与 Worker 保持先锁知识库、再操作页面投递的顺序。
+    await clear_deliveries_for_knowledge(db, knowledge.id)
     await db.flush()
     outcome = KnowledgeMutationOutcome(
         response_data=None,

@@ -1,9 +1,16 @@
 """统一定义 Wiki 候选的本体类型及页面分类。"""
 
+import re
 from enum import StrEnum
 
 ONTOLOGY_VERSION = "ontology_general_v1:v1"
 TYPE_EVIDENCE_CONTEXT_CHARS = 180
+_EVIDENCE_PUNCTUATION = str.maketrans("（），：", "(),:")
+_EVIDENCE_MARKDOWN = re.compile(
+    r"(?<![a-zA-Z0-9*\\])(?P<bold>\*\*|\\\*\\\*)"
+    r"(?=\S)(?P<label>[^*\r\n]+?)(?<=\S)(?P=bold)(?![a-zA-Z0-9*\\])"
+    r"|(?<=[:：])[ \t]*\r?\n[ \t]*-[ \t]+(?=\S)"
+)
 
 
 class OntologyType(StrEnum):
@@ -59,6 +66,38 @@ def candidate_identity(candidate: dict) -> str:
     return candidate.get("semantic_type") or candidate["kind"]
 
 
+def _evidence_text(text: str) -> tuple[str, list[int]]:
+    """去掉分类引文中的加粗和冒号后的列表排版，记录每个字符的原文位置。"""
+    parts = []
+    offsets = []
+    start = 0
+    for match in _EVIDENCE_MARKDOWN.finditer(text):
+        parts.append(text[start:match.start()])
+        offsets.extend(range(start, match.start()))
+        if match["label"] is not None:
+            parts.append(match["label"])
+            offsets.extend(range(*match.span("label")))
+        start = match.end()
+    parts.append(text[start:])
+    offsets.extend(range(start, len(text)))
+    return "".join(parts).translate(_EVIDENCE_PUNCTUATION), offsets
+
+
+def _evidence_span(text: str, quote: str) -> tuple[int, int] | None:
+    start = text.find(quote)
+    if start >= 0:
+        return start, start + len(quote)
+
+    visible_quote, _ = _evidence_text(quote.strip())
+    if not any(char.isalnum() for char in visible_quote):
+        return None
+    visible_text, offsets = _evidence_text(text)
+    start = visible_text.find(visible_quote)
+    if start < 0:
+        return None
+    return offsets[start], offsets[start + len(visible_quote) - 1] + 1
+
+
 def with_verified_type(candidate: dict, source_text: dict[str, str]) -> dict:
     """仅保留候选自己引用且能在原文找到的引文。"""
     refs = set(candidate["source_refs"])
@@ -68,13 +107,17 @@ def with_verified_type(candidate: dict, source_text: dict[str, str]) -> dict:
         if ref not in refs or not quote.strip():
             continue
         text = source_text.get(ref, "")
-        start = text.find(quote)
-        if start < 0:
+        span = _evidence_span(text, quote)
+        if span is None:
             continue
+        start, end = span
         # 分类引文附近可能还有原文明确写出的同名、隶属或纠正关系。
         context = text[max(0, start - TYPE_EVIDENCE_CONTEXT_CHARS):
-                       start + len(quote) + TYPE_EVIDENCE_CONTEXT_CHARS]
-        evidence.append({**item, "semantic_type": candidate["semantic_type"], "context": context})
+                       end + TYPE_EVIDENCE_CONTEXT_CHARS]
+        evidence.append({
+            **item, "quote": text[start:end], "semantic_type": candidate["semantic_type"],
+            "context": context,
+        })
     if not evidence:
         raise ValueError(f"Candidate {candidate['name']!r} has no valid type evidence")
     kind = page_type(candidate["semantic_type"])

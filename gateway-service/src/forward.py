@@ -31,8 +31,10 @@ from fastapi import Request
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 from memorybear_grpc.metadata import traceparent_trace_id
 from pydantic import BaseModel
+from starlette.convertors import UUIDConvertor
 
 from .circuit import CircuitBreaker
+from .knowledge_routes import versioned_knowledge_target
 from .metrics import (
     gateway_circuit_breaker_state,
     gateway_forward_requests_total,
@@ -83,14 +85,20 @@ def rewrite_internal_path(external_path: str) -> str:
 def _compile_api_key_path(template: str) -> tuple[str, re.Pattern[str]]:
     """Compile one "METHOD /path/{param}" allowlist entry into (method, regex).
 
-    ``{param}`` matches exactly one path segment; every other character is
-    escaped literally. The allowlist is static for the process lifetime, so the
-    compiled form is cached rather than rebuilt per request.
+    ``{param}`` matches one segment, and ``{id:uuid}`` matches a UUID segment.
+    Cache the result for the route's lifetime.
     """
     method, _, path = template.partition(" ")
-    parts = re.split(r"\{[^}]+\}", path.strip())
-    pattern = re.compile("[^/]+".join(re.escape(part) for part in parts))
-    return method.strip().upper(), pattern
+    parts = re.split(r"(\{[^}]+\})", path.strip())
+    regex = []
+    for index, part in enumerate(parts):
+        if index % 2 == 0:
+            regex.append(re.escape(part))
+        elif part.endswith(":uuid}"):
+            regex.append(UUIDConvertor.regex)
+        else:
+            regex.append("[^/]+")
+    return method.strip().upper(), re.compile("".join(regex))
 
 
 class TargetRoute(BaseModel):
@@ -124,9 +132,13 @@ class TargetRoute(BaseModel):
     grpc_target: str | None = None
     grpc_method: str = ""
 
-    def target_path(self, external_path: str) -> str:
+    def target_path(self, external_path: str, *, method: str = "GET") -> str:
         if self.path_mode == "preserve":
             return external_path
+        if self.service == "kb":
+            target = versioned_knowledge_target(external_path, method)
+            if target is not None:
+                return target
         return rewrite_internal_path(external_path)
 
     def api_key_path_verdict(self, method: str, path: str) -> str | None:
@@ -268,7 +280,7 @@ class Forwarder:
             return JSONResponse(status_code=502, content={"detail": "circuit open"})
         gateway_circuit_breaker_state.labels(target=route.service).set(0)
         # request.url.path 不含查询串，query 须单独拼回，否则分页/过滤等参数静默丢失
-        url = route.base_url + route.target_path(request.url.path)
+        url = route.base_url + route.target_path(request.url.path, method=request.method)
         if request.url.query:
             url += "?" + request.url.query
         headers = self.build_headers(request)

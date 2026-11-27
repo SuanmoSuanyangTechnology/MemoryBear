@@ -1,9 +1,10 @@
 """页面投递归属与新素材交接，所有写入使用既有知识库锁序。"""
 
 from datetime import timedelta
-from uuid import uuid4
+from uuid import UUID, uuid4
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from ...models.owned.wiki import WikiDocumentPageTask, WikiPage, WikiReduceDelivery, utcnow
 from ...rag.wiki.config import TERMINAL_TASK_STATUSES, WikiError, WikiSuperseded
@@ -23,6 +24,11 @@ def _new_turn(row):
     row.cas_used = row.compact_used = row.attempts = 0
     row.deadline_at = None
     return _message(row)
+
+
+async def clear_deliveries_for_knowledge(db: AsyncSession, kb_id: UUID) -> None:
+    """调用方持有知识库行锁，在同一事务清理该库投递。"""
+    await db.execute(delete(WikiReduceDelivery).where(WikiReduceDelivery.kb_id == kb_id))
 
 
 def register(session, kb_id, page_ids):

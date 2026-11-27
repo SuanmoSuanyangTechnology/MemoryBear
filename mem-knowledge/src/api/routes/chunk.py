@@ -27,6 +27,7 @@ from ..schemas.chunk import (
     ChunkCreate,
     ChunkRetrieve,
     ChunkUpdate,
+    HttpChunkRetrieve,
     KnowledgeRetrievalSource,
     RetrievalPolicy,
     RetrievalPolicyRequest,
@@ -36,6 +37,7 @@ from ..schemas.common import SERVICE_UNAVAILABLE_RESPONSE, SuccessEnvelope, succ
 from ..schemas.knowledge_retrieval import prepare_retrieval_request
 
 router = APIRouter(prefix="/chunks", tags=["chunks"])
+public_retrieval_router = APIRouter(prefix="/chunks", tags=["chunks"])
 
 
 def _success(
@@ -443,6 +445,23 @@ async def retrieve_chunks(
     )
     data = result.model_dump(mode="json") if result.has_graph_data() else result.chunks
     return _success(request, data, "retrieval successful")
+
+
+@public_retrieval_router.post(
+    "/retrieval",
+    response_model=SuccessEnvelope[Any],
+    responses=SERVICE_UNAVAILABLE_RESPONSE,
+)
+async def retrieve_public_chunks(
+    request: Request,
+    retrieve_data: HttpChunkRetrieve,
+    principal: Annotated[Principal, Depends(get_principal)],
+    source: Annotated[KnowledgeRetrievalSource, Depends(get_source)],
+    runtime: Annotated[ProcessRuntime, Depends(get_runtime)],
+) -> SuccessEnvelope[Any]:
+    # 保留省略值与显式 null 的差异，只把公开模型已验证的字段交给内部检索。
+    payload = ChunkRetrieve.model_validate(retrieve_data.model_dump(exclude_unset=True))
+    return await retrieve_chunks(request, payload, principal, source, runtime)
 
 
 @router.post("/{kb_id}/import_qa", response_model=SuccessEnvelope[dict[str, str]])

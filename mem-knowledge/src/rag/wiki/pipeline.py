@@ -118,9 +118,23 @@ def extract_candidates(model, snapshot, segments):
         source_text = {s["ref"]: s["text"] for s in segment}
 
         def validate(value):
-            for index, candidate in enumerate(value["candidates"]):
-                require_refs(candidate["source_refs"], source_text)
-                value["candidates"][index] = with_verified_type(candidate, source_text)
+            verified = []
+            first_error = None
+            for candidate in value["candidates"]:
+                try:
+                    require_refs(candidate["source_refs"], source_text)
+                    verified.append(with_verified_type(candidate, source_text))
+                except ValueError as exc:
+                    first_error = first_error or exc
+            if first_error is not None:
+                if not verified:
+                    raise first_error
+                logger.warning(
+                    "Wiki 分段已跳过证据校验失败的候选 task_id=%s document_id=%s skipped=%s",
+                    current_parent_task_id(), snapshot.get("document_id"),
+                    len(value["candidates"]) - len(verified),
+                )
+            value["candidates"] = verified
 
         result = model.call(
             "wiki_candidates_v1",

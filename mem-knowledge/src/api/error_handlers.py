@@ -47,11 +47,12 @@ _HTTP_ERRORS = {
 
 
 # The actual endpoint identity is independent of router prefixes and query strings.
-# Only ChunkRetrieve receives the specialized rerank field mapping.
+# 检索入口沿用同一套请求校验和重排字段错误契约。
 _VALIDATION_CONTRACTS = {
     ("src.api.routes.faq_import", "submit_import"): "KB_HTTP_VALIDATION_ERROR",
     ("src.api.routes.wiki_faq", "export_faqs"): "KB_HTTP_VALIDATION_ERROR",
     ("src.api.routes.chunk", "retrieve_chunks"): "KB_RETRIEVAL_REQUEST_INVALID",
+    ("src.api.routes.chunk", "retrieve_public_chunks"): "KB_RETRIEVAL_REQUEST_INVALID",
 }
 _RERANK_FIELDS = frozenset({"rerank_mode", "rerank_weights"})
 

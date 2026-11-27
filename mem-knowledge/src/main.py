@@ -10,7 +10,7 @@ from typing import Any
 from fastapi import FastAPI
 
 from .api.error_handlers import register_error_handlers
-from .api.router import internal_upload_router, internal_v1_router
+from .api.router import internal_v1_router, internal_v2_router
 from .api.schemas.common import ApiResponse
 from .application.bootstrap import get_settings
 from .application.config import KnowledgeSettings
@@ -117,7 +117,7 @@ def create_app(settings: KnowledgeSettings | None = None) -> FastAPI:
         gateway=gateway_auth,
     )
     application.include_router(internal_v1_router)
-    application.include_router(internal_upload_router)
+    application.include_router(internal_v2_router)
 
     register_error_handlers(application)
 
