@@ -393,6 +393,22 @@ class MemoryConfigReadRepository:
             )
             return dict(row) if row is not None else None
 
+    async def config_ids_by_workspace(self, workspace_id: UUID) -> list[UUID]:
+        """Every memory-config id under the workspace.
+
+        The workspace model switch invalidates ``memory_config:{config_id}``
+        for each of them, exactly like the API's switch flow: the cached
+        configuration inherits the workspace's embedding model.
+        """
+
+        async with self.postgres.session() as session:
+            rows = await session.scalars(
+                select(MemoryConfigRow.config_id).where(
+                    MemoryConfigRow.workspace_id == workspace_id
+                )
+            )
+            return list(rows.all())
+
     async def list_by_workspace(self, workspace_id: UUID) -> list[dict[str, Any]]:
         """List a workspace's configurations."""
 

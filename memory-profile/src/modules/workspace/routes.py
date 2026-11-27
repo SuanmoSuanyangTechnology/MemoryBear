@@ -137,13 +137,27 @@ async def create_workspace_reembed_job(
         ),
     ] = None,
 ) -> ApiResponse[Any] | JSONResponse:
-    """Register a job for a model switch and publish the API re-embed driver.
+    """Run the rest of a model switch; the caller only wrote the workspace row.
 
     Service-to-service entry point: the workspace service changes
-    ``workspaces.embedding`` first, then calls this route so the durable job row
-    is written here and ``app.tasks.run_reembed_job`` is published to the API
-    worker. One active job per workspace; the target config must already be the
-    workspace's current embedding model (otherwise 409).
+    ``workspaces.embedding`` first and calls this route, which takes over
+    everything the API's own switch flow did after that write:
+
+    * resolve both configs to their underlying model name (``model_configs.name``)
+      and skip the rebuild when the vector space did not change — a no-op is a
+      success with ``created=False``, never an error;
+    * one active job per workspace, and the target config must already be the
+      workspace's current embedding model (otherwise 409);
+    * commit the durable job row here and publish ``app.tasks.run_reembed_job``
+      to the API worker;
+    * invalidate ``memory_config:{config_id}`` for every config under the
+      workspace so the new models take effect immediately.
+
+    ``data.job_id`` is the job in flight after this request (newly created, or
+    the one already running when no rebuild was needed) — the ``reembed_job_id``
+    the caller back-fills into ``PUT /workspace_models``. The caller must roll
+    its workspace columns back when this call fails: the column write is already
+    committed by then.
 
     ``Idempotency-Key`` is optional but recommended: a retried registration with
     the same key replays the first response instead of registering a second job
