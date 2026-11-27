@@ -1,7 +1,9 @@
 """Internal routes for working-memory read endpoints (T01–T04).
 
-The four existing read routes live under ``/internal/v1`` and are registered with
-``@external_api`` so the contract snapshot tracks them.  The monolith's
+The API-key face published only ``conversations``/``messages``/``source_messages``
+(the monolith's ``memory_working_api_controller``), so exactly those three are
+registered with ``@external_api``; ``sources`` and ``detail`` stay JWT-only. The
+monolith's
 ``memory_profile_proxy`` forwards to these paths when
 ``ENABLE_MEMORY_PROFILE`` is true at API startup.
 
@@ -98,7 +100,6 @@ async def get_messages(
     "/memory/work/{end_user_id}/sources",
     response_model=ApiResponse[list[SourceStatItem]],
 )
-@external_api
 async def get_sources(
     request: Request,
     context: Context,

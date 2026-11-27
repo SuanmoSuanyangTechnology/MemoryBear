@@ -265,6 +265,11 @@ async def create_config(
     return await _handler(request).create_config(context, body, request)
 
 
+# ``update_config*`` serve both faces through one internal route: the monolith's
+# /api (user-JWT) face called POST and its /v1 (API-key) face called PUT. The
+# method is therefore declared twice here, but the gateway's ``/v1/memory_config``
+# API-key allowlist publishes PUT only (mirroring the monolith's v1 face and
+# ``api/openapi-baseline.json``); POST stays on the JWT face.
 @router.api_route(
     "/update_config",
     methods=["PUT", "POST"],
