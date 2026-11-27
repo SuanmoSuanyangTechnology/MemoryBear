@@ -330,8 +330,6 @@ class MemoryWriteService:
             raw_messages=messages,
             written=written,
             storage_type=storage_type,
-            app_id=None,
-            require_app_gate=False,
             end_user_id=end_user_id,
             config_id=config_id,
             workspace_id=str(workspace_id),
