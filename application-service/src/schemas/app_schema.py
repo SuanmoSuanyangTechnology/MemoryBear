@@ -342,6 +342,28 @@ class VariableDefinition(BaseModel):
     max_length: Optional[int] = Field(default=None, description="最大长度（用于文本类型）")
 
 
+# Direct writes validate references. The read models still accept historical IDs.
+class KnowledgeBaseConfigWrite(KnowledgeBaseConfig):
+    kb_id: uuid.UUID = Field(..., description="知识库ID")
+
+
+class KnowledgeRetrievalConfigWrite(KnowledgeRetrievalConfig):
+    knowledge_bases: List[KnowledgeBaseConfigWrite] = Field(
+        default_factory=list, description="关联的知识库列表，每个知识库有独立配置"
+    )
+    reranker_id: Optional[uuid.UUID] = Field(default=None, description="多知识库结果融合的模型ID")
+
+
+class ToolConfigWrite(ToolConfig):
+    tool_id: Optional[uuid.UUID] = Field(default=None, description="工具ID")
+
+
+class SkillConfigWrite(SkillConfig):
+    skill_ids: Optional[list[uuid.UUID]] = Field(
+        default_factory=list, description="技能ID列表（非空即启用这些技能，空列表=不挂技能）"
+    )
+
+
 class AgentConfigCreate(BaseModel):
     """Agent behavior config"""
     # Prompt config
@@ -355,7 +377,7 @@ class AgentConfigCreate(BaseModel):
     )
 
     # Knowledge base association
-    knowledge_retrieval: Optional[KnowledgeRetrievalConfig] = Field(
+    knowledge_retrieval: Optional[KnowledgeRetrievalConfigWrite] = Field(
         default=None,
         description="知识库检索配置"
     )
@@ -373,13 +395,13 @@ class AgentConfigCreate(BaseModel):
     )
 
     # Tool config
-    tools: List[ToolConfig] = Field(
+    tools: List[ToolConfigWrite] = Field(
         default_factory=list,
         description="Agent 可用的工具列表"
     )
 
     # Skill config
-    skills: Optional[SkillConfig] = Field(default_factory=dict, description="关联的技能列表")
+    skills: Optional[SkillConfigWrite] = Field(default_factory=dict, description="关联的技能列表")
 
     # Features
     features: Optional[AppFeatures] = Field(default=None, description="功能特性配置")
@@ -429,7 +451,7 @@ class AgentConfigUpdate(BaseModel):
     model_parameters: Optional[ModelParameters] = Field(default=None, description="模型参数配置")
 
     # Knowledge base association
-    knowledge_retrieval: Optional[KnowledgeRetrievalConfig] = Field(
+    knowledge_retrieval: Optional[KnowledgeRetrievalConfigWrite] = Field(
         default=None,
         description="知识库检索配置"
     )
@@ -441,10 +463,10 @@ class AgentConfigUpdate(BaseModel):
     variables: Optional[List[VariableDefinition]] = Field(default=None, description="变量列表")
 
     # Tool config
-    tools: Optional[List[ToolConfig]] = Field(default_factory=list, description="工具列表")
+    tools: Optional[List[ToolConfigWrite]] = Field(default_factory=list, description="工具列表")
 
     # Skill config
-    skills: Optional[SkillConfig] = Field(default_factory=dict, description="关联的技能列表")
+    skills: Optional[SkillConfigWrite] = Field(default_factory=dict, description="关联的技能列表")
 
     # Features
     features: Optional[AppFeatures] = Field(default=None, description="功能特性配置")

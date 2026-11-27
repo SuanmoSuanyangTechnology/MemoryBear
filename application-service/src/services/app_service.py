@@ -63,6 +63,10 @@ from ..utils.model_config_refs import config_ref_ids
 from ..utils.workflow_template_loader import load_workflow_template
 from ..utils.workflow_validator import WorkflowValidator
 from .agent_config_converter import AgentConfigConverter
+from .agent_config_references import (
+    filter_copied_agent_config,
+    validate_agent_config_references,
+)
 from .asset_release_resolver import AssetReleaseResolver
 from .category_service import CategoryService
 from .model_ref_gate import assert_refs_publishable, raise_model_unavailable, resolve_invoke_ref
@@ -387,38 +391,35 @@ class AppService:
             )
         return app
 
+    def _prepare_agent_config(
+            self,
+            config: app_schema.AgentConfigCreate | app_schema.AgentConfigUpdate,
+            workspace_id: uuid.UUID,
+            tenant_id: uuid.UUID | None = None,
+            stored_tools: list | dict | None = None,
+    ) -> dict[str, Any]:
+        tenant_id = validate_agent_config_references(self.db, config, workspace_id, tenant_id)
+        storage_data = AgentConfigConverter.to_storage_format(config)
+        tools = storage_data.get("tools")
+        if tools:
+            tenant_id = tenant_id or cross_domain_read.get_workspace_tenant_id(self.db, workspace_id)
+            if tenant_id is None:
+                raise BusinessException("应用所属工作空间不存在", BizCode.NOT_FOUND)
+            storage_data["tools"] = ToolService(self.db).validate_tool_selection(
+                tenant_id, tools, stored_tools
+            )
+        return storage_data
+
     def _create_agent_config(
             self,
             app_id: uuid.UUID,
             config_data: app_schema.AgentConfigCreate,
+            storage_data: dict[str, Any],
             now: datetime.datetime,
             *,
-            workspace_id: uuid.UUID | None = None,
-            tenant_id: uuid.UUID | None = None
+            workspace_id: uuid.UUID,
+            tenant_id: uuid.UUID | None = None,
     ) -> None:
-        """Create an Agent config (internal method).
-
-        Args:
-            app_id: App ID
-            config_data: Agent config data
-            now: Current time
-            workspace_id: Workspace ID (tenant fallback lookup)
-            tenant_id: Tenant ID (skips the workspace lookup)
-        """
-        storage_data = AgentConfigConverter.to_storage_format(config_data)
-        tools = storage_data.get("tools") or []
-        if tools:
-            resolved = tenant_id or (
-                cross_domain_read.get_workspace_tenant_id(self.db, workspace_id)
-                if workspace_id is not None
-                else None
-            )
-            if resolved is None:
-                raise BusinessException("应用所属工作空间不存在", BizCode.NOT_FOUND)
-            storage_data["tools"] = ToolService(self.db).validate_tool_selection(
-                resolved, tools
-            )
-
         # Validate the model reference **before** the insert. Without this the bad
         # id hits `agent_configs.default_model_config_id`'s FK, and the resulting
         # IntegrityError is wrapped by `create_app`'s generic `except` into
@@ -940,14 +941,19 @@ class AppService:
                 created_at=now,
                 updated_at=now,
             )
+            agent_storage = None
+            if app.type == AppType.AGENT and data.agent_config is not None:
+                agent_storage = self._prepare_agent_config(data.agent_config, workspace_id, tenant_id)
+
             self.db.add(app)
             self.db.flush()  # Fetch app.id
 
             # For agent-type apps with a config payload, create the AgentConfig
-            if app.type == "agent" and data.agent_config:
+            if data.agent_config is not None and agent_storage is not None:
                 self._create_agent_config(
                     app.id,
                     data.agent_config,
+                    agent_storage,
                     now,
                     workspace_id=workspace_id,
                     tenant_id=tenant_id,
@@ -1382,54 +1388,26 @@ class AppService:
                 ).first()
 
                 if source_config:
-                    if is_cross_workspace:
-                        # Cross-workspace: keep tenant-level model/tools/skills as is;
-                        # filter workspace-level knowledge_bases and clear memory_config
-                        _, kb_ids = self._collect_resource_ids_from_config(
-                            None, source_config.knowledge_retrieval
+                    if target_tenant_id is None:
+                        target_tenant_id = cross_domain_read.get_workspace_tenant_id(
+                            self.db, target_workspace_id
                         )
-                        _, available_kb_ids = self._preload_cross_workspace_resources(
-                            target_tenant_id, target_workspace_id, set(), kb_ids
-                        )
-                        new_model_config_id = source_config.default_model_config_id
-                        new_knowledge_retrieval = self._clean_knowledge_retrieval(
-                            source_config.knowledge_retrieval, available_kb_ids
-                        )
-                        new_tools = (
-                            copy.deepcopy(source_config.tools)
-                            if source_config.tools else []
-                        )
-                        new_memory = self._clean_memory_cross_workspace(
-                            source_config.memory, target_workspace_id
-                        )
-                        new_skills = (
-                            copy.deepcopy(source_config.skills)
-                            if source_config.skills else {}
-                        )
-                    else:
-                        new_model_config_id = source_config.default_model_config_id
-                        new_knowledge_retrieval = (
-                            copy.deepcopy(source_config.knowledge_retrieval)
-                            if source_config.knowledge_retrieval else None
-                        )
-                        new_tools = (
-                            copy.deepcopy(source_config.tools)
-                            if source_config.tools else []
-                        )
-                        new_memory = (
-                            copy.deepcopy(source_config.memory)
-                            if source_config.memory else None
-                        )
-                        new_skills = (
-                            copy.deepcopy(source_config.skills)
-                            if source_config.skills else {}
-                        )
+                        if target_tenant_id is None:
+                            raise ResourceNotFoundException("工作空间", str(target_workspace_id))
+                    new_knowledge_retrieval, new_tools, new_skills = filter_copied_agent_config(
+                        self.db, source_config, source_app.workspace_id, target_workspace_id,
+                        target_tenant_id,
+                    )
+                    new_memory = (
+                        self._clean_memory_cross_workspace(source_config.memory, target_workspace_id)
+                        if is_cross_workspace else copy.deepcopy(source_config.memory)
+                    )
 
                     new_config = AgentConfig(
                         id=uuid.uuid4(),
                         app_id=new_app.id,
                         system_prompt=source_config.system_prompt,
-                        default_model_config_id=new_model_config_id,
+                        default_model_config_id=source_config.default_model_config_id,
                         model_parameters=(
                             copy.deepcopy(source_config.model_parameters)
                             if source_config.model_parameters else None
@@ -2135,6 +2113,7 @@ class AppService:
 
         # Validate the model reference before the row is touched; a bare FK
         # violation would surface as a 500 carrying the SQL statement.
+        tenant_id = None
         if data.default_model_config_id is not None:
             tenant_id = cross_domain_read.get_workspace_tenant_id(
                 self.db, app.workspace_id
@@ -2152,6 +2131,9 @@ class AppService:
             .order_by(AgentConfig.updated_at.desc())
         )
         agent_cfg: AgentConfig | None = self.db.scalars(stmt).first()
+        storage_data = self._prepare_agent_config(
+            data, app.workspace_id, tenant_id, agent_cfg.tools if agent_cfg else None
+        )
         now = utcnow_naive()
 
         if not agent_cfg:
@@ -2164,20 +2146,6 @@ class AppService:
             )
             self.db.add(agent_cfg)
             logger.debug("创建新的 Agent 配置", extra={"app_id": str(app_id)})
-
-        # Convert to storage format
-        storage_data = AgentConfigConverter.to_storage_format(data)
-
-        tools = storage_data.get("tools") or []
-        if tools:
-            tenant_id = cross_domain_read.get_workspace_tenant_id(
-                self.db, app.workspace_id
-            )
-            if tenant_id is None:
-                raise BusinessException("应用所属工作空间不存在", BizCode.NOT_FOUND)
-            storage_data["tools"] = ToolService(self.db).validate_tool_selection(
-                tenant_id, tools, agent_cfg.tools
-            )
 
         # Update fields (unconditional full overwrite: absent fields are cleared too)
         agent_cfg.system_prompt = data.system_prompt

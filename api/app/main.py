@@ -38,6 +38,7 @@ from error_core.codes import (
     is_known_code,
 )
 from error_core.diagnostics import format_diagnostics
+from error_core.fastapi_handlers import request_validation_detail
 from error_core.knowledge import knowledge_message
 from error_core.knowledge_upload import is_versioned_upload, upload_error_response
 from error_core.messages import user_message
@@ -445,10 +446,7 @@ async def request_validation_error_handler(
         )
         return safe_retrieval_validation_response(request, exc.errors())
     # 请求体/参数校验失败统一走响应体（状态码保持 422）
-    detail = "; ".join(
-        str(error.get("msg") or "").removeprefix("Value error, ")
-        for error in exc.errors()
-    ) or "请求参数校验失败"
+    detail = request_validation_detail(exc.errors())
     language = getattr(request.state, "language", settings.I18N_DEFAULT_LANGUAGE)
     message = get_translation_service().translate(
         "errors.common.validation_failed", language
