@@ -118,7 +118,12 @@ def _annotation_text(annotation: object) -> str:
     if isinstance(annotation, TypeAliasType):
         return _annotation_text(annotation.__value__)
     if isinstance(annotation, type):
-        if annotation.__module__ == "builtins":
+        model_module = annotation.__module__
+        if issubclass(annotation, BaseModel):
+            generic_origin = annotation.__pydantic_generic_metadata__["origin"]
+            if generic_origin is not None:
+                model_module = generic_origin.__module__
+        if model_module == "builtins":
             return annotation.__qualname__
         generic_metadata = getattr(annotation, "__pydantic_generic_metadata__", None)
         if generic_metadata and generic_metadata.get("origin") is not None:

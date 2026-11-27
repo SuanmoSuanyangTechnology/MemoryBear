@@ -137,6 +137,16 @@ class AppServiceReadBody(BaseModel):
         return value
 
 
+class PredictionStatementReadBody(BaseModel):
+    """Inputs for the original prediction Statement recall."""
+
+    message: str
+    end_user_id: str
+    config_id: UUID
+    limit: int = Field(ge=1)
+    enable_rerank: bool = False
+
+
 class ReadStreamBody(BaseModel):
     """Body of ``POST /internal/v1/memory/read/stream``."""
 
@@ -148,6 +158,7 @@ class ReadStreamBody(BaseModel):
 
 __all__ = [
     "AppServiceReadBody",
+    "PredictionStatementReadBody",
     "ReadInternalBody",
     "ReadStreamBody",
     "ReadSyncBody",

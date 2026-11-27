@@ -31,6 +31,7 @@ from fastapi.responses import StreamingResponse
 from src.common.responses import ApiResponse, failure, success
 from src.core.application.read.projection import public_memory_dumps
 from src.core.composition import MemoryReadModule, build_memory_read_module
+from src.core.domain.enums import MemorySource, SearchStrategy, StorageType
 from src.core.domain.errors import ReadError, ReadErrorCode
 from src.core.domain.models import (
     ReadContextOverrides,
@@ -44,6 +45,7 @@ from src.i18n import get_request_language
 from src.middleware.auth import MemoryPrincipal
 from src.modules.memory_read.schemas import (
     AppServiceReadBody,
+    PredictionStatementReadBody,
     ReadInternalBody,
     ReadStreamBody,
     ReadSyncBody,
@@ -263,6 +265,55 @@ class MemoryReadHandler:
 
         return success(data=_sync_payload(outcome, public=False))
 
+    async def read_prediction_statements(
+        self,
+        request: Request,
+        context: MemoryPrincipal,
+        body: PredictionStatementReadBody,
+    ) -> ApiResponse[dict[str, Any]]:
+        try:
+            outcome = await self.module(request).read_memory.execute(
+                SyncReadCommand(
+                    message=body.message,
+                    search_switch=SearchStrategy.NORMAL,
+                    end_user_ids=(body.end_user_id,),
+                    enable_rerank=body.enable_rerank,
+                ),
+                _principal(context),
+                language="zh",
+                overrides=ReadContextOverrides(
+                    config_id=body.config_id,
+                    storage_type=StorageType.NEO4J.value,
+                    draft=True,
+                ),
+                options=ReadOptions(
+                    limit=body.limit,
+                    includes=(MemorySource.STATEMENT.value,),
+                    skip_summary=True,
+                    enable_rerank=body.enable_rerank,
+                ),
+            )
+        except ReadError as error:
+            return _read_failure(error, get_request_language(request))
+
+        assert isinstance(outcome, ReadOutcome)
+        result = outcome.result
+        trace = result.execution_trace
+        return success(data={
+            "statements": [
+                {
+                    "id": item.id,
+                    "score": item.score,
+                    "retrieval_trace": (
+                        item.retrieval_trace.model_dump() if item.retrieval_trace else None
+                    ),
+                }
+                for item in result.memories
+                if item.source == MemorySource.STATEMENT
+            ][:body.limit],
+            "execution_trace": trace.model_dump() if trace is not None else None,
+        })
+
     async def read_app_service(
         self,
         request: Request,
@@ -450,8 +501,6 @@ class MemoryReadHandler:
 
 
 def _parse_strategy(value: Any) -> Any:
-    from src.core.domain.enums import SearchStrategy
-
     return SearchStrategy(str(value))
 
 
