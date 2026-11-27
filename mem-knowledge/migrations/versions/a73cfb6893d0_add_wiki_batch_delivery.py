@@ -50,7 +50,7 @@ from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import UUID as SQLUUID
 from sqlalchemy.types import TypeEngine
 
-revision = "94ad0ca7d324"
+revision = "a73cfb6893d0"
 down_revision = "72e42a8c6d19"
 branch_labels = None
 depends_on = None
