@@ -1,4 +1,4 @@
-"""Wiki batch delivery and self-contained knowledge parser configuration backfill.
+"""补齐知识库和文档解析器配置表，并回填旧配置。
 
 All schema definitions, historical conversion rules and validation live in this
 revision. It imports no repository modules and reads no external SQL/config files.
@@ -50,51 +50,10 @@ from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import UUID as SQLUUID
 from sqlalchemy.types import TypeEngine
 
-revision = "94ad0ca7d324"
-down_revision = "72e42a8c6d19"
+revision = "b5389f2ea741"
+down_revision = "a73cfb6893d0"
 branch_labels = None
 depends_on = None
-
-
-def upgrade() -> None:
-    if op.get_context().as_sql:
-        raise RuntimeError(
-            "Knowledge redesign needs live data reads; "
-            "use the normal online Alembic upgrade, not --sql"
-        )
-    connection = op.get_bind()
-    if connection.dialect.name != "postgresql" or not connection.in_transaction():
-        raise RuntimeError("Knowledge redesign requires an Alembic PostgreSQL transaction")
-
-    op.add_column("wiki_document_states", sa.Column("batch_id", SQLUUID()))
-    op.add_column("wiki_document_states", sa.Column("claimed_at", sa.DateTime()))
-    scope = ["tenant_id", "workspace_id", "kb_id"]
-    op.create_table(
-        "wiki_reduce_deliveries",
-        *(sa.Column(key, SQLUUID(), nullable=False) for key in scope),
-        sa.Column("page_id", SQLUUID(), primary_key=True),
-        sa.Column("delivery_id", SQLUUID(), nullable=False),
-        sa.Column("attempt_id", SQLUUID(), nullable=False),
-        sa.Column("status", sa.String(16), nullable=False),
-        sa.Column("input_revision", sa.BigInteger(), nullable=False),
-        sa.Column("cas_used", sa.Integer(), nullable=False),
-        sa.Column("compact_used", sa.Integer(), nullable=False),
-        sa.Column("attempts", sa.Integer(), nullable=False),
-        sa.Column("deadline_at", sa.DateTime()),
-        sa.Column("created_at", sa.DateTime(), nullable=False),
-        sa.Column("updated_at", sa.DateTime(), nullable=False),
-        sa.ForeignKeyConstraint(["kb_id"], ["knowledges.id"], ondelete="CASCADE"),
-        sa.ForeignKeyConstraint(
-            [*scope, "page_id"],
-            [f"wiki_pages.{k}" for k in [*scope, "id"]],
-            name="fk_wiki_delivery_page",
-            ondelete="CASCADE",
-        ),
-        sa.CheckConstraint(
-            "status IN ('queued','running','retry_wait')", name="ck_wiki_delivery_status"
-        ),
-    )
-    _upgrade_parser_configuration(connection)
 
 
 class Scope(Flag):
@@ -1802,6 +1761,19 @@ def _upgrade_parser_configuration(connection: Connection) -> None:
         "Knowledge redesign validated; commit is pending: %s",
         json.dumps(report.as_dict(), ensure_ascii=False),
     )
+
+
+def upgrade() -> None:
+    if op.get_context().as_sql:
+        raise RuntimeError(
+            "Knowledge redesign needs live data reads; "
+            "use the normal online Alembic upgrade, not --sql"
+        )
+    connection = op.get_bind()
+    if connection.dialect.name != "postgresql" or not connection.in_transaction():
+        raise RuntimeError("Knowledge redesign requires an Alembic PostgreSQL transaction")
+
+    _upgrade_parser_configuration(connection)
 
 
 def downgrade() -> None:

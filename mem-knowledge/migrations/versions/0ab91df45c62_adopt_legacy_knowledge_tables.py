@@ -331,7 +331,8 @@ _STATS_TRIGGER = (
     "CREATE TRIGGER tr_documents_update_stats AFTER INSERT OR DELETE OR UPDATE ON public.documents "
     "FOR EACH ROW EXECUTE FUNCTION update_knowledge_stats()"
 )
-_STATS_BODY_HASH = "9496d34d9ac7db74976f38475abe9bda"
+# 已发布脚本的函数体只存在空白行差异，按非空行校验并保留数据库中的函数。
+_STATS_BODY_HASH = "b558a921bb2bd805740765d76b6a198a"
 
 
 def _secondary_indexes() -> dict[tuple[str, str], str]:
@@ -381,7 +382,8 @@ def _compare(expected: dict, actual: dict, kind: str) -> None:
         )
 
 
-def _verify_schema(connection: sa.Connection) -> None:
+def verify_owned_tables(connection: sa.Connection) -> None:
+    """校验六张基础表和文档统计触发器。"""
     columns = connection.exec_driver_sql(f"""
         SELECT c.relname, a.attname, format_type(a.atttypid, a.atttypmod),
                a.attnotnull, pg_get_expr(d.adbin, d.adrelid)
@@ -441,7 +443,12 @@ def _verify_schema(connection: sa.Connection) -> None:
     )
     triggers = connection.exec_driver_sql(f"""
         SELECT c.relname, t.tgname, t.tgenabled::text, pg_get_triggerdef(t.oid),
-               md5(p.prosrc)
+               md5((
+                   SELECT string_agg(line, chr(10) ORDER BY line_number)
+                   FROM string_to_table(p.prosrc, chr(10))
+                       WITH ORDINALITY AS lines(line, line_number)
+                   WHERE btrim(line, E' \\t\\r') <> ''
+               ))
         FROM pg_trigger t
         JOIN pg_class c ON c.oid = t.tgrelid
         JOIN pg_namespace n ON n.oid = c.relnamespace
@@ -473,7 +480,7 @@ def upgrade() -> None:
         raise RuntimeError(f"知识库表部分存在，缺少：{sorted(_COLUMNS.keys() - existing)}")
     if not existing:
         _create_tables(connection)
-    _verify_schema(connection)
+    verify_owned_tables(connection)
 
 
 def downgrade() -> None:

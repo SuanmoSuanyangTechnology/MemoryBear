@@ -17,7 +17,6 @@ from .migration_policy import VERSION_TABLE
 
 logger = logging.getLogger("src.database_migrations")
 _MIGRATION_LOCK_KEY = f"mem-knowledge:{VERSION_TABLE}"
-_LEGACY_TABLES_BASELINE = "0ab91df45c62"
 
 
 def _upgrade_schema(connection: Connection, settings: KnowledgeSettings) -> None:
@@ -25,15 +24,13 @@ def _upgrade_schema(connection: Connection, settings: KnowledgeSettings) -> None
     config = Config(str(service_root / "alembic.ini"))
     config.set_main_option("script_location", str(service_root / "migrations"))
     config.attributes["settings"] = settings
-    # 两段迁移在同一个连接、事务和锁下执行。
+    # 迁移在同一个连接、事务和锁下执行。
     with connection.begin():
         connection.execute(
             text("SELECT pg_advisory_xact_lock(hashtextextended(:key, 0))"),
             {"key": _MIGRATION_LOCK_KEY},
         )
         config.attributes["connection"] = connection
-        # 空库先创建 Wiki 迁移依赖的表。已有 Wiki 版本的库仍要核对这批存量表。
-        command.upgrade(config, _LEGACY_TABLES_BASELINE)
         command.upgrade(config, "head")
 
 
