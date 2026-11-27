@@ -7,7 +7,7 @@ import clsx from 'clsx';
 import { useTranslation } from 'react-i18next';
 
 import type { BreadcrumbPath } from '@/hooks/useBreadcrumbManager';
-import type { KnowledgeBaseListItem } from '@/views/KnowledgeBase/types';
+import type { V1KnowledgeListItem } from '@/views/KnowledgeBase/typesV1';
 
 import PrivateDirectoryPanel from './PrivateDirectoryPanel';
 import PrivateKnowledgeBaseHeader from './PrivateKnowledgeBaseHeader';
@@ -24,7 +24,7 @@ import { useWikiData } from './hooks/useWikiData';
 
 interface PrivateKnowledgeBaseWorkspaceProps {
   breadcrumbPath: BreadcrumbPath;
-  knowledgeBase: KnowledgeBaseListItem;
+  knowledgeBase: V1KnowledgeListItem;
   knowledgeBaseId: string;
   directoryCollapsed: boolean;
   onToggleDirectory: () => void;
@@ -37,8 +37,7 @@ interface PrivateKnowledgeBaseWorkspaceProps {
   onShareKnowledgeBase: () => void;
   onOpenRecallTest: () => void;
   onOpenMetadata: () => void;
-  onOpenKnowledgeBaseSettings: (step?: number, type?: string) => void;
-  onEditKnowledgeBase: () => void;
+  onOpenKnowledgeBaseSettings: (type?: string) => void;
   onBatchDownloadKnowledgeBase: () => void;
   onExportKnowledgeBaseQa: () => void;
 }
@@ -75,7 +74,6 @@ const PrivateKnowledgeBaseWorkspace: FC<PrivateKnowledgeBaseWorkspaceProps> = ({
   onOpenRecallTest,
   onOpenMetadata,
   onOpenKnowledgeBaseSettings,
-  onEditKnowledgeBase,
   onBatchDownloadKnowledgeBase,
   onExportKnowledgeBaseQa,
 }) => {
@@ -190,8 +188,6 @@ const PrivateKnowledgeBaseWorkspace: FC<PrivateKnowledgeBaseWorkspaceProps> = ({
     setMode(nextMode);
   };
 
-  const resolvedFileContent = typeof fileContent === 'function' ? fileContent(openWikiPage) : fileContent;
-
   return (
     <Flex vertical className="rb:h-full rb:min-w-0 rb:overflow-hidden rb:rounded-xl rb:bg-white">
       <PrivateKnowledgeBaseHeader
@@ -202,7 +198,6 @@ const PrivateKnowledgeBaseWorkspace: FC<PrivateKnowledgeBaseWorkspaceProps> = ({
         onOpenRecallTest={onOpenRecallTest}
         onOpenMetadata={onOpenMetadata}
         onOpenKnowledgeBaseSettings={onOpenKnowledgeBaseSettings}
-        onEditKnowledgeBase={onEditKnowledgeBase}
         onBatchDownloadKnowledgeBase={onBatchDownloadKnowledgeBase}
         onExportKnowledgeBaseQa={onExportKnowledgeBaseQa}
       />
@@ -263,7 +258,7 @@ const PrivateKnowledgeBaseWorkspace: FC<PrivateKnowledgeBaseWorkspaceProps> = ({
           {mode === 'faq'
             ? <FaqWorkspace key={knowledgeBaseId} knowledgeBaseId={knowledgeBaseId} onOpenWikiPage={openWikiPage} />
             : mode === 'knowledgeGraph'
-            ? <KnowledgeGraphCard knowledgeBase={knowledgeBase} onRebuildGraph={() => onOpenKnowledgeBaseSettings(1, 'rebuild')} />
+            ? <KnowledgeGraphCard knowledgeBase={knowledgeBase} onRebuildGraph={() => onOpenKnowledgeBaseSettings('rebuild')} />
             : mode === 'wiki' || mode === 'summary'
             ? (
               <WikiReader
@@ -283,7 +278,6 @@ const PrivateKnowledgeBaseWorkspace: FC<PrivateKnowledgeBaseWorkspaceProps> = ({
                 onToggleDirectory={onToggleDirectory}
                 onOpenGraph={() => handleModeChange('wikiGraph')}
                 onOpenFiles={() => handleModeChange('files')}
-                onOpenKnowledgeBaseSettings={onOpenKnowledgeBaseSettings}
                 onPageSelect={openWikiPage}
               />
             )

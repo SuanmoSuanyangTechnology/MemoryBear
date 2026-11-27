@@ -66,6 +66,12 @@ from app.services.multimodal_service import (
     serialize_file_reference,
 )
 from app.services.tool_orchestrator import ToolOrchestrator
+from app.core.memory.retrieval_trace.tool_steps import (
+    ToolStepCollector,
+    apply_text_event,
+    apply_tool_event,
+    merge_tool_steps,
+)
 from app.services.context_assembler import (
     ContextEvidence,
     append_external_context_rule,
@@ -1100,6 +1106,8 @@ class AgentRunService:
             status: str = "completed",
             error: Any = None,
             message_id: Optional[str] = None,
+            last_seq: Optional[int] = None,
+            last_message: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """统一构建 compare 场景下的 model_end 事件。"""
         data = {
@@ -1115,6 +1123,10 @@ class AgentRunService:
             "suggested_questions": suggested_questions or [],
             "status": status,
             "message_id": message_id,
+            # 该模型本轮时间线的最后一个 seq（每列自成一轮）
+            "last_seq": last_seq,
+            # 最后一轮消息全文（该列自己的文本段）
+            "last_message": last_message,
             "timestamp": time.time(),
             "time": now_ms(),
         }
@@ -2381,6 +2393,9 @@ class AgentRunService:
                         "usage": {},
                         "elapsed_time": elapsed_time,
                         "message_length": len(annotation_match["answer"]),
+                        # 标注命中本轮没有分配任何 seq，键保留仅为帧形状一致
+                        "last_seq": None,
+                        "last_message": {"seq": None, "content": annotation_match["answer"]},
                         "annotation_hit": {
                             "annotation_id": str(annotation_match["annotation_id"]),
                             "similarity": annotation_match["similarity"],
@@ -2506,6 +2521,10 @@ class AgentRunService:
 
             context = None
 
+            # 本轮工具调用，按到达顺序收集（流式下发 seq，随消消息一起落库）。
+            # 建在下面的弱模型重放之前，因为重放也要喂给它。
+            tool_steps = ToolStepCollector()
+
             # 8. 发送开始事件
             yield self._format_sse_event("start", {
                 "conversation_id": conversation_id,
@@ -2514,22 +2533,35 @@ class AgentRunService:
                 "timestamp": time.time()
             })
 
-            # 把弱模型的工具调用步骤补发给前端
+            # 把弱模型的工具调用步骤补发给前端。
+            # 重放的步骤在本 collector 存在之前就已经结束，因此不启动计时
+            # （否则耗时会被算成 ~0ms）。
             for step in orchestrator_node_executions:
                 event_type = "tool_error" if step.get("status") == "failed" else "tool_end"
-                yield self._format_sse_event("tool_start", {
-                    "step_id": step.get("step_id"),
-                    "name": step.get("node_name"),
-                    "input": step.get("input"),
-                    "meta": step.get("meta"),
-                })
-                yield self._format_sse_event(event_type, {
-                    "step_id": step.get("step_id"),
-                    "name": step.get("node_name"),
-                    "output": step.get("output"),
-                    "error": step.get("error"),
-                    "meta": step.get("meta"),
-                })
+                start_payload = apply_tool_event(
+                    tool_steps,
+                    "tool_start",
+                    {
+                        "step_id": step.get("step_id"),
+                        "name": step.get("node_name"),
+                        "input": step.get("input"),
+                        "meta": step.get("meta"),
+                    },
+                    replay=True,
+                )
+                yield self._format_sse_event("tool_start", start_payload)
+                end_payload = apply_tool_event(
+                    tool_steps,
+                    event_type,
+                    {
+                        "step_id": step.get("step_id"),
+                        "name": step.get("node_name"),
+                        "output": step.get("output"),
+                        "error": step.get("error"),
+                        "meta": step.get("meta"),
+                    },
+                )
+                yield self._format_sse_event(event_type, end_payload)
 
             # 创建 Agent 执行记录（running 状态）
             # skip_save=True 仅表示"不落会话消息"（重新生成场景由调用方保存），不表示"不落执行轨迹"。
@@ -2602,12 +2634,30 @@ class AgentRunService:
                     yield self._format_sse_event("reasoning", {"content": chunk["content"]})
                 elif isinstance(chunk, dict) and chunk.get("type") == "node_executions":
                     node_executions = chunk.get("data", [])
+                    tool_steps.reconcile(node_executions)
                 elif isinstance(chunk, dict) and chunk.get("type") == "tool_start":
-                    yield self._format_sse_event("tool_start", {"step_id": chunk.get("step_id"), "name": chunk["name"], "input": chunk.get("input"), "meta": chunk.get("meta")})
+                    start_payload = apply_tool_event(tool_steps, "tool_start", {
+                        "step_id": chunk.get("step_id"),
+                        "name": chunk["name"],
+                        "input": chunk.get("input"),
+                        "meta": chunk.get("meta"),
+                    })
+                    yield self._format_sse_event("tool_start", start_payload)
                 elif isinstance(chunk, dict) and chunk.get("type") == "tool_end":
-                    yield self._format_sse_event("tool_end", {"step_id": chunk.get("step_id"), "name": chunk["name"], "output": chunk.get("output"), "meta": chunk.get("meta")})
+                    end_payload = apply_tool_event(tool_steps, "tool_end", {
+                        "step_id": chunk.get("step_id"),
+                        "name": chunk["name"],
+                        "output": chunk.get("output"),
+                        "meta": chunk.get("meta"),
+                    })
+                    yield self._format_sse_event("tool_end", end_payload)
                 elif isinstance(chunk, dict) and chunk.get("type") == "tool_error":
-                    yield self._format_sse_event("tool_error", {"step_id": chunk.get("step_id"), "name": chunk["name"], "error": chunk.get("error")})
+                    tool_error_payload = apply_tool_event(tool_steps, "tool_error", {
+                        "step_id": chunk.get("step_id"),
+                        "name": chunk["name"],
+                        "error": chunk.get("error"),
+                    })
+                    yield self._format_sse_event("tool_error", tool_error_payload)
                 elif isinstance(chunk, dict) and chunk.get("type") == "agent_log":
                     # 增量快照：终态未到时先兜底（中途异常也能留下可查的轨迹）
                     if _trace is None and isinstance(chunk.get("data"), dict):
@@ -2623,7 +2673,10 @@ class AgentRunService:
                     yield self._format_sse_event(event_type, chunk)
                 else:
                     full_content += chunk
-                    yield self._format_sse_event("message", {"content": chunk})
+                    # `seq` = the text segment this chunk belongs to; consecutive
+                    # chunks share one segment until a tool call interrupts them.
+                    _text_payload = apply_text_event(tool_steps, {"content": chunk})
+                    yield self._format_sse_event("message", _text_payload)
                     if tts_task is not None:
                         await text_queue.put(chunk)
 
@@ -2659,7 +2712,7 @@ class AgentRunService:
                     user_message_id=user_message_id,
                     app_id=_app_id,
                     user_id=user_id,
-                    meta_data={
+                    meta_data=merge_tool_steps({
                         "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": total_tokens},
                         "reasoning_content": full_reasoning or None,
                         "suggested_questions": suggested_questions,
@@ -2668,7 +2721,7 @@ class AgentRunService:
                         "model_config_id": str(model_config.id),
                         **({"model_parameters_override": model_parameters_override}
                            if model_parameters_override else {}),
-                    },
+                    }, tool_steps),
                     files=files,
                     processed_files=processed_files,
                     audio_url=stream_audio_url,
@@ -2722,6 +2775,10 @@ class AgentRunService:
                 "message_length": len(full_content),
                 "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": total_tokens},
                 "citations": filtered_citations,
+                # 本轮时间线的最后一个 seq，前端据此在 end 帧收尾
+                "last_seq": tool_steps.last_seq(),
+                # 最后一轮消息全文，前端可直接用它收尾，不必自己拼 chunk
+                "last_message": tool_steps.last_message(),
             }
             if sub_agent:
                 # 子 Agent 完成事件：携带 execution_id / token，前端据此收尾对应区块
@@ -4144,6 +4201,9 @@ class AgentRunService:
                 suggested_questions = []
                 stream_error = None
                 message_id = None
+                # 该模型的工具调用，按到达顺序收集。建在这一层（而非 run_stream 内）：
+                # 内层只返回 SSE 文本，没有把快照回传上来的结构化通道。
+                tool_steps = ToolStepCollector()
 
                 # 每个模型各自的参数通过显式 override 传入。不能改写共享的
                 # agent_config.model_parameters：并行任务会互相覆盖，导致不同模型
@@ -4199,14 +4259,14 @@ class AgentRunService:
                             chunk = event_data.get("content", "")
                             full_content += chunk
 
-                            # 转发消息块事件（带模型标识）
-                            await event_queue.put(self._format_sse_event("model_message", {
+                            # 转发消息块事件（带模型标识，并带上文本段 `seq`）
+                            await event_queue.put(self._format_sse_event("model_message", apply_text_event(tool_steps, {
                                 "model_index": idx,
                                 "model_config_id": model_config_id,
                                 "label": model_label,
                                 "conversation_id": returned_conversation_id,
                                 "content": chunk
-                            }))
+                            })))
 
                         # 转发深度思考事件（带模型标识）
                         if event_type == "reasoning" and event_data:
@@ -4222,32 +4282,42 @@ class AgentRunService:
 
                         # 转发工具调用事件（带模型标识）
                         if event_type == "tool_start" and event_data:
-                            await event_queue.put(self._format_sse_event("model_tool_start", {
+                            start_payload = apply_tool_event(tool_steps, "tool_start", {
                                 "model_index": idx,
                                 "model_config_id": model_config_id,
                                 "step_id": event_data.get("step_id"),
                                 "name": event_data.get("name", ""),
                                 "input": event_data.get("input"),
-                            }))
+                                "meta": event_data.get("meta"),
+                            })
+                            await event_queue.put(self._format_sse_event(
+                                "model_tool_start", start_payload
+                            ))
 
                         if event_type == "tool_end" and event_data:
-                            await event_queue.put(self._format_sse_event("model_tool_end", {
+                            end_payload = apply_tool_event(tool_steps, "tool_end", {
                                 "model_index": idx,
                                 "model_config_id": model_config_id,
                                 "step_id": event_data.get("step_id"),
                                 "name": event_data.get("name", ""),
                                 "output": event_data.get("output"),
                                 "meta": event_data.get("meta"),
-                            }))
+                            })
+                            await event_queue.put(self._format_sse_event(
+                                "model_tool_end", end_payload
+                            ))
 
                         if event_type == "tool_error" and event_data:
-                            await event_queue.put(self._format_sse_event("model_tool_error", {
+                            error_tool_payload = apply_tool_event(tool_steps, "tool_error", {
                                 "model_index": idx,
                                 "model_config_id": model_config_id,
                                 "step_id": event_data.get("step_id"),
                                 "name": event_data.get("name", ""),
                                 "error": event_data.get("error"),
-                            }))
+                            })
+                            await event_queue.put(self._format_sse_event(
+                                "model_tool_error", error_tool_payload
+                            ))
 
                         # 从 end 事件中提取 features 输出字段
                         if event_type == "end" and event_data:
@@ -4292,7 +4362,9 @@ class AgentRunService:
                             suggested_questions=suggested_questions,
                             status="failed",
                             error=stream_error,
-                            message_id=message_id
+                            message_id=message_id,
+                            last_seq=tool_steps.last_seq(),
+                            last_message=tool_steps.last_message(),
                         )
                     ))
                     return {
@@ -4329,6 +4401,7 @@ class AgentRunService:
                     "error": None,
                     "total_tokens": total_tokens,
                     "user_message_id": str(model_user_message_id),
+                    "timeline": tool_steps.build(),
                 }
 
                 # 发送模型完成事件
@@ -4345,7 +4418,9 @@ class AgentRunService:
                         audio_status=audio_status,
                         citations=citations,
                         suggested_questions=suggested_questions,
-                        message_id=message_id
+                        message_id=message_id,
+                        last_seq=tool_steps.last_seq(),
+                        last_message=tool_steps.last_message(),
                     )
                 ))
 
@@ -4387,7 +4462,9 @@ class AgentRunService:
                         conversation_id=model_conversation_id,
                         elapsed_time=timeout,
                         status="failed",
-                        error=compact_error
+                        error=compact_error,
+                        last_seq=tool_steps.last_seq(),
+                        last_message=tool_steps.last_message(),
                     )
                 ))
 
@@ -4430,7 +4507,9 @@ class AgentRunService:
                         conversation_id=model_conversation_id,
                         elapsed_time=0,
                         status="failed",
-                        error=compact_error
+                        error=compact_error,
+                        last_seq=tool_steps.last_seq(),
+                        last_message=tool_steps.last_message(),
                     )
                 ))
 
@@ -4573,6 +4652,8 @@ class AgentRunService:
                                     "citations": r.get("citations", []),
                                     "suggested_questions": r.get("suggested_questions", []),
                                     "audio_status": r.get("audio_status"),
+                                    **({"timeline": r["timeline"]}
+                                       if r.get("timeline") else {}),
                                 },
                             },
                         ))
@@ -4913,6 +4994,9 @@ class AgentRunService:
         citations = []
         audio_url = None
         audio_status = None
+        # 本轮工具调用，按到达顺序收集：`message` 帧要带上文本段 seq，
+        # 新版本的 meta_data 也要带上同一份时间线。
+        tool_steps = ToolStepCollector()
 
         # 发送开始事件
         yield self._format_sse_event("start", {
@@ -4950,12 +5034,20 @@ class AgentRunService:
             # 累积内容并转发事件
             if event_type == "message" and event_data:
                 full_content += event_data.get("content", "")
-                yield event_str
+                # 喂本地 collector，使新版本的 meta_data 带上客户端刚看到的同样文本段，
+                # 并把 `seq` 写回（重组帧，不直接转发）。
+                yield self._format_sse_event(
+                    "message", apply_text_event(tool_steps, event_data)
+                )
             elif event_type == "reasoning" and event_data:
                 full_reasoning += event_data.get("content", "")
                 yield event_str
             elif event_type == "tool_start" or event_type == "tool_end" or event_type == "tool_error":
-                yield event_str
+                # 喂本地 collector，使新版本的 meta_data 带上同一份工具步骤，
+                # 并让后续正文开新文本段（与正式对话口径一致）。
+                yield self._format_sse_event(
+                    event_type, apply_tool_event(tool_steps, event_type, event_data)
+                )
             elif event_type in ("agent_log", "agent_log_final"):
                 # regenerate 接口不向前端返回 agent 执行轨迹事件，直接丢弃
                 continue
@@ -4972,7 +5064,7 @@ class AgentRunService:
             content=full_content,
             version=new_version,
             parent_message_id=parent_msg_id,
-            meta_data={
+            meta_data=merge_tool_steps({
                 "reasoning_content": full_reasoning or None,
                 "regenerated_from": str(message_id),
                 "suggested_questions": suggested_questions,
@@ -4982,7 +5074,7 @@ class AgentRunService:
                 "model_config_id": str(model_config.id),
                 **({"model_parameters_override": model_parameters_override}
                    if model_parameters_override else {}),
-            },
+            }, tool_steps),
         )
 
         logger.info(
@@ -5005,5 +5097,9 @@ class AgentRunService:
             "audio_url": audio_url,
             "audio_status": audio_status,
             "citations": citations,
+            # 本轮时间线的最后一个 seq（见 run_stream 的 end 事件）
+            "last_seq": tool_steps.last_seq(),
+            # 最后一轮消息全文（同上，前端直接用它收尾）
+            "last_message": tool_steps.last_message(),
             "timestamp": time.time()
         })

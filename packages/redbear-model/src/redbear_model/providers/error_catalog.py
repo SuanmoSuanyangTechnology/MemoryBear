@@ -24,11 +24,18 @@ def _rules(*items: Rule) -> tuple[Rule, ...]:
 
 _SPEEDBEAR = _rules(
     Rule(401, "AUTH_", 3009, False),
+    # 402 额度不足五级（SpeedBear 1.13 起，分级码在 error.error_code）：
+    # 租户/项目/API Key/未细分四级换渠道也无额度 → 3018 不可重试；
+    # 渠道级额度不足是暂时态（上游声明可退避重试）→ 10003 可重试、可换渠道。
     Rule(402, "BILLING_API_KEY_", 3018, False),
     Rule(402, "BILLING_PROJECT_", 3018, False),
     Rule(402, "BILLING_TENANT_", 3018, False),
-    Rule(402, "BILLING_CHANNEL_", 10003, False),
-    Rule(402, "ENDPOINT_NO_CHANNEL_QUOTA", 10003, False),
+    Rule(402, "BILLING_INSUFFICIENT_QUOTA", 3018, False),
+    Rule(402, "BILLING_CHANNEL_", 10003, True),
+    Rule(402, "ENDPOINT_NO_CHANNEL_QUOTA", 10003, True),
+    # 未识别的 402（含缺失 error_code、只有 type=insufficient_quota）按通用额度不足处理：
+    # 402 的语义恒为「额度不足」，不能落到共享 4xx 兜底的 1003 参数错误。
+    Rule(402, None, 3018, False),
     Rule(403, "AUTH_MODEL_NOT_AVAILABLE", 4003, False),
     Rule(403, "AUTH_MODEL_FORBIDDEN", 3001, False),
     Rule(403, "AUTH_MODEL_DISABLED", 3001, False),

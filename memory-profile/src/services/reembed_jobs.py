@@ -1,29 +1,41 @@
 """Register a re-embed job for a workspace model change and dispatch its driver.
 
-The workspace service owns the model switch itself; once ``workspaces.embedding``
-points at the new config it calls ``POST /workspace_reembed/jobs`` so the durable
-job row is registered here and the driver is handed to the API worker (the
-re-embed workers are still API-owned until the API is retired).
+The workspace service now performs only the workspace-column write; everything
+after it runs here, mirroring the API's own switch flow
+(``workspace_service.update_workspace_models_configs``):
+
+* resolve both configs to their underlying model (``model_configs.name``, the
+  host's ``model_name``) — the caller only sends ids;
+* a slot that did not change, or two configs resolving to the same model,
+  registers nothing (the vector space is unchanged) and is a success, not an
+  error;
+* one active job per workspace, and the job's target must already be the
+  workspace's current embedding model;
+* the durable job row is committed here and the driver is handed to the API
+  worker (the re-embed workers are still API-owned until the API is retired);
+* after the commit, every ``memory_config:{config_id}`` under the workspace is
+  invalidated so the switch takes effect immediately.
 
 Registration is idempotent: the caller's ``Idempotency-Key`` (or, when it sends
 none, a key derived from the request body) reserves the operation in Redis before
 anything is written, so a retried call replays the first response instead of
-registering a second job for the same model change.
+registering a second job for the same model change. No-op calls write nothing,
+so they take no reservation.
 
-Registration carries the same guards as the API's own switch flow: a no-op change
-(same config, or two configs resolving to the same underlying model) registers
-nothing, one active job per workspace, and the job's target must already be the
-workspace's current embedding model. Dispatch is best-effort, exactly like the
-API's: the row is committed first, and a publish failure leaves it ``pending``
-for the periodic reconciler to pick up.
+The response's ``job_id`` is "the job in flight after this request" — the newly
+registered one, the one already running when no rebuild was needed, or ``null``.
+The caller must roll the workspace columns back itself when this call fails: the
+column write is already committed by the time we see it, and a workspace that
+points at a new model without a rebuild would mix two vector spaces.
 """
 
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
+from src.common.redis_cache import invalidate_cache
 from src.infrastructure.api_tasks import dispatch_reembed_job
 from src.infrastructure.idempotency import (
     DEFAULT_TTL_SECONDS,
@@ -35,6 +47,8 @@ from src.infrastructure.idempotency import (
     derived_key,
     request_fingerprint,
 )
+from src.repositories.memory_config import MemoryConfigReadRepository
+from src.repositories.model_config import ModelConfigRepository
 from src.repositories.reembed_status_mutation import (
     ACTIVE_JOB_EXISTS,
     CREATED,
@@ -65,6 +79,8 @@ class ReembedJobService:
     def __init__(self, runtime: ProfileRuntime) -> None:
         self.runtime = runtime
         self.repository = ReembedRetryMutationRepository(runtime.postgres)
+        self.models = ModelConfigRepository(runtime.postgres)
+        self.configs = MemoryConfigReadRepository(runtime.postgres)
         # ``getattr`` keeps the unit-test fakes (partial runtimes) working; a
         # missing manager just means "no reservation" (see IdempotencyStore).
         self.idempotency = IdempotencyStore(
@@ -77,16 +93,15 @@ class ReembedJobService:
         workspace_id: UUID,
         tenant_id: UUID,
         created_by_user_id: UUID | None,
-        old_embedding_config_id: str | None,
-        new_embedding_config_id: str,
-        old_model_name: str | None,
-        new_model_name: str | None,
+        old_embedding_config_id: UUID | None,
+        new_embedding_config_id: UUID,
         idempotency_key: str | None = None,
-    ) -> dict[str, str | None]:
-        """Create the pending job and publish the driver; return both ids.
+    ) -> dict[str, Any]:
+        """Run the switch flow after the workspace columns are already written.
 
-        ``task_id`` is ``None`` when the broker rejected the publish. That is not
-        an error: the job is already committed and the reconciler re-dispatches
+        ``task_id`` is ``None`` when no task was published — a no-op switch, or a
+        broker that rejected the publish. Neither is an error: the job row (when
+        one was created) is already committed and the reconciler re-dispatches
         it, so the caller may keep polling by ``job_id`` either way.
 
         A retried registration replays the first response: the key (the caller's
@@ -96,35 +111,49 @@ class ReembedJobService:
         """
 
         new_config = str(new_embedding_config_id)
-        if (
-            old_embedding_config_id is not None
-            and str(old_embedding_config_id) == new_config
-        ):
-            raise ReembedJobCreateInvalidError(
-                "old 与 new embedding 配置相同，无需登记重算任务"
-            )
+        old_config = (
+            None if old_embedding_config_id is None else str(old_embedding_config_id)
+        )
 
-        # The switch flow registers a rebuild only when the *underlying model*
-        # changes: swapping between two configs that resolve to the same model
-        # keeps the vector space, so the host logs it and creates no job. Same
-        # skip here, otherwise a caller that switches configs would start a
-        # pointless full rebuild.
-        if (
-            old_model_name is not None
-            and new_model_name is not None
-            and old_model_name == new_model_name
-        ):
-            raise ReembedJobCreateInvalidError(
-                "embedding 底层模型未变更（仅更换配置），无需登记重算任务"
-            )
+        old_model_name, new_model_name = await self._resolve_model_names(
+            tenant_id=tenant_id,
+            old_config_id=old_embedding_config_id,
+            new_config_id=new_embedding_config_id,
+        )
+
+        # The host registers a rebuild only when the embedding slot changed AND
+        # the two configs resolve to different underlying models. Equal names
+        # (including "both unresolved", exactly as the host compares them) mean
+        # the vector space did not change. A no-op is a success and still
+        # invalidates the cached memory configs, like the host, which runs that
+        # side effect regardless of whether a job was created.
+        slot_unchanged = old_config is not None and old_config == new_config
+        if slot_unchanged:
+            # The host never enters the embedding branch, so it never guards.
+            await self._invalidate_memory_config_caches(workspace_id)
+            return {
+                "job_id": await self.repository.active_job_id(workspace_id),
+                "task_id": None,
+                "created": False,
+            }
+
+        # The slot changed, so the host runs the in-flight guard *before* it
+        # compares model names: swapping between two configs of the same model
+        # during a rebuild is refused too (409). The create path repeats this
+        # check under the workspace lock in ``create_job``.
+        if old_model_name == new_model_name:
+            if await self.repository.active_job_id(workspace_id) is not None:
+                raise ReembedJobCreateConflictError(
+                    "该工作空间已有进行中的重算任务，不能重复登记"
+                )
+            await self._invalidate_memory_config_caches(workspace_id)
+            return {"job_id": None, "task_id": None, "created": False}
 
         fingerprint = request_fingerprint(
             {
                 "workspace_id": str(workspace_id),
-                "old_embedding_config_id": old_embedding_config_id,
+                "old_embedding_config_id": old_config,
                 "new_embedding_config_id": new_config,
-                "old_model_name": old_model_name,
-                "new_model_name": new_model_name,
             }
         )
         key, ttl_seconds = self._resolve_key(idempotency_key, fingerprint)
@@ -155,7 +184,7 @@ class ReembedJobService:
                 workspace_id=workspace_id,
                 tenant_id=tenant_id,
                 created_by_user_id=created_by_user_id,
-                old_embedding_config_id=old_embedding_config_id,
+                old_embedding_config_id=old_config,
                 new_config=new_config,
                 old_model_name=old_model_name,
                 new_model_name=new_model_name,
@@ -165,6 +194,9 @@ class ReembedJobService:
             raise
 
         await self._complete(scope, key, fingerprint, result, ttl_seconds)
+        # The host invalidates after its commit, whether or not a job was
+        # created; a broker-rejected dispatch still counts as created here.
+        await self._invalidate_memory_config_caches(workspace_id)
         return result
 
     async def _register(
@@ -177,7 +209,7 @@ class ReembedJobService:
         new_config: str,
         old_model_name: str | None,
         new_model_name: str | None,
-    ) -> dict[str, str | None]:
+    ) -> dict[str, Any]:
         outcome = await self.repository.create_job(
             workspace_id=workspace_id,
             tenant_id=tenant_id,
@@ -210,7 +242,62 @@ class ReembedJobService:
             workspace_id,
             task_id,
         )
-        return {"job_id": outcome.job_id, "task_id": task_id}
+        return {"job_id": outcome.job_id, "task_id": task_id, "created": True}
+
+    async def _resolve_model_names(
+        self,
+        *,
+        tenant_id: UUID,
+        old_config_id: UUID | None,
+        new_config_id: UUID | None,
+    ) -> tuple[str | None, str | None]:
+        """``model_configs.name`` for both configs — the host's ``model_name``.
+
+        The host resolves through ``get_runtime_model_view_async`` and turns a
+        resolution failure into ``None``; the names are then compared for
+        equality. Same visibility rule here (the tenant's own rows plus public
+        ones). A lookup error is not a "model unchanged" verdict: the host lets
+        database errors fail the switch too.
+        """
+
+        ids = [model_id for model_id in (old_config_id, new_config_id) if model_id]
+        rows: dict[UUID, dict[str, Any]] = {}
+        if ids:
+            rows = await self.models.get_models(ids, tenant_id)
+
+        def _name(model_id: UUID | None) -> str | None:
+            row = rows.get(model_id) if model_id is not None else None
+            return None if row is None else row.get("name")
+
+        return _name(old_config_id), _name(new_config_id)
+
+    async def _invalidate_memory_config_caches(self, workspace_id: UUID) -> None:
+        """Drop ``memory_config:{config_id}`` for the whole workspace.
+
+        The cached configuration inherits the workspace's model slots, so the
+        switch must not leave it behind. Best-effort like the host: a lookup or
+        Redis failure is logged and never fails the switch.
+        """
+
+        try:
+            config_ids = await self.configs.config_ids_by_workspace(workspace_id)
+        except Exception:
+            logger.warning(
+                "re-embed: memory config lookup failed, caches not invalidated "
+                "workspace=%s",
+                workspace_id,
+                exc_info=True,
+            )
+            return
+        for config_id in config_ids:
+            try:
+                await invalidate_cache(prefix=f"memory_config:{config_id}")
+            except Exception:
+                logger.warning(
+                    "re-embed: memory config cache invalidation failed config=%s",
+                    config_id,
+                    exc_info=True,
+                )
 
     @staticmethod
     def _resolve_key(
@@ -257,7 +344,7 @@ class ReembedJobService:
         scope: str,
         key: str,
         fingerprint: str,
-        response: dict[str, str | None],
+        response: dict[str, Any],
         ttl_seconds: int,
     ) -> None:
         try:

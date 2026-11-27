@@ -1,18 +1,14 @@
-/**
- * @Description: Document Details
- * @Version: 0.0.1
- * @Author: yujiangping
- * @Date: 2025-11-15 16:13:47
- * @LastEditors: yujiangping
- * @LastEditTime: 2025-12-19 20:19:59
- */
 import { useEffect, useMemo, useState, useRef, type FC } from 'react';
 import { useNavigate, useParams, useLocation, useSearchParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
-import { useBreadcrumbManager, type BreadcrumbPath } from '@/hooks/useBreadcrumbManager';
 import { Button, Spin, message, Switch, App, Divider, Flex } from 'antd';
-import { getDocumentDetail, getDocumentChunkList, downloadFile, updateDocument, updateDocumentChunk, createDocumentChunk } from '@/api/knowledgeBase';
-import type { KnowledgeBaseDocumentData, RecallTestData } from '@/views/KnowledgeBase/types';
+import copy from 'copy-to-clipboard'
+
+import { useBreadcrumbManager, type BreadcrumbPath } from '@/hooks/useBreadcrumbManager';
+import { getDocumentChunkList, downloadFile, updateDocument, updateDocumentChunk, createDocumentChunk } from '@/api/knowledgeBase';
+import { getDocumentDetailV1 } from '@/api/knowledgeBaseDocument'
+import type { RecallTestData } from '@/views/KnowledgeBase/types';
+import type { V1DocumentsItem } from '@/views/KnowledgeBase/typesDocumentV1';
 import { formatDateTime } from '@/utils/format';
 import InfoPanel, { type InfoItem } from '../components/InfoPanel';
 import RecallTestResult from '../components/RecallTestResult';
@@ -21,7 +17,7 @@ import DocumentPreview from '@/components/DocumentPreview';
 import InsertModal, { type InsertModalRef } from '../components/InsertModal';
 import DocumentMetadata from '../components/DocumentMetadata';
 import exitIcon from '@/assets/images/knowledgeBase/exit.png';
-import copy from 'copy-to-clipboard'
+
 const DocumentDetails: FC = () => {
   const { t } = useTranslation();
   const navigate = useNavigate();
@@ -69,7 +65,7 @@ const DocumentDetails: FC = () => {
     breadcrumbPath?: BreadcrumbPath;
   };
   const [loading, setLoading] = useState(false);
-  const [document, setDocument] = useState<KnowledgeBaseDocumentData | null>(null);
+  const [document, setDocument] = useState<V1DocumentsItem | null>(null);
   const [chunkList, setChunkList] = useState<RecallTestData[]>([]);
   const [infoItems, setInfoItems] = useState<InfoItem[]>([]);
   const [page, setPage] = useState(1);
@@ -131,7 +127,7 @@ const DocumentDetails: FC = () => {
   }
 
 
-  const formatDocumentInfo = (doc: KnowledgeBaseDocumentData): InfoItem[] => {
+  const formatDocumentInfo = (doc: V1DocumentsItem): InfoItem[] => {
     return [
       {
         key: 'id',
@@ -185,12 +181,12 @@ const DocumentDetails: FC = () => {
     if (!documentId) return;
     setLoading(true);
     try {
-      const response = await getDocumentDetail(documentId);
+      const response = await getDocumentDetailV1(documentId);
       setDocument(response);
       setInfoItems(formatDocumentInfo(response));
       const url = `${window.location.origin}/api/files/${response.file_id}`;
       setFileUrl(url);
-      const auto_questions = response?.parser_config?.auto_questions || 0
+      const auto_questions = response?.processing_configuration?.qa?.questions_per_chunk || 0
       setParserMode(auto_questions)
       setIsParentChildMode(response.parent_child_mode || false)
       // ChunkList will be called automatically in useEffect based on document.progress

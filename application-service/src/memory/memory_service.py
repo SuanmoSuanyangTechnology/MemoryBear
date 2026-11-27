@@ -1,12 +1,12 @@
 """Delegating facade for the long-term memory entry point.
 
-Long-term memory reads run inside memory-profile through its app-service read
-callback; ingestion still goes to the monolith memory API during the
-coexistence period. Both go over the internal network (never through the
-gateway) so memory state keeps exactly one writer per path. An unconfigured
-channel fails closed with a clear ``BusinessException`` instead of silently
-degrading, so memory-dependent runs fail visibly rather than losing memory
-without a trace.
+Long-term memory reads and agent-turn ingestion run inside memory-profile
+through its app-service callbacks; workflow-node ingestion still goes to the
+monolith memory API during the coexistence period. Both channels go over the
+internal network (never through the gateway) so memory state keeps exactly one
+writer per path. An unconfigured channel fails closed with a clear
+``BusinessException`` instead of silently degrading, so memory-dependent runs
+fail visibly rather than losing memory without a trace.
 
 ``create_long_term_memory_tool`` keeps the host contract for disabled configs
 (returns ``None`` when memory is off or no end user is given), and the tool
@@ -37,7 +37,7 @@ from .enums import SearchStrategy
 logger = logging.getLogger(__name__)
 
 _UNAVAILABLE_MESSAGE = (
-    "Long-term memory ingestion is served by the memory API and its channel is "
+    "Workflow memory ingestion is served by the memory API and its channel is "
     "not configured (APPLICATION_SERVICE_UPSTREAM_BASE_URL); disable memory for "
     "this run"
 )
@@ -47,13 +47,17 @@ _READ_UNAVAILABLE_MESSAGE = (
     "not configured (MEMORY_PROFILE_BASE_URL); disable memory for this run"
 )
 
-_READ_IDENTITY_MESSAGE = (
-    "Long-term memory reads need the end-user and workspace to resolve a full "
-    "internal principal and the workspace tenant; unable to build it for this run"
+_INGEST_AGENT_UNAVAILABLE_MESSAGE = (
+    "Agent memory ingestion is served by memory-profile and its channel is "
+    "not configured (MEMORY_PROFILE_BASE_URL); disable memory for this run"
+)
+
+_IDENTITY_MESSAGE = (
+    "Memory calls need the end-user and workspace to resolve a full internal "
+    "principal and the workspace tenant; unable to build it for this run"
 )
 
 _INGEST_WORKFLOW_PATH = "/api/internal/app-service/memory/ingest-workflow"
-_INGEST_AGENT_PATH = "/api/internal/app-service/memory/ingest-agent"
 
 
 class LongTermMemoryInput(BaseModel):
@@ -138,14 +142,15 @@ async def _workspace_tenant_id(workspace_id: uuid.UUID) -> uuid.UUID | None:
         )
 
 
-async def _read_identity(
+async def resolve_internal_identity(
         end_user_id: str, workspace_id: str | None
 ) -> tuple[uuid.UUID, uuid.UUID, uuid.UUID]:
     """Build the full internal principal memory-profile's direct mode demands.
 
-    Reads run without an inbound request, so the end user acts as the caller,
-    the tenant comes from the workspace, and every identity must be a UUID;
-    any missing or malformed identity fails the read closed.
+    Runtime-plane memory calls run without an inbound request, so the end user
+    acts as the caller, the tenant comes from the workspace, and every
+    identity must be a UUID; any missing or malformed identity fails the call
+    closed.
     """
 
     try:
@@ -153,17 +158,17 @@ async def _read_identity(
         workspace_uuid = uuid.UUID(str(workspace_id))
     except (TypeError, ValueError) as exc:
         raise BusinessException(
-            _READ_IDENTITY_MESSAGE, code=BizCode.SERVICE_UNAVAILABLE
+            _IDENTITY_MESSAGE, code=BizCode.SERVICE_UNAVAILABLE
         ) from exc
     try:
         tenant_id = await _workspace_tenant_id(workspace_uuid)
-    except Exception as exc:  # noqa: BLE001 - a failed lookup must fail the read closed
+    except Exception as exc:  # noqa: BLE001 - a failed lookup must fail the call closed
         raise BusinessException(
-            _READ_IDENTITY_MESSAGE, code=BizCode.SERVICE_UNAVAILABLE
+            _IDENTITY_MESSAGE, code=BizCode.SERVICE_UNAVAILABLE
         ) from exc
     if tenant_id is None:
         raise BusinessException(
-            _READ_IDENTITY_MESSAGE, code=BizCode.SERVICE_UNAVAILABLE
+            _IDENTITY_MESSAGE, code=BizCode.SERVICE_UNAVAILABLE
         )
     return actor_id, tenant_id, workspace_uuid
 
@@ -237,7 +242,7 @@ class MemoryService:
             raise BusinessException(
                 _READ_UNAVAILABLE_MESSAGE, code=BizCode.SERVICE_UNAVAILABLE
             )
-        actor_id, tenant_id, workspace_uuid = await _read_identity(
+        actor_id, tenant_id, workspace_uuid = await resolve_internal_identity(
             self._end_user_id, self._workspace_id
         )
         try:
@@ -323,7 +328,7 @@ class MemoryService:
         storage_type: str = "neo4j",
         user_rag_memory_id: str = "",
     ) -> None:
-        """Forward one same-turn message batch to the memory ingest endpoint.
+        """Forward one same-turn message batch to memory-profile's ingest route.
 
         The batch keeps the user + assistant pair together so the pipeline
         assigns consecutive sequence numbers in order. Message objects carry
@@ -332,6 +337,14 @@ class MemoryService:
         serialized to JSON; the endpoint rebuilds them with the same types.
         """
 
+        client = get_memory_profile_client()
+        if client is None or not client.configured:
+            raise BusinessException(
+                _INGEST_AGENT_UNAVAILABLE_MESSAGE, code=BizCode.SERVICE_UNAVAILABLE
+            )
+        actor_id, tenant_id, workspace_uuid = await resolve_internal_identity(
+            end_user_id, workspace_id or None
+        )
         payload_messages = []
         for message in messages:
             created_at = getattr(message, "created_at", None)
@@ -343,20 +356,38 @@ class MemoryService:
                 "created_at": created_at.isoformat() if created_at else None,
                 "should_memorize": bool(getattr(message, "should_memorize", True)),
             })
-        await _forward_memory_call(
-            _INGEST_AGENT_PATH,
-            workspace_id=workspace_id,
-            json_body={
-                "messages": payload_messages,
-                "conversation_id": conversation_id,
-                "app_id": app_id,
-                "config_id": str(config_id) if config_id else "",
-                "end_user_id": end_user_id,
-                "language": language,
-                "storage_type": storage_type,
-                "user_rag_memory_id": user_rag_memory_id,
-            },
-        )
+        try:
+            envelope = await client.ingest_agent(
+                payload={
+                    "messages": payload_messages,
+                    "conversation_id": conversation_id,
+                    "app_id": app_id,
+                    "config_id": str(config_id) if config_id else "",
+                    "end_user_id": end_user_id,
+                    "language": language,
+                    "storage_type": storage_type,
+                    "user_rag_memory_id": user_rag_memory_id,
+                },
+                workspace_id=workspace_uuid,
+                tenant_id=tenant_id,
+                actor_id=actor_id,
+                trace_id=get_trace_id() or uuid.uuid4().hex,
+            )
+        except MemoryProfileUnavailableError as exc:
+            raise BusinessException(
+                f"forward to memory API failed: {exc}",
+                code=BizCode.SERVICE_UNAVAILABLE,
+            ) from exc
+        except MemoryProfileProtocolError as exc:
+            raise BusinessException(
+                str(exc), code=BizCode.SERVICE_UNAVAILABLE
+            ) from exc
+        if envelope.get("code") != 0:
+            detail = envelope.get("msg") or envelope.get("error")
+            raise BusinessException(
+                str(detail or "memory API rejected the request"),
+                code=as_biz_code(envelope.get("code")),
+            )
 
 
 def create_long_term_memory_tool(

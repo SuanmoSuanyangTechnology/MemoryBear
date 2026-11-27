@@ -27,6 +27,12 @@
     },
     "quota_resources": {
       "model": "模型"
+    },
+    "invoke": {
+      "quota_tenant": "租户余额不足，请充值后再试",
+      "quota_project": "项目可用额度不足，请调整项目预算后再试",
+      "quota_api_key": "当前 API Key 额度已用完，请更换密钥或联系管理员",
+      "quota_generic": "模型调用额度不足，请充值后再试"
     }
   }
 }

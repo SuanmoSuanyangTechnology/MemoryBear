@@ -7,6 +7,7 @@
 import { type FC, useRef, useState, useMemo, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useParams } from 'react-router-dom';
+import dayjs from 'dayjs';
 import { Flex, Button, Form, Switch, Space, Divider, App, Dropdown, DatePicker, type SegmentedProps } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 
@@ -260,9 +261,16 @@ const Logs: FC<{ application: Application; }> = ({ application }) => {
     }
   }, [values])
 
+  const annotationsQuery = useMemo(() => {
+    const rest = { ...(values || {}) }
+    delete rest.dateRange
+    return rest
+  }, [values])
+
   const isPureWorkflow = useMemo(() => {
     return application?.type === 'pure_workflow'
   }, [application.type])
+
   return (
     <Flex vertical className="rb:bg-white rb:rounded-lg rb:pt-3! rb:px-3! rb:h-full! rb:overflow-hidden!">
       <Flex justify={!isHideAnnotations ? "space-between" : 'flex-end'} className="rb:mb-3!">
@@ -273,7 +281,12 @@ const Logs: FC<{ application: Application; }> = ({ application }) => {
             onChange={handleChangeTab}
           />
         }
-        <Form form={form}>
+        <Form
+          form={form}
+          initialValues={{
+            dateRange: [dayjs().subtract(6, 'day').startOf('day'), dayjs().endOf('day')],
+          }}
+        >
           <Space size={8}>
             {activeTab === 'logs' &&
               <>
@@ -288,6 +301,7 @@ const Logs: FC<{ application: Application; }> = ({ application }) => {
                 <Form.Item name="dateRange" noStyle>
                   <RangePicker
                     className="rb:w-70"
+                    allowClear={false}
                   />
                 </Form.Item>
               </>
@@ -384,9 +398,7 @@ const Logs: FC<{ application: Application; }> = ({ application }) => {
           <Table<AnnotationItem>
             ref={annotationsTableRef}
             apiUrl={getAnnotationsListUrl(id || '')}
-            apiParams={{
-              ...(values ?? {})
-            }}
+            apiParams={annotationsQuery}
             columns={annotationsColumns}
             rowKey="id"
             isScroll={true}

@@ -1,15 +1,9 @@
-/*
- * @Description: 
- * @Version: 0.0.1
- * @Author: yujiangping
- * @Date: 2025-11-10 18:52:55
- * @LastEditors: ZhaoYing
- * @LastEditTime: 2026-03-25 18:30:28
- */
 import { forwardRef, useImperativeHandle, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { App, Flex } from 'antd';
-import type { ShareModalRef, ShareModalRefProps, KnowledgeBase} from '@/views/KnowledgeBase/types';
+
+import type { ShareModalRef, ShareModalRefProps} from '@/views/KnowledgeBase/types';
+import type { V1KnowledgeListItem } from '@/views/KnowledgeBase/typesV1'
 import RbModal from '@/components/RbModal'
 // import betchControlIcon from '@/assets/images/knowledgeBase/betch-control.png';
 import kbIcon from '@/assets/images/knowledgeBase/knowledge-management.png';
@@ -25,8 +19,6 @@ const ShareModal = forwardRef<ShareModalRef,ShareModalRefProps>(({ handleShare: 
   const [loading, setLoading] = useState(false)
   const [curIndex, setCurIndex] = useState(-1);
   const [kbId, setKbId] = useState<string>('');
-  const [spaceIds, setSpaceIds] = useState<string>('');
-  const [knowledgeBase, setKnowledgeBase] = useState<KnowledgeBase | null>(null);
   const [spaceList, setSpaceList] = useState<SpaceItem[]>([]);
  
   // Close modal and reset state
@@ -36,10 +28,8 @@ const ShareModal = forwardRef<ShareModalRef,ShareModalRefProps>(({ handleShare: 
     setVisible(false);
   };
 
-  const handleOpen = (kb_id?: string, knowledgeBase?: KnowledgeBase | null, spaceIds?:string) => {
+  const handleOpen = (kb_id?: string, _knowledgeBase?: V1KnowledgeListItem | null, spaceIds?:string) => {
     setKbId(kb_id ?? '');
-    setSpaceIds(spaceIds ?? '')
-    setKnowledgeBase(knowledgeBase ?? null);
     setVisible(true);
     getSpaceListFn(spaceIds ?? '')
   };
@@ -120,7 +110,7 @@ const ShareModal = forwardRef<ShareModalRef,ShareModalRefProps>(({ handleShare: 
                     onClick={item.is_active ? () => handleClick(index, item.is_active) : undefined}
                   >
                     <Flex align="center" gap={8}>
-                        <img src={item.icon || kbIcon} className='rb:size-[20px] rb:rounded-[6px]' />
+                        <img src={item.icon || kbIcon} className='rb:size-5 rb:rounded-md' />
                         <span className='rb:text-base rb:font-medium rb:text-gray-800'>{item.name}</span>
                     </Flex>
                   </Flex>

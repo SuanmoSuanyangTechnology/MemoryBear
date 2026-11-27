@@ -5,8 +5,9 @@ The following groups share this handler:
 * the re-embed status reads (the two job-detail routes and the two per-user
   lists) — the host returns the plain ``ApiResponse`` envelope, so the payload
   shapes are described by ``src.schemas.workspace_api``;
-* the job-creation route called by the workspace service — it registers the
-  pending job and publishes the driver;
+* the job-creation route called by the workspace service — it runs everything
+  after the caller's workspace-column write: model-name resolution, the rebuild
+  decision, the job row and the driver, and the memory-config cache invalidation;
 * the four manual-retry routes — the retry logic itself now runs here, in
   ``ReembedRetryService``; only the downstream re-embed workers are still
   published to the API worker;
@@ -184,11 +185,20 @@ class WorkspaceHandler:
         *,
         idempotency_key: str | None = None,
     ) -> ApiResponse[Any] | JSONResponse:
-        """Register a job for a model change and publish the API driver.
+        """Run the rest of a model switch after the caller wrote the columns.
 
-        The caller is the workspace service: it has already switched
-        ``workspaces.embedding``. The row is committed here first; a broker
-        failure leaves ``task_id`` null and the reconciler re-dispatches.
+        The caller (the workspace service) has already switched
+        ``workspaces.embedding`` and nothing else: the underlying model names,
+        the rebuild decision, the row, the dispatch and the memory-config cache
+        invalidation all happen here, mirroring the API's switch flow. A switch
+        that needs no rebuild is a success with ``created=False`` and the id of
+        the job already in flight (or ``null``).
+
+        The row is committed here first; a broker failure leaves ``task_id``
+        null and the reconciler re-dispatches. If this call fails, the caller
+        must roll its workspace columns back — the columns are already
+        committed and a workspace pointing at a new model without a rebuild
+        would mix two vector spaces.
 
         ``Idempotency-Key`` (optional) makes a retried call replay the first
         response instead of registering a second job; without it the service
@@ -202,8 +212,6 @@ class WorkspaceHandler:
                 created_by_user_id=principal.actor_id,
                 old_embedding_config_id=payload.old_embedding_config_id,
                 new_embedding_config_id=payload.new_embedding_config_id,
-                old_model_name=payload.old_model_name,
-                new_model_name=payload.new_model_name,
                 idempotency_key=idempotency_key,
             )
         except ReembedWorkspaceNotFoundError:

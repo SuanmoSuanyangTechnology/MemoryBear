@@ -36,6 +36,7 @@ from src.services import (
     reconcile,
     retention,
     schema_check,
+    workspace_switch_recovery,
 )
 from src.services.enterprise import register_identity_plugins
 from src.trace import TraceIdMiddleware
@@ -65,11 +66,21 @@ async def lifespan(app: FastAPI):
     audit_task = asyncio.create_task(audit_consumer.audit_loop())
     reconcile_task = asyncio.create_task(reconcile.reconcile_loop())
     retention_task = asyncio.create_task(retention.retention_loop())
+    # 一次性自愈：上一进程若在"写完模型列、未登记重算任务"之间崩溃，重启后补登记
+    switch_recovery_task = asyncio.create_task(
+        asyncio.to_thread(workspace_switch_recovery.replay_pending_switches)
+    )
     yield
-    for t in (notify_task, audit_task, reconcile_task, retention_task):
+    background_tasks = (
+        notify_task,
+        audit_task,
+        reconcile_task,
+        retention_task,
+        switch_recovery_task,
+    )
+    for t in background_tasks:
         t.cancel()
-    await asyncio.gather(notify_task, audit_task, reconcile_task, retention_task,
-                         return_exceptions=True)
+    await asyncio.gather(*background_tasks, return_exceptions=True)
     iredis.close_sync_redis()
     await iredis.close_redis()
     db.close_sync_db()

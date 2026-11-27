@@ -18,6 +18,7 @@ from sqlalchemy.orm import Session
 
 from ...errors import BizCode, BusinessException
 from ...guards.workspace_access import require_workspace_access
+from ...memory.retrieval_trace.tool_steps import hydrate_message_meta
 from ...models.app_model import AppType
 from ...models.file_metadata_model import FileMetadata
 from ...schemas.app_log_schema import (
@@ -273,6 +274,14 @@ def get_app_log_detail(
                 files=files,
                 created_at=message_times.get(m.id, m.created_at),
             ))
+
+    # Log detail is the read face of the timeline, so it does the slicing itself:
+    # the response already carries both the recorded segment lengths and the
+    # answer body. Each text step therefore leaves here with its own `content`,
+    # and the consumer renders it without ever touching an offset. Storage and
+    # the SSE contract keep recording only `length`.
+    for msg in msg_list:
+        msg.meta_data = hydrate_message_meta(msg.meta_data, msg.content)
 
     # Human-intervention info, scoped to the page's workflow executions;
     # agent conversations have no executions and get an empty map.

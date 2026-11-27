@@ -3,7 +3,7 @@ import { useParams, useLocation } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { Popover, Flex, Spin } from 'antd';
 
-import type { KnowledgeBaseListItem } from '@/views/KnowledgeBase/types';
+import type { V1KnowledgeListItem } from '@/views/KnowledgeBase/typesV1';
 import RecallTest from '../components/RecallTest';
 import InfoPanel, { type InfoItem } from '../components/InfoPanel';
 import shareUserIcon from '@/assets/images/knowledgeBase/share-user.png';
@@ -16,7 +16,7 @@ import kbModelIcon from '@/assets/images/knowledgeBase/kb-model.png';
 import NoData from '@/assets/images/knowledgeBase/noData.png'
 
 import kbHistoryIcon from '@/assets/images/knowledgeBase/kb-history.png';
-import { getKnowledgeBaseDetail } from '@/api/knowledgeBase';
+import { getKnowledgeBaseDetailV1 } from '@/api/knowledgeBaseV1';
 import { formatDateTime } from '@/utils/format';
 import { useBreadcrumbManager, type BreadcrumbItem } from '@/hooks/useBreadcrumbManager';
 import Empty from '@/components/Empty'
@@ -27,35 +27,12 @@ const Share: FC = () => {
   const location = useLocation();
   const knowledgeBaseId = params.knowledgeBaseId;
   const [loading, setLoading] = useState(false);
-  const [knowledgeBase, setKnowledgeBase] = useState<KnowledgeBaseListItem | null>(null);
+  const [knowledgeBase, setKnowledgeBase] = useState<V1KnowledgeListItem | null>(null);
   const [infoItems, setInfoItems] = useState<InfoItem[]>([]);
   const [knowledgeBaseFolderPath, setKnowledgeBaseFolderPath] = useState<BreadcrumbItem[]>([]);
   const { updateBreadcrumbs } = useBreadcrumbManager({
     breadcrumbType: 'detail'
   });
-  // useEffect(() => {
-  //   console.log('Share.tsx - useParams result:', params);
-  //   console.log('Share.tsx - knowledgeBaseId:', knowledgeBaseId);
-  //   console.log('Share.tsx - typeof knowledgeBaseId:', typeof knowledgeBaseId);
-    
-  //   if (knowledgeBaseId) {
-  //     fetchKnowledgeBaseDetail(knowledgeBaseId);
-  //     // Use callback ref to ensure recall test is ready before calling methods
-  //     const tryOpen = (retries = 5) => {
-  //       if (recallTestRef.current) {
-  //         recallTestRef.current.handleOpen(knowledgeBaseId);
-  //       } else if (retries > 0) {
-  //         // Retry with a short delay until the ref is ready
-  //         setTimeout(() => tryOpen(retries - 1), 50);
-  //       } else {
-  //         console.warn('Share.tsx - recallTestRef is still null after retries');
-  //       }
-  //     };
-  //     tryOpen();
-  //   } else {
-  //     console.warn('Share.tsx - knowledgeBaseId is undefined or empty');
-  //   }
-  // }, [knowledgeBaseId]);
 
   // Update breadcrumbs
   useEffect(() => {
@@ -84,7 +61,8 @@ const Share: FC = () => {
       setKnowledgeBaseFolderPath(state.knowledgeBaseFolderPath);
     }
   }, [location.state]);
-  const formatInfoItems = (data: KnowledgeBaseListItem): InfoItem[] => {
+  const formatInfoItems = (data: V1KnowledgeListItem): InfoItem[] => {
+    const multimodalEnabled = data.processing_configuration?.multimodal?.enabled === true;
     const items: InfoItem[] = [
       { 
         key: 'name',
@@ -116,24 +94,28 @@ const Share: FC = () => {
         value: data.llm?.name ?? '-',
         icon: kbModelIcon,
       },
-      {
-        key: 'image2text_id',
-        label: t('knowledgeBase.image2text_id') + ' ' + 'model',
-        value: data.image2text?.name ?? '-',
-        icon: kbModelIcon,
-      },
-      {
-        key: 'audio2text_id',
-        label: t('knowledgeBase.audio2text_id') + ' ' + 'model',
-        value: data.audio2text?.name ?? '-',
-        icon: kbModelIcon,
-      },
-      {
-        key: 'video2text_id',
-        label: t('knowledgeBase.video2text_id') + ' ' + 'model',
-        value: data.video2text?.name ?? '-',
-        icon: kbModelIcon,
-      },
+      ...(multimodalEnabled
+        ? [
+            {
+              key: 'image2text_id',
+              label: t('knowledgeBase.image2text_id') + ' ' + 'model',
+              value: data.image2text?.name ?? '-',
+              icon: kbModelIcon,
+            },
+            {
+              key: 'audio2text_id',
+              label: t('knowledgeBase.audio2text_id') + ' ' + 'model',
+              value: data.audio2text?.name ?? '-',
+              icon: kbModelIcon,
+            },
+            {
+              key: 'video2text_id',
+              label: t('knowledgeBase.video2text_id') + ' ' + 'model',
+              value: data.video2text?.name ?? '-',
+              icon: kbModelIcon,
+            },
+          ]
+        : []),
       {
         key: 'updated_at',
         label: t('knowledgeBase.last_at'),
@@ -153,11 +135,10 @@ const Share: FC = () => {
   }, [knowledgeBaseId])
   const fetchKnowledgeBaseDetail = (id: string) => {
     setLoading(true);
-    getKnowledgeBaseDetail(id)
-      .then((res: any) => {
-        const data = res.data || res;
-        setKnowledgeBase(data);
-        setInfoItems(formatInfoItems(data));
+    getKnowledgeBaseDetailV1(id)
+      .then((detail) => {
+        setKnowledgeBase(detail);
+        setInfoItems(formatInfoItems(detail));
       })
       .finally(() => {
         setLoading(false);

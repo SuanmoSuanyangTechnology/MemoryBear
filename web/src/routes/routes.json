@@ -35,7 +35,6 @@
       { "path": "/knowledge-base", "element": "KnowledgeBase" },
       { "path": "/knowledge-base/:knowledgeBaseId/private", "element": "Private" },
       { "path": "/knowledge-base/:knowledgeBaseId/share", "element": "Share" },
-      { "path": "/knowledge-base/:knowledgeBaseId/create-dataset", "element": "CreateDataset" },
       { "path": "/knowledge-base/:knowledgeBaseId/DocumentDetails", "element": "DocumentDetails" },
       { "path": "/api-key", "element": "ApiKeyManagement" },
       { "path": "/emotion-engine/:id", "element": "EmotionEngine" },

@@ -14,6 +14,7 @@ from app.core.error_codes import BizCode
 from app.core.exceptions import BusinessException
 from app.core.exceptions import ResourceNotFoundException
 from app.core.logging_config import get_business_logger
+from app.core.memory.retrieval_trace.tool_steps import hydrate_message_meta
 from app.core.models import RedBearChatModel
 from app.core.utils.datetime_utils import to_timestamp_ms, utcnow, utcnow_naive
 from app.db import get_db
@@ -52,6 +53,9 @@ class ConversationService:
         "audio_url",
         "audio_status",
         "files",
+        # 本轮的有序时间线（schema_version 1）：文本段、工具调用、子 Agent 派发。
+        # 纯加法：没有步骤的轮次不带该键。
+        "timeline",
     }
 
     def create_conversation(
@@ -805,7 +809,12 @@ class ConversationService:
                     "role": message.role,
                     "content": message.content,
                     "status": message.status,
-                    "meta_data": self._sanitize_v1_message_meta_data(message.meta_data),
+                    # 白名单保留 timeline；在这里把每段文本切好，调用方就不必再
+                    # 拿已收到的正文自己算偏移。
+                    "meta_data": hydrate_message_meta(
+                        self._sanitize_v1_message_meta_data(message.meta_data),
+                        message.content,
+                    ),
                     "created_at": message.created_at,
                     "version": message.version or 1,
                     "is_current": False if message.is_current is False else True,
@@ -887,7 +896,12 @@ class ConversationService:
                     "role": message.role,
                     "content": message.content,
                     "status": message.status,
-                    "meta_data": self._sanitize_v1_message_meta_data(message.meta_data),
+                    # 白名单保留 timeline；在这里把每段文本切好，调用方就不必再
+                    # 拿已收到的正文自己算偏移。
+                    "meta_data": hydrate_message_meta(
+                        self._sanitize_v1_message_meta_data(message.meta_data),
+                        message.content,
+                    ),
                     "created_at": message.created_at,
                     "version": message.version or 1,
                     "is_current": False if message.is_current is False else True,

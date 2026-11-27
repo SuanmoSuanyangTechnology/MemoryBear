@@ -1,21 +1,13 @@
-/*
- * @Description: 
- * @Version: 0.0.1
- * @Author: yujiangping
- * @Date: 2025-12-30 15:07:37
- * @LastEditors: yujiangping
- * @LastEditTime: 2026-01-05 20:28:51
- */
 import React, { useState, useEffect } from 'react'
 import { useTranslation } from 'react-i18next';
 import { Button, Flex } from 'antd';
 
 import KnowledgeGraph, { type KnowledgeGraphResponse } from './KnowledgeGraph'
 import { getKnowledgeGraph } from '@/api/knowledgeBase';
-import { type KnowledgeBase } from '../types';
+import { type V1KnowledgeListItem } from '../typesV1';
 import Empty from '@/components/Empty';
 interface KnowledgeGraphCardProps {
-  knowledgeBase?: KnowledgeBase;
+  knowledgeBase?: V1KnowledgeListItem;
   onRebuildGraph?: () => void; // Callback function to rebuild graph
 }
 
@@ -56,8 +48,8 @@ const KnowledgeGraphCard: React.FC<KnowledgeGraphCardProps> = ({ knowledgeBase, 
     fetchData()
   }, [knowledgeBase?.id])
 
-  const title = knowledgeBase?.parser_config?.graphrag?.use_graphrag
-    ? knowledgeBase?.parser_config?.graphrag?.scene_name
+  const title = knowledgeBase?.processing_configuration?.graph?.enabled
+    ? knowledgeBase?.processing_configuration?.graph?.scene_name
     : null
   return (
     <Flex vertical className='rb:w-full rb:h-full!'>
@@ -78,7 +70,7 @@ const KnowledgeGraphCard: React.FC<KnowledgeGraphCardProps> = ({ knowledgeBase, 
         </Button>
       </Flex>
       <div className='rb:flex-1 rb:overflow-hidden!'>
-        {knowledgeBase?.parser_config?.graphrag?.use_graphrag
+        {knowledgeBase?.processing_configuration?.graph?.enabled
           ? <KnowledgeGraph data={data} loading={loading} />
           : <Empty title={t('knowledgeBase.graphEmpty')} size={88} className="rb:h-full!" />
         }

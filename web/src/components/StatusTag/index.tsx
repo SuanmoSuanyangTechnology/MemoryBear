@@ -49,7 +49,7 @@ const StatusTag: FC<StatusTagProps> = ({
   className,
 }) => {
   return (
-    <Tag className={clsx("rb:bg-white! rb:border-[#EBEBEB]!", className, {
+    <Tag className={clsx("rb:bg-white! rb:border-gray-200! rb:me-0!", className, {
       'rb:rounded-md!': !circle,
       'rb:rounded-full!': circle,
       'rb:text-[12px]!': size === 'small' && !className?.includes('rb:text-['),

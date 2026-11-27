@@ -9,6 +9,7 @@ from typing import Any
 
 from ..schemas.app_schema import (
     AgentConfigCreate,
+    AgentConfigUpdate,
     AppFeatures,
     KnowledgeRetrievalConfig,
     MemoryConfig,
@@ -23,7 +24,7 @@ class AgentConfigConverter:
     """Agent config format converter."""
 
     @staticmethod
-    def to_storage_format(config: AgentConfigCreate) -> dict[str, Any]:
+    def to_storage_format(config: AgentConfigCreate | AgentConfigUpdate) -> dict[str, Any]:
         """
         Convert a config object to the database storage format.
 
@@ -41,7 +42,7 @@ class AgentConfigConverter:
 
         # 2. Knowledge-base retrieval config
         if config.knowledge_retrieval:
-            result["knowledge_retrieval"] = config.knowledge_retrieval.model_dump()
+            result["knowledge_retrieval"] = config.knowledge_retrieval.model_dump(mode="json")
 
         # 3. Memory config
         if hasattr(config, 'memory') and config.memory:
@@ -53,11 +54,11 @@ class AgentConfigConverter:
 
         # 5. Tool config
         if hasattr(config, 'tools') and config.tools:
-            result["tools"] = [tool.model_dump() for tool in config.tools]
+            result["tools"] = [tool.model_dump(mode="json") for tool in config.tools]
 
         if hasattr(config, "skills") and config.skills:
             result["skills"] = (
-                config.skills.model_dump()
+                config.skills.model_dump(mode="json")
                 if hasattr(config.skills, "model_dump")
                 else config.skills
             )

@@ -28,7 +28,7 @@ const MoreDropdown: FC<MoreDropdownProps> = ({ items, placement = 'bottomRight',
       placement={placement}
     >
       {variant === 'outline'
-        ? <Flex align="center" justify="center" className="rb:cursor-pointer rb:border rb:border-[#EBEBEB] rb:rounded-lg rb:size-6! rb:hover:border-primary-600">
+        ? <Flex align="center" justify="center" className="rb:cursor-pointer rb:border rb:border-gray-200 rb:rounded-lg rb:size-6! rb:hover:border-primary-600">
           <div
             onClick={(e) => { e.stopPropagation(); onClick?.(e); }}
             className={`rb:size-4 rb:bg-cover rb:bg-[url('@/assets/images/common/more.svg')]`}
@@ -37,7 +37,7 @@ const MoreDropdown: FC<MoreDropdownProps> = ({ items, placement = 'bottomRight',
         : 
           <div
             onClick={(e) => { e.stopPropagation(); onClick?.(e); }}
-            className={`rb:cursor-pointer rb:size-5.5 rb:bg-cover rb:bg-[url('@/assets/images/common/more.svg')] rb:hover:bg-[url('@/assets/images/common/more_hover.svg')] rb:shrink-0 ${iconClassName}`}
+            className={`rb:cursor-pointer rb:size-5.5 rb:bg-cover rb:bg-[url('@/assets/images/common/more.svg')] rb:hover:bg-[url('@/assets/images/common/more_hover.svg')] rb:shrink-0 rb:overflow-hidden! rb:rounded-lg! ${iconClassName}`}
           />
       }
     </Dropdown>

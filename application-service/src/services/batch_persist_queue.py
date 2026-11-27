@@ -14,7 +14,7 @@ import time
 import uuid as uuid_module
 from collections import defaultdict
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any, ClassVar
 
 from sqlalchemy import (
@@ -418,12 +418,6 @@ async def _bulk_persist_messages(
                 _opening_sq = args.get("opening_suggested_questions")
                 _opening_row = _row(opening_row_id, conv_id, "assistant", args["opening_statement"],
                                     {"suggested_questions": _opening_sq} if _opening_sq else None)
-                # Rows persisted in the same batch may carry an identical created_at
-                # (clock resolution), leaving opening/user ordering undefined; shift the
-                # opening 1ms earlier so it always sorts strictly before this turn's user.
-                from datetime import timedelta as _timedelta
-
-                _opening_row["created_at"] = _opening_row["created_at"] - _timedelta(milliseconds=1)
                 _add_row(_opening_row, conv_id)
 
         # user message
@@ -499,6 +493,16 @@ async def _bulk_persist_messages(
             "batch_persist: dropped %d duplicate message rows within one batch",
             len(rows) - len(unique_rows),
         )
+
+    # The clock can return the same time for several rows in one flush.
+    # Keep construction order within each conversation, including the opening.
+    last_created_at_by_conversation = {}
+    for row in unique_rows:
+        conversation_id = row["conversation_id"]
+        previous = last_created_at_by_conversation.get(conversation_id)
+        if previous is not None and row["created_at"] <= previous:
+            row["created_at"] = previous + timedelta(milliseconds=1)
+        last_created_at_by_conversation[conversation_id] = row["created_at"]
 
     # --- single idempotent multi-row INSERT for all messages ---
     inserted_ids: set[uuid_module.UUID] = set()

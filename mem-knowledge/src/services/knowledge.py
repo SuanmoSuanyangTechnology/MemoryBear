@@ -344,6 +344,7 @@ async def _build_folder_trees(
     db: AsyncSession,
     items: list[Knowledge],
     workspace_id: uuid.UUID,
+    status: int | None = None,
 ) -> list[dict[str, Any]]:
     folder_ids = [item.id for item in items if item.type == KnowledgeType.FOLDER]
     if not folder_ids:
@@ -366,6 +367,7 @@ async def _build_folder_trees(
             db,
             current_parent_ids,
             workspace_id,
+            status=status,
         )
         pending_parent_ids = []
         for child in children:
@@ -457,7 +459,7 @@ async def list_knowledges(
         orderby,
         desc,
     )
-    return total, await _build_folder_trees(db, items, principal.workspace_id)
+    return total, await _build_folder_trees(db, items, principal.workspace_id, status=status)
 
 
 async def get_knowledge(

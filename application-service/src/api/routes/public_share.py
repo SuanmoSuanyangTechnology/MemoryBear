@@ -35,6 +35,7 @@ from sqlalchemy.orm import Session
 
 from ...db import get_async_db_context, get_db_context
 from ...errors import BizCode, BusinessException, ResourceNotFoundException
+from ...memory.retrieval_trace.tool_steps import hydrate_message_meta
 from ...models import (
     App,
     AppRelease,
@@ -101,6 +102,16 @@ SHARE_FORWARD_EVENTS = frozenset({
     "memory_stage",
     "tool_end",
     "tool_error",
+    # Cluster supervisor → sub-agent dispatch: carries the `seq` that places the
+    # agent card between two paragraphs of the shared reply. Additive; viewers
+    # that do not know these events simply ignore them.
+    "agent_dispatch",
+    "agent_complete",
+    # Sub-agent traces: the cluster stream forwards only agent_dispatch /
+    # agent_complete, so a sub-agent's tool calls reach the viewer exclusively
+    # inside `agent_log.data.iterations[].tool_calls[]`.
+    "agent_log",
+    "agent_log_final",
     "end",
     "error",
     "regenerate_end",
@@ -1040,19 +1051,27 @@ def get_conversation(
         }
 
     def _resolve_meta(msg) -> dict | None:
-        """Resolve local attachments in meta_data.files to accessible URLs
-        without mutating the ORM row."""
+        """Resolve local attachments in meta_data.files to accessible URLs and
+        hand each text step its own text, without mutating the ORM row.
+
+        The share view renders the same timeline as the console, so it slices
+        here too: storage keeps only ``length``, and a response that already
+        holds the body carries the sliced text per step.
+        """
 
         meta = msg.meta_data
-        if not isinstance(meta, dict) or not meta.get("files"):
+        if not isinstance(meta, dict):
             return meta
-        resolved_files = []
-        for f in meta["files"]:
-            if not isinstance(f, dict):
-                continue
-            file_url = f.get("url") or local_file_url_map.get(str(f.get("upload_file_id")))
-            resolved_files.append({**f, "url": file_url} if file_url else f)
-        return {**meta, "files": resolved_files}
+        resolved = dict(meta)
+        if meta.get("files"):
+            resolved_files = []
+            for f in meta["files"]:
+                if not isinstance(f, dict):
+                    continue
+                file_url = f.get("url") or local_file_url_map.get(str(f.get("upload_file_id")))
+                resolved_files.append({**f, "url": file_url} if file_url else f)
+            resolved["files"] = resolved_files
+        return hydrate_message_meta(resolved, msg.content)
 
     message_responses = []
     for m in messages:
@@ -1099,6 +1118,38 @@ def get_conversation(
         .model_dump(mode="json")
     )
     conv_dict["messages"] = message_responses
+
+    # Cluster sub-agent traces. A cluster's sub-agent tool calls reach the
+    # viewer only inside ``agent_log.data.iterations[].tool_calls[]`` — the
+    # cluster stream forwards just agent_dispatch / agent_complete. The shared
+    # view renders the same sub-agent cards as the console, so it needs the
+    # same per-message node map the log detail returns, built by the same
+    # service call (page-scoped, master + sub executions folded together).
+    # Workflow shares keep their existing payload: their node details come from
+    # workflow_executions, a separate contract.
+    app = db.get(App, conversation.app_id) if conversation.app_id else None
+    app_type = app.type if app is not None else AppType.AGENT
+    if app_type not in (AppType.WORKFLOW, AppType.PURE_WORKFLOW):
+        try:
+            page_messages = [
+                msg
+                for group in messages
+                for msg in (group if isinstance(group, list) else [group])
+            ]
+            node_map = AppLogService(db)._get_agent_node_executions(
+                conversation_id, page_messages
+            )
+            conv_dict["node_executions_map"] = {
+                key: [node.model_dump(mode="json") for node in nodes]
+                for key, nodes in node_map.items()
+            }
+        except Exception as e:
+            # Node details are additive: a failure must not break the
+            # conversation the viewer opened the share link for.
+            logger.warning(f"分享端会话详情构建子 Agent 节点明细失败（已降级为空）: {e}")
+            conv_dict["node_executions_map"] = {}
+    else:
+        conv_dict["node_executions_map"] = {}
 
     # Page time window: human-intervention rows outside it belong to other
     # pages and are not rendered here, so the scan stays bounded instead of

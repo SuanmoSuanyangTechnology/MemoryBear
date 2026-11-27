@@ -99,6 +99,7 @@ from .orchestration import (
     run_failover_plan_stream_async,
     run_with_channel_fallback,
     run_with_channel_fallback_async,
+    upstream_error_code,
 )
 from .providers.dashscope import is_qwen3_vl_embedding, is_qwen3_vl_reranker
 from .registry import (

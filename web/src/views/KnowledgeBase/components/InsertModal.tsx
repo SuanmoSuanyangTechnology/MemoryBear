@@ -109,12 +109,12 @@ const InsertModal = forwardRef<InsertModalRef, InsertModalProps>(({ onInsert, on
   const handleOk = async () => {
     const currentContent = getCurrentContent();
     if ((typeof currentContent === 'object' && !currentContent.question && !!currentContent.answer) || (typeof currentContent === 'string' && !currentContent)) {
-      message.warning(t('knowledgeBase.pleaseEnterContent') || '请输入内容');
+      message.warning(t('knowledgeBase.pleaseEnterContent'));
       return;
     }
 
     if (!documentId) {
-      message.error(t('knowledgeBase.documentIdRequired') || '文档ID不能为空');
+      message.error(t('knowledgeBase.documentIdRequired'));
       return;
     }
 
@@ -124,23 +124,23 @@ const InsertModal = forwardRef<InsertModalRef, InsertModalProps>(({ onInsert, on
         const success = await onInsert(documentId, currentContent, chunkId, parentChunkId);
         if (success) {
           const successMsg = isEditMode 
-            ? (t('knowledgeBase.updateSuccess') || '更新成功')
-            : (t('knowledgeBase.insertSuccess') || '插入成功');
+            ? (t('knowledgeBase.updateSuccess'))
+            : (t('knowledgeBase.insertSuccess'));
           message.success(successMsg);
           handleClose();
           onSuccess?.();
         } else {
           const errorMsg = isEditMode
-            ? (t('knowledgeBase.updateFailed') || '更新失败')
-            : (t('knowledgeBase.insertFailed') || '插入失败');
+            ? (t('knowledgeBase.updateFailed'))
+            : (t('knowledgeBase.insertFailed'));
           message.error(errorMsg);
         }
       }
     } catch (error) {
       console.error('Operation failed:', error);
       const errorMsg = isEditMode
-        ? (t('knowledgeBase.updateFailed') || '更新失败')
-        : (t('knowledgeBase.insertFailed') || '插入失败');
+        ? (t('knowledgeBase.updateFailed'))
+        : (t('knowledgeBase.insertFailed'));
       message.error(errorMsg);
     } finally {
       setLoading(false);
@@ -207,15 +207,15 @@ const InsertModal = forwardRef<InsertModalRef, InsertModalProps>(({ onInsert, on
   return (
     <RbModal
       title={isEditMode 
-        ? (t('knowledgeBase.editContent') || '编辑内容')
-        : (t('knowledgeBase.insertContent') || '插入内容')
+        ? (t('knowledgeBase.editContent'))
+        : (t('knowledgeBase.insertContent'))
       }
       open={visible}
       onCancel={handleClose}
       onOk={handleOk}
       confirmLoading={loading}
-      okText={t('common.confirm') || '确认'}
-      cancelText={t('common.cancel') || '取消'}
+      okText={t('common.confirm')}
+      cancelText={t('common.cancel')}
       width={600}
     >
       <Tabs

@@ -25,6 +25,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
 from ..errors import BizCode, BusinessException, ResourceNotFoundException
+from ..memory.retrieval_trace.tool_steps import hydrate_message_meta
+from ..models.app_release_model import AppRelease
 from ..models.conversation_model import Conversation, Message
 from ..models.message_feedback_model import MessageFeedback
 from ..repositories.conversation_repository import ConversationRepository, MessageRepository
@@ -57,6 +59,19 @@ def _log_memory_dispatch_outcome(task: asyncio.Task) -> None:
         logger.error("Memory ingest dispatch failed: %s", error, exc_info=error)
 
 
+def _release_memory_enabled(release_config: Any) -> bool:
+    """Whether the active release snapshot enables memory (monolith parity).
+
+    Mirrors ``check_memory_enabled`` in the monolith dispatcher: a missing
+    release snapshot, a non-dict config or a missing switch all mean "off".
+    """
+
+    if not isinstance(release_config, dict):
+        return False
+    memory_config = release_config.get("memory", {})
+    return bool(isinstance(memory_config, dict) and memory_config.get("enabled", False))
+
+
 class ConversationService:
     """Conversation service (v1 reads, message versions, soft delete, chat kernel)."""
 
@@ -72,6 +87,10 @@ class ConversationService:
         "audio_url",
         "audio_status",
         "files",
+        # Ordered timeline of the turn (schema_version 1): text segments, tool
+        # calls and sub-agent dispatches. Additive: the key is absent for turns
+        # without steps.
+        "timeline",
     }
 
     def _resolve_v1_internal_user_id(
@@ -255,7 +274,13 @@ class ConversationService:
                     "role": message.role,
                     "content": message.content,
                     "status": message.status,
-                    "meta_data": self._sanitize_v1_message_meta_data(message.meta_data),
+                    # The whitelist keeps `timeline`; slicing each text step
+                    # here spares the caller from re-deriving offsets from the
+                    # body it already received.
+                    "meta_data": hydrate_message_meta(
+                        self._sanitize_v1_message_meta_data(message.meta_data),
+                        message.content,
+                    ),
                     "created_at": message.created_at,
                     "version": message.version or 1,
                     "is_current": False if message.is_current is False else True,
@@ -972,6 +997,11 @@ class ConversationService:
     ) -> None:
         """Resolve the memory config and fire-and-forget the paired ingest.
 
+        The dispatch only happens when the app's active release snapshot has
+        ``config.memory.enabled`` set — the app-memory switch used to gate
+        inside the monolith ingest callback and now lives here, at the single
+        point every memory-pair dispatch goes through.
+
         The pair is submitted as one batch, so the memory pipeline assigns
         consecutive sequence numbers with the user message strictly before
         the assistant one. Message dicts accept: ``id``, ``content``,
@@ -1007,8 +1037,19 @@ class ConversationService:
                 conv_app_id = str(conversation.app_id)
                 conv_workspace_id = str(conversation.workspace_id)
                 conv_user_id = str(conversation.user_id) if conversation.user_id else ""
+                release_config = await db.scalar(
+                    select(AppRelease.config)
+                    .where(
+                        AppRelease.app_id == conversation.app_id,
+                        AppRelease.is_active.is_(True),
+                    )
+                    .order_by(AppRelease.version.desc())
+                    .limit(1)
+                )
+                if not _release_memory_enabled(release_config):
+                    return
                 config_id = await MemoryConfigService().get_workspace_active_config_id_async(
-                    conversation.workspace_id
+                    conversation.workspace_id, conv_user_id,
                 )
         except Exception as exc:
             logger.warning(

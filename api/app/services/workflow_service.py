@@ -42,6 +42,7 @@ from app.core.error_codes import BizCode
 from app.core.config import settings
 from app.core.exceptions import BusinessException
 from app.core.usage_context import bind_usage
+from app.core.memory.retrieval_trace.tool_steps import hydrate_message_meta
 from app.core.workflow.adapters.registry import PlatformAdapterRegistry
 from app.core.workflow.error_info import workflow_error_info
 from app.core.workflow.executor import execute_workflow, execute_workflow_stream
@@ -6104,7 +6105,9 @@ class WorkflowService:
 
         def serialize(m: MessageModel) -> dict:
             fb_type, fb_content = feedback_map.get(m.id, (None, None))
-            meta_out = m.meta_data
+            # 切片口径同日志详情与体验会话详情：切版本拿到的同样是切好的文本段，
+            # 与首次加载一致。
+            meta_out = hydrate_message_meta(m.meta_data, m.content)
             # audio_status 落库时多为 end 帧当下的 "pending"（TTS 尚未合成完），不会回写；
             # 这里按 FileMetadata 实时状态覆盖，口径同会话详情接口，避免切版本后一直 pending。
             if isinstance(meta_out, dict) and m.id in audio_status_map:
@@ -7059,6 +7062,12 @@ class WorkflowService:
                     conversation_id_uuid, None, human_message, human_meta,
                     error_info["msg"], error_info["error"],
                 )
+            # 模型服务已归类的失败（如 402 额度不足）保留原异常：外层按服务侧
+            # 业务码与分级文案输出，包成 INTERNAL_ERROR 会退化成 10001 + 诊断串。
+            from app.integrations.model.errors import ModelInvokeFailedError
+
+            if isinstance(e, ModelInvokeFailedError):
+                raise
             raise BusinessException(
                 code=BizCode.INTERNAL_ERROR,
                 message=error_info["msg"],

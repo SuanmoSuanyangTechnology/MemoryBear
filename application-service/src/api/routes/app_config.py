@@ -144,6 +144,21 @@ def get_app_config(
     "/{app_id}/app-config",
     summary="更新应用配置（按 type 分派）",
     response_model=ApiResponse,
+    openapi_extra={
+        "requestBody": {
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "anyOf": [
+                            {"$ref": "#/components/schemas/AgentConfigUpdate"},
+                            {"$ref": "#/components/schemas/WorkflowConfigUpdate"},
+                            {"$ref": "#/components/schemas/MultiAgentConfigUpdate"},
+                        ]
+                    }
+                }
+            }
+        }
+    },
 )
 def update_app_config(
     app_id: UUID,

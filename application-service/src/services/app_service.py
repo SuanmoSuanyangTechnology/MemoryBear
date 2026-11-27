@@ -63,6 +63,10 @@ from ..utils.model_config_refs import config_ref_ids
 from ..utils.workflow_template_loader import load_workflow_template
 from ..utils.workflow_validator import WorkflowValidator
 from .agent_config_converter import AgentConfigConverter
+from .agent_config_references import (
+    filter_copied_agent_config,
+    validate_agent_config_references,
+)
 from .asset_release_resolver import AssetReleaseResolver
 from .category_service import CategoryService
 from .model_ref_gate import assert_refs_publishable, raise_model_unavailable, resolve_invoke_ref
@@ -387,38 +391,35 @@ class AppService:
             )
         return app
 
+    def _prepare_agent_config(
+            self,
+            config: app_schema.AgentConfigCreate | app_schema.AgentConfigUpdate,
+            workspace_id: uuid.UUID,
+            tenant_id: uuid.UUID | None = None,
+            stored_tools: list | dict | None = None,
+    ) -> dict[str, Any]:
+        tenant_id = validate_agent_config_references(self.db, config, workspace_id, tenant_id)
+        storage_data = AgentConfigConverter.to_storage_format(config)
+        tools = storage_data.get("tools")
+        if tools:
+            tenant_id = tenant_id or cross_domain_read.get_workspace_tenant_id(self.db, workspace_id)
+            if tenant_id is None:
+                raise BusinessException("应用所属工作空间不存在", BizCode.NOT_FOUND)
+            storage_data["tools"] = ToolService(self.db).validate_tool_selection(
+                tenant_id, tools, stored_tools
+            )
+        return storage_data
+
     def _create_agent_config(
             self,
             app_id: uuid.UUID,
             config_data: app_schema.AgentConfigCreate,
+            storage_data: dict[str, Any],
             now: datetime.datetime,
             *,
-            workspace_id: uuid.UUID | None = None,
-            tenant_id: uuid.UUID | None = None
+            workspace_id: uuid.UUID,
+            tenant_id: uuid.UUID | None = None,
     ) -> None:
-        """Create an Agent config (internal method).
-
-        Args:
-            app_id: App ID
-            config_data: Agent config data
-            now: Current time
-            workspace_id: Workspace ID (tenant fallback lookup)
-            tenant_id: Tenant ID (skips the workspace lookup)
-        """
-        storage_data = AgentConfigConverter.to_storage_format(config_data)
-        tools = storage_data.get("tools") or []
-        if tools:
-            resolved = tenant_id or (
-                cross_domain_read.get_workspace_tenant_id(self.db, workspace_id)
-                if workspace_id is not None
-                else None
-            )
-            if resolved is None:
-                raise BusinessException("应用所属工作空间不存在", BizCode.NOT_FOUND)
-            storage_data["tools"] = ToolService(self.db).validate_tool_selection(
-                resolved, tools
-            )
-
         # Validate the model reference **before** the insert. Without this the bad
         # id hits `agent_configs.default_model_config_id`'s FK, and the resulting
         # IntegrityError is wrapped by `create_app`'s generic `except` into
@@ -570,7 +571,9 @@ class AppService:
 
     def _load_ontology_map(
             self,
-            app_ids: list[uuid.UUID]
+            app_ids: list[uuid.UUID],
+            tenant_id: uuid.UUID | None = None,
+            workspace_id: uuid.UUID | None = None,
     ) -> dict[uuid.UUID, dict] | None:
         """Batch-load the effective ontology (ontology sub-object) per app.
 
@@ -595,10 +598,14 @@ class AppService:
                 # serialization queries fail.
                 with self.db.begin_nested():
                     return binder.load_app_ontology_batch(self.db, app_ids)
-            # Remote binder (memory-domain callback): never hold a transaction
-            # across the HTTP call. Callers serialize rows before reaching here.
+            # Remote binder (memory-enterprise): never hold a transaction across
+            # the HTTP call. Callers serialize rows before reaching here. The
+            # bindings are tenant-scoped, so the tenant resolves from the
+            # workspace before the transaction ends.
+            if tenant_id is None and workspace_id is not None:
+                tenant_id = cross_domain_read.get_workspace_tenant_id(self.db, workspace_id)
             self.db.rollback()
-            return binder.load_app_ontology_batch(self.db, app_ids)
+            return binder.load_app_ontology_batch(self.db, app_ids, tenant_id)
         except Exception as e:
             logger.error("应用本体聚合失败", extra={"error": str(e)}, exc_info=True)
             return None
@@ -711,7 +718,8 @@ class AppService:
     def to_schemas_with_ontology(
             self,
             apps: list[App],
-            current_workspace_id: uuid.UUID
+            current_workspace_id: uuid.UUID,
+            tenant_id: uuid.UUID | None = None,
     ) -> list[app_schema.App]:
         """Batch-convert apps to schemas and fill the effective ontology.
 
@@ -726,7 +734,9 @@ class AppService:
             self._convert_to_schema(a, current_workspace_id, None, context)
             for a in apps
         ]
-        ontology_map = self._load_ontology_map(app_ids)
+        ontology_map = self._load_ontology_map(
+            app_ids, tenant_id, current_workspace_id,
+        )
         if ontology_map is not None:
             # A remote binder ends the transaction, which expires the ORM rows;
             # read the pre-captured ids so the fill loop issues no refresh queries.
@@ -739,10 +749,13 @@ class AppService:
     def to_schema_with_ontology(
             self,
             app: App,
-            current_workspace_id: uuid.UUID
+            current_workspace_id: uuid.UUID,
+            tenant_id: uuid.UUID | None = None,
     ) -> app_schema.App:
         """Convert a single app to a schema and fill the effective ontology."""
-        return self.to_schemas_with_ontology([app], current_workspace_id)[0]
+        return self.to_schemas_with_ontology(
+            [app], current_workspace_id, tenant_id,
+        )[0]
 
     def _convert_to_schema(
             self,
@@ -940,14 +953,19 @@ class AppService:
                 created_at=now,
                 updated_at=now,
             )
+            agent_storage = None
+            if app.type == AppType.AGENT and data.agent_config is not None:
+                agent_storage = self._prepare_agent_config(data.agent_config, workspace_id, tenant_id)
+
             self.db.add(app)
             self.db.flush()  # Fetch app.id
 
             # For agent-type apps with a config payload, create the AgentConfig
-            if app.type == "agent" and data.agent_config:
+            if data.agent_config is not None and agent_storage is not None:
                 self._create_agent_config(
                     app.id,
                     data.agent_config,
+                    agent_storage,
                     now,
                     workspace_id=workspace_id,
                     tenant_id=tenant_id,
@@ -1039,10 +1057,10 @@ class AppService:
             tenant_id: uuid.UUID | None,
             ontology_id: uuid.UUID,
     ) -> None:
-        """Bind after the local commit; soft-delete the app when the callback fails.
+        """Bind after the local commit; soft-delete the app when the call fails.
 
-        The monolith business code is passed through to the client (validation
-        codes like 4000/3001); transport failures surface as 10003.
+        The business code is passed through to the client (validation codes
+        like 4000/3001); transport failures surface as 10003.
         """
         try:
             binder.bind_app(app.id, tenant_id, ontology_id)
@@ -1119,13 +1137,15 @@ class AppService:
             self,
             *,
             app_id: uuid.UUID,
-            workspace_id: uuid.UUID | None = None
+            workspace_id: uuid.UUID | None = None,
+            tenant_id: uuid.UUID | None = None,
     ) -> None:
         """Delete an app.
 
         Args:
             app_id: App ID
             workspace_id: Workspace ID (for permission checks)
+            tenant_id: Acting tenant (for the tenant-scoped ontology unbind)
 
         Raises:
             ResourceNotFoundException: When the app does not exist
@@ -1197,18 +1217,20 @@ class AppService:
             .returning(ToolConfig.id)
         ).all())
 
-        # Bindings belong to the memory domain: only the remote callback binder
-        # can unbind them, after the local commit (no remote call inside a
+        # Bindings belong to the memory domain: only the remote binder can
+        # unbind them, after the local commit (no remote call inside a
         # transaction). The in-process binder lives in the monolith and runs its
         # own delete path, so this service never sees one.
         binder = get_plugin(ONTOLOGY_BINDING_PLUGIN)
         remote_unbind = binder is not None and not getattr(binder, "uses_local_db", True)
+        if remote_unbind and tenant_id is None:
+            tenant_id = cross_domain_read.get_workspace_tenant_id(self.db, app.workspace_id)
 
         self.db.commit()
 
         if remote_unbind:
             self._unbind_ontology_remote(
-                binder, app, share_ids, installation_ids, workflow_tool_ids
+                binder, app, tenant_id, share_ids, installation_ids, workflow_tool_ids
             )
 
         logger.info(
@@ -1224,6 +1246,7 @@ class AppService:
             self,
             binder: Any,
             app: App,
+            tenant_id: uuid.UUID | None,
             share_ids: list[uuid.UUID],
             installation_ids: list[uuid.UUID],
             workflow_tool_ids: list[uuid.UUID],
@@ -1237,7 +1260,7 @@ class AppService:
         the caller as a whole-delete failure it can retry.
         """
         try:
-            binder.unbind_app(app.id)
+            binder.unbind_app(app.id, tenant_id)
         except OntologyUpstreamError as exc:
             self._compensate_failed_delete(
                 app, share_ids, installation_ids, workflow_tool_ids
@@ -1382,54 +1405,26 @@ class AppService:
                 ).first()
 
                 if source_config:
-                    if is_cross_workspace:
-                        # Cross-workspace: keep tenant-level model/tools/skills as is;
-                        # filter workspace-level knowledge_bases and clear memory_config
-                        _, kb_ids = self._collect_resource_ids_from_config(
-                            None, source_config.knowledge_retrieval
+                    if target_tenant_id is None:
+                        target_tenant_id = cross_domain_read.get_workspace_tenant_id(
+                            self.db, target_workspace_id
                         )
-                        _, available_kb_ids = self._preload_cross_workspace_resources(
-                            target_tenant_id, target_workspace_id, set(), kb_ids
-                        )
-                        new_model_config_id = source_config.default_model_config_id
-                        new_knowledge_retrieval = self._clean_knowledge_retrieval(
-                            source_config.knowledge_retrieval, available_kb_ids
-                        )
-                        new_tools = (
-                            copy.deepcopy(source_config.tools)
-                            if source_config.tools else []
-                        )
-                        new_memory = self._clean_memory_cross_workspace(
-                            source_config.memory, target_workspace_id
-                        )
-                        new_skills = (
-                            copy.deepcopy(source_config.skills)
-                            if source_config.skills else {}
-                        )
-                    else:
-                        new_model_config_id = source_config.default_model_config_id
-                        new_knowledge_retrieval = (
-                            copy.deepcopy(source_config.knowledge_retrieval)
-                            if source_config.knowledge_retrieval else None
-                        )
-                        new_tools = (
-                            copy.deepcopy(source_config.tools)
-                            if source_config.tools else []
-                        )
-                        new_memory = (
-                            copy.deepcopy(source_config.memory)
-                            if source_config.memory else None
-                        )
-                        new_skills = (
-                            copy.deepcopy(source_config.skills)
-                            if source_config.skills else {}
-                        )
+                        if target_tenant_id is None:
+                            raise ResourceNotFoundException("工作空间", str(target_workspace_id))
+                    new_knowledge_retrieval, new_tools, new_skills = filter_copied_agent_config(
+                        self.db, source_config, source_app.workspace_id, target_workspace_id,
+                        target_tenant_id,
+                    )
+                    new_memory = (
+                        self._clean_memory_cross_workspace(source_config.memory, target_workspace_id)
+                        if is_cross_workspace else copy.deepcopy(source_config.memory)
+                    )
 
                     new_config = AgentConfig(
                         id=uuid.uuid4(),
                         app_id=new_app.id,
                         system_prompt=source_config.system_prompt,
-                        default_model_config_id=new_model_config_id,
+                        default_model_config_id=source_config.default_model_config_id,
                         model_parameters=(
                             copy.deepcopy(source_config.model_parameters)
                             if source_config.model_parameters else None
@@ -1858,6 +1853,7 @@ class AppService:
             ontology_status: str = "all",
             field_search: str | None = None,
             orchestration_mode: str | None = None,
+            tenant_id: uuid.UUID | None = None,
     ) -> tuple[list[App], int]:
         """List apps in a workspace (paginated).
 
@@ -1956,8 +1952,8 @@ class AppService:
                 )
             )
         # Ontology filter: the local binder supplies SQL predicates (premium
-        # tables); the remote binder filters candidate ids over the monolith
-        # callback channel after the scope query. Without a plugin the
+        # tables); the remote binder filters candidate ids through
+        # memory-enterprise after the scope query. Without a plugin the
         # ontology parameters have no effect (community behavior).
         field_search = field_search.strip() if field_search else None
         ontology_filter = (ontology_status and ontology_status != "all") or field_search
@@ -2013,16 +2009,19 @@ class AppService:
             scope = and_(scope, *filters)
 
         if ontology_filter:
-            # Candidate ids under the non-ontology scope; the monolith returns
-            # the subset matching the ontology filter. End the transaction
-            # before the HTTP call (no remote calls inside a transaction).
+            # Candidate ids under the non-ontology scope; memory-enterprise
+            # returns the subset matching the ontology filter. The match is
+            # tenant-scoped, so the tenant resolves from the workspace before
+            # the transaction ends (no remote calls inside a transaction).
             candidates = list(
                 self.db.scalars(select(App.id).where(scope)).all()
             )
+            if tenant_id is None:
+                tenant_id = cross_domain_read.get_workspace_tenant_id(self.db, workspace_id)
             self.db.rollback()
             try:
                 matched = ontology_binder.filter_app_ids(
-                    candidates, ontology_status, field_search
+                    candidates, ontology_status, field_search, tenant_id
                 )
             except Exception as e:
                 logger.error("本体筛选回调失败", extra={"error": str(e)}, exc_info=True)
@@ -2135,6 +2134,7 @@ class AppService:
 
         # Validate the model reference before the row is touched; a bare FK
         # violation would surface as a 500 carrying the SQL statement.
+        tenant_id = None
         if data.default_model_config_id is not None:
             tenant_id = cross_domain_read.get_workspace_tenant_id(
                 self.db, app.workspace_id
@@ -2152,6 +2152,9 @@ class AppService:
             .order_by(AgentConfig.updated_at.desc())
         )
         agent_cfg: AgentConfig | None = self.db.scalars(stmt).first()
+        storage_data = self._prepare_agent_config(
+            data, app.workspace_id, tenant_id, agent_cfg.tools if agent_cfg else None
+        )
         now = utcnow_naive()
 
         if not agent_cfg:
@@ -2164,20 +2167,6 @@ class AppService:
             )
             self.db.add(agent_cfg)
             logger.debug("创建新的 Agent 配置", extra={"app_id": str(app_id)})
-
-        # Convert to storage format
-        storage_data = AgentConfigConverter.to_storage_format(data)
-
-        tools = storage_data.get("tools") or []
-        if tools:
-            tenant_id = cross_domain_read.get_workspace_tenant_id(
-                self.db, app.workspace_id
-            )
-            if tenant_id is None:
-                raise BusinessException("应用所属工作空间不存在", BizCode.NOT_FOUND)
-            storage_data["tools"] = ToolService(self.db).validate_tool_selection(
-                tenant_id, tools, agent_cfg.tools
-            )
 
         # Update fields (unconditional full overwrite: absent fields are cleared too)
         agent_cfg.system_prompt = data.system_prompt

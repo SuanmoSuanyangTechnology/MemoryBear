@@ -1,8 +1,8 @@
 import type { Model } from '@/views/ModelManagement/types';
-import folderIcon from '@/assets/images/knowledgeBase/folder.png';
+import folderIcon from '@/assets/images/knowledgeBase/folder.svg';
 import generalIcon from '@/assets/images/knowledgeBase/datasets.png';
 import webIcon from '@/assets/images/knowledgeBase/general.png';
-import tpIcon from '@/assets/images/knowledgeBase/text.png';
+import tpIcon from '@/assets/images/application/text.svg';
 
 export const baseModelFields = [
   { name: 'llm', type: 'llm', label: 'llmModel', required: true },
@@ -25,7 +25,7 @@ export const multimodalModelFields = [
   required: boolean;
 }[];
 
-// 根据类型获取图标
+// Get the icon by type
 export const getTypeIcon = (type: string) => {
   const normalized = (type || '').toLowerCase();
   switch (normalized) {
@@ -43,7 +43,7 @@ export const getTypeIcon = (type: string) => {
   }
 };
 
-// 下拉菜单项
+// Dropdown menu items
 export const menuItems = [
   {
     key: 'edit',

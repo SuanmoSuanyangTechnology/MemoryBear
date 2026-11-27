@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from collections import OrderedDict
+from collections.abc import Callable
 from typing import Any
 
 from app.core.memory.retrieval_trace.stage_events import build_memory_stage_payload
@@ -103,21 +104,34 @@ class MessageTrace:
                 error=step.get("error"),
             )
 
-    def build(self) -> dict[str, Any] | None:
-        """Build metadata only from terminal calls so incomplete traces are not exposed."""
-        tool_calls = [
-            call
-            for call in self._calls.values()
-            if call.get("status") in {"completed", "failed"}
-        ]
+    def build(self, seq_resolver: Callable[[str], int | None] | None = None) -> dict[str, Any] | None:
+        """Build metadata only from terminal calls so incomplete traces are not exposed.
+
+        ``seq_resolver`` 把工具调用的 ``step_id`` 映射到它在 ``meta_data.timeline``
+        里拿到的 ``seq``。流结束后客户端只剩这一个排序键，所以落库结构也要带上：
+        否则刷新后无法把记忆调用对回它的 timeline 步骤（一轮里多次召回时必然对错）。
+        """
+        tool_calls = []
+        for step_id, call in self._calls.items():
+            if call.get("status") not in {"completed", "failed"}:
+                continue
+            entry = dict(call)
+            seq = seq_resolver(step_id) if seq_resolver is not None else None
+            if seq is not None:
+                entry["seq"] = seq
+            tool_calls.append(entry)
         if not tool_calls:
             return None
         return {"schema_version": 1, "tool_calls": tool_calls}
 
 
-def merge_memory_trace(meta: dict[str, Any], trace: MessageTrace) -> dict[str, Any]:
+def merge_memory_trace(
+    meta: dict[str, Any],
+    trace: MessageTrace,
+    seq_resolver: Callable[[str], int | None] | None = None,
+) -> dict[str, Any]:
     merged = dict(meta or {})
-    memory_retrieval = trace.build()
+    memory_retrieval = trace.build(seq_resolver)
     if memory_retrieval is not None:
         merged["memory_retrieval"] = memory_retrieval
     return merged
