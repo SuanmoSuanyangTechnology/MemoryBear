@@ -1,4 +1,4 @@
-"""Emotion reply endpoint for validated API-key requests from core/api."""
+"""Emotion reply and policy endpoints."""
 
 from __future__ import annotations
 
@@ -9,14 +9,14 @@ import httpx
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
 
-from src.common.errors import BizCode
+from src.common.errors import BizCode, ProfileError
 from src.common.external_api import external_api
 from src.common.responses import ApiResponse, error_response, failure
-from src.middleware.auth import SOURCE_EXTERNAL, MemoryPrincipal
+from src.middleware.auth import MemoryPrincipal
 from src.middleware.identity import require_memory_context
 from src.schemas.emotion_reply import (
+    AppEmotionPolicyData,
     AppEmotionPolicyRequest,
-    AppEmotionStrategy,
     EmotionReplyData,
     EmotionReplyRequest,
 )
@@ -33,29 +33,10 @@ async def emotion_reply(
     context: Annotated[MemoryPrincipal, Depends(require_memory_context)],
     body: EmotionReplyRequest,
 ) -> ApiResponse[EmotionReplyData] | JSONResponse:
-    # The trusted API proxy verifies the API key type, workspace binding, and tenant context.
-    if (
-        context.source != SOURCE_EXTERNAL
-        or context.actor_kind != "apikey"
-        or "authorization" in request.headers
-    ):
-        return error_response(
-            request, 403, failure(BizCode.API_KEY_INVALID, "仅支持经 API 鉴权的服务请求")
-        )
-
-    runtime = request.app.state.runtime
-    if not runtime.memory_enterprise.enabled:
-        return error_response(
-            request, 503, failure(BizCode.SERVICE_UNAVAILABLE, "情绪回应策略能力不可用")
-        )
-
     try:
-        data = await runtime.emotion_reply.resolve(
-            body.message,
-            context.trace_id,
-            tenant_id=context.tenant_id,
-            workspace_id=context.workspace_id,
-        )
+        data = await request.app.state.runtime.emotion_reply.resolve(context, body.message)
+    except ProfileError:
+        raise
     except Exception:
         logger.error("emotion reply failed: request_id=%s fault=internal_error", context.trace_id)
         return error_response(
@@ -66,13 +47,13 @@ async def emotion_reply(
 
 @router.post(
     "/memory/emotion-policy",
-    response_model=ApiResponse[AppEmotionStrategy | None],
+    response_model=ApiResponse[AppEmotionPolicyData],
 )
 async def app_emotion_policy(
     request: Request,
     context: Annotated[MemoryPrincipal, Depends(require_memory_context)],
     body: AppEmotionPolicyRequest,
-) -> ApiResponse[AppEmotionStrategy | None] | JSONResponse:
+) -> ApiResponse[AppEmotionPolicyData]:
     enterprise = request.app.state.runtime.memory_enterprise
     if enterprise.enabled:
         try:
@@ -80,12 +61,10 @@ async def app_emotion_policy(
                 enterprise.app_emotion_policy, app_id=body.app_id, tenant_id=context.tenant_id,
                 workspace_id=context.workspace_id, emotion_code=body.emotion_code,
             )
-            return ApiResponse[AppEmotionStrategy | None](data=strategy)
+            return ApiResponse(data=AppEmotionPolicyData(available=True, strategy=strategy))
         except (httpx.HTTPError, TimeoutError, ValueError) as exc:
             logger.warning(
                 "app emotion policy failed: request_id=%s fault=%s",
                 context.trace_id, type(exc).__name__,
             )
-    return error_response(
-        request, 503, failure(BizCode.SERVICE_UNAVAILABLE, "情绪回应策略能力不可用")
-    )
+    return ApiResponse(data=AppEmotionPolicyData(available=False, strategy=None))
