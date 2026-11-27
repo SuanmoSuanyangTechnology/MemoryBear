@@ -148,8 +148,10 @@ reachable routes and their parameter contract are mirrored in
 
 Required direct-mode headers are `x-tenant-id`, `x-workspace-id`, `x-source`, and the acting id — whose header the face decides: `ex_api` carries the key that authenticated as `x-api-key-id`, and every other face carries the user as `x-user-id`. Both terminators follow that rule (the Gateway when it terminates an API key, the API's own proxy on its `/v1` route), so an `ex_api` request resolves to one principal whichever hop terminated it, and the acting id is never a key id on one path and a creator's user id on another. The request log records which of the two it got, as `actor_kind` (`apikey` or `actor`), so a key id is never read as an actor. `X-Trace-Id` is optional; all identity IDs must be UUIDs. In gateway mode the actor, tenant, workspace, and authenticated face come from verified token claims (the claim keeps its own `api_key` / absent spelling and is mapped onto `ex_api` / `in_api`); conflicting request headers are ignored.
 
-Emotion reply uses the trusted API proxy channel. Route its public face through
-the API to verify the API key type, workspace binding, and tenant context.
+Emotion reply accepts the Gateway's verified API-key token or the API proxy's
+trusted identity headers. Both entry points require the `memory` scope.
+Memory-profile checks that the key is an active, unexpired service key bound
+to the authenticated workspace and tenant before running classification.
 With `MEMORY_ENTERPRISE_BASE_URL` and `MEMORY_INTERNAL_TOKEN` configured,
 memory-profile sends the emotion code to memory-enterprise after BERT classification.
 memory-enterprise compares the token against its own `MEMORY_INTERNAL_TOKEN` and

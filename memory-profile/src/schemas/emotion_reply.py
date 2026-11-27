@@ -43,3 +43,8 @@ class AppEmotionStrategy(BaseModel):
     tone: str
     do_list: list[str]
     avoid_list: list[str]
+
+
+class AppEmotionPolicyData(BaseModel):
+    available: bool
+    strategy: AppEmotionStrategy | None

@@ -6,7 +6,13 @@ import logging
 from collections.abc import Awaitable, Callable
 from uuid import UUID
 
+from sqlalchemy.exc import SQLAlchemyError
+
+from src.common.errors import BizCode, ProfileError
 from src.common.vocabulary import normalize_emotion_type
+from src.infrastructure.postgres import PostgresManager
+from src.middleware.auth import SOURCE_EXTERNAL, MemoryPrincipal
+from src.repositories.service_key import ServiceKeyRepository
 from src.schemas.emotion_reply import EmotionPolicy, EmotionReplyData
 
 logger = logging.getLogger(__name__)
@@ -56,13 +62,49 @@ class EmotionReplyService:
         self,
         predict: Callable[[str], Awaitable[tuple[str, float] | None]],
         load_policy: Callable[[str, str, UUID, UUID], Awaitable[EmotionPolicy | None]],
+        *,
+        postgres: PostgresManager,
+        policy_enabled: bool,
     ) -> None:
         self._predict = predict
         self._load_policy = load_policy
+        self._service_keys = ServiceKeyRepository(postgres)
+        self._policy_enabled = policy_enabled
 
-    async def resolve(
-        self, message: str, trace_id: str, *, tenant_id: UUID, workspace_id: UUID
-    ) -> EmotionReplyData:
+    async def _require_bound_service_key(self, context: MemoryPrincipal) -> None:
+        if context.source != SOURCE_EXTERNAL or context.actor_kind != "apikey":
+            raise ProfileError(
+                BizCode.API_KEY_INVALID, "仅支持已鉴权的服务 API Key", status_code=403
+            )
+
+        try:
+            bound = await self._service_keys.is_bound_service_key(
+                api_key_id=context.actor_id,
+                workspace_id=context.workspace_id,
+                tenant_id=context.tenant_id,
+            )
+        except (SQLAlchemyError, OSError) as exc:
+            logger.error(
+                "service key lookup failed: request_id=%s fault=%s",
+                context.trace_id,
+                type(exc).__name__,
+            )
+            raise ProfileError(
+                BizCode.SERVICE_UNAVAILABLE, "服务 API Key 校验暂不可用", status_code=503
+            ) from exc
+        if not bound:
+            raise ProfileError(
+                BizCode.API_KEY_INVALID, "需要绑定当前工作空间的有效服务 API Key", status_code=403
+            )
+
+    async def resolve(self, context: MemoryPrincipal, message: str) -> EmotionReplyData:
+        await self._require_bound_service_key(context)
+        if not self._policy_enabled:
+            raise ProfileError(
+                BizCode.SERVICE_UNAVAILABLE, "情绪回应策略能力不可用", status_code=503
+            )
+
+        trace_id = context.trace_id
         try:
             result = await self._predict(message)
         except Exception:
@@ -76,7 +118,9 @@ class EmotionReplyService:
         code, score = result
         data = EmotionReplyData(emotion_code=code, score=score)
         try:
-            policy = await self._load_policy(code, trace_id, tenant_id, workspace_id)
+            policy = await self._load_policy(
+                code, trace_id, context.tenant_id, context.workspace_id
+            )
         except Exception:
             logger.warning(
                 "emotion reply degraded: request_id=%s fault=policy_read_failed", trace_id
