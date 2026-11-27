@@ -18,6 +18,7 @@ from ..models.owned import Document, Knowledge
 from ..parser_configuration import DocumentConfiguration, Scope, from_api, new_configuration, to_api
 from ..parser_configuration.api import configuration_error
 from ..parser_configuration.entities import ConfigurationError, KnowledgeConfiguration
+from ..parser_configuration.legacy import validate_document_chunk_mode
 from ..repositories.parser_configuration import (
     document_configuration,
     knowledge_configuration,
@@ -175,6 +176,7 @@ async def prepare_upload(
     await file_service.require_parent_folder(db, kb_id, parent_id, principal)
     preset = knowledge_configuration(knowledge)
     configuration = merge_configuration(document_preset(preset), nested, preset)
+    validate_document_chunk_mode(preset, configuration)
     await validate_models(db, configuration, principal, runtime)
     file_id = uuid4()
     extension = splitext(filename)[1].lower()
@@ -190,4 +192,5 @@ async def prepare_upload(
         parser_id=str(knowledge.parser_id),
         configuration=configuration,
         digest=(await to_thread(sha256, content)).hexdigest(),
+        enforce_chunk_mode=True,
     )

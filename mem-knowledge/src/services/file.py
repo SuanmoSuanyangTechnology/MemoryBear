@@ -32,13 +32,21 @@ from ..models.owned import (
     Knowledge,
     UploadFingerprint,
 )
-from ..parser_configuration import DocumentConfiguration, to_legacy
-from ..parser_configuration.legacy import document_configuration_from_legacy
+from ..parser_configuration import DocumentConfiguration, Scope, to_legacy
+from ..parser_configuration.fields import fields_for
+from ..parser_configuration.legacy import (
+    document_configuration_from_legacy,
+    validate_document_chunk_mode,
+)
 from ..rag.knowledge_graph import GraphPipelineConfigError
 from ..rag.parser_config import normalize_document_parser_config
 from ..repositories import document as document_repository
 from ..repositories import file as file_repository
-from ..repositories.parser_configuration import document_configuration, knowledge_configuration
+from ..repositories.parser_configuration import (
+    AsyncParserConfigurationRepository,
+    document_configuration,
+    knowledge_configuration,
+)
 from . import knowledge as knowledge_service
 from .folder_hierarchy import validate_file_hierarchy
 from .knowledge_file_storage import KnowledgeFileStorage, generate_kb_file_key
@@ -87,6 +95,7 @@ class UploadPlan:
     parser_id: str
     configuration: DocumentConfiguration
     digest: str | None = None
+    enforce_chunk_mode: bool = False
 
     @property
     def parser_config(self) -> dict[str, Any]:
@@ -379,6 +388,23 @@ async def persist_uploaded_content(
         raise KnowledgeError.from_code("KB_KNOWLEDGE_NOT_FOUND")
     await require_parent_folder(db, plan.kb_id, plan.parent_id, principal)
     try:
+        if plan.enforce_chunk_mode:
+            # Serialize first uploads with legacy document updates before saving any rows.
+            knowledge = (await db.execute(
+                select(Knowledge).where(Knowledge.id == plan.kb_id)
+                .with_for_update().execution_options(populate_existing=True)
+            )).scalar_one()
+            current = knowledge_configuration(knowledge)
+            validate_document_chunk_mode(current, plan.configuration)
+            if current.chunk_method is None:
+                defaults = {
+                    spec.column: deepcopy(getattr(plan.configuration, spec.column))
+                    for spec in fields_for(Scope.KNOWLEDGE)
+                    if spec.scope == Scope.COMMON
+                }
+                await AsyncParserConfigurationRepository(db).write_knowledge(
+                    knowledge, lambda _: current.model_copy(update=defaults),
+                )
         db_file = await file_repository.add_file_async(
             db,
             FileCreate(
