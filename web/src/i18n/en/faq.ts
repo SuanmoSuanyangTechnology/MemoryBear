@@ -33,6 +33,7 @@ export const faq = {
   'question&answer': 'Question & Answer',
   question: 'Question',
   answer: 'Answer',
+  noWikiSource: 'No Wiki source',
   updatedAt: 'Updated at',
   actions: 'Actions',
   search: 'Search questions or answers',

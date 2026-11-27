@@ -31,7 +31,7 @@ const CreateFolderModal = forwardRef<CreateFolderModalRef,CreateFolderModalRefPr
     const target = selectedOptions[selectedOptions.length - 1];
     if (!target || target.children) return;
     try {
-      const response = await getFolderList({ kb_id: folder.kb_id, parent_id: target.value } as FolderFormData);
+      const response = await getFolderList(folder.kb_id, target.value || folder.kb_id,  { file_ext: 'folder', page: 1, pagesize: 100 } as FolderFormData);
       const items = Array.isArray(response) ? response : response?.items ?? response?.list ?? response?.data?.items ?? [];
       target.children = items.filter((item: any) => {
         const ext = typeof item.file_ext === 'string' ? item.file_ext.trim().replace(/^\./, '').toLowerCase() : '';
@@ -41,7 +41,7 @@ const CreateFolderModal = forwardRef<CreateFolderModalRef,CreateFolderModalRefPr
         return item.is_directory ?? item.is_dir ?? Boolean(item.folder_name || item.children);
       }).map((item: any) => ({
         value: String(item.id ?? item.file_id ?? item.key ?? item.folder_id),
-        label: item.folder_name ?? item.file_name ?? item.name ?? item.title ?? '未命名节点',
+        label: item.folder_name ?? item.file_name ?? item.name ?? item.title ?? t('knowledgeBase.unnamedNode'),
         isLeaf: false,
       }));
       target.isLeaf = target.children?.length === 0;

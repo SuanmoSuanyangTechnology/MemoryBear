@@ -3,65 +3,39 @@ import { App } from 'antd';
 import copy from 'copy-to-clipboard';
 import { useTranslation } from 'react-i18next';
 
-import { batchDownloadFilesByKb, exportQaByKb, updateKnowledgeBase } from '@/api/knowledgeBase';
+import { batchDownloadFilesByKb, exportQaByKb } from '@/api/knowledgeBase';
+import { getKnowledgeBaseDetailV1, patchKnowledgeBaseV1 } from '@/api/knowledgeBaseV1';
 import type {
-  CreateModalRef,
-  KnowledgeBaseFormData,
-  KnowledgeBaseListItem,
   MetadataDrawerRef,
   RecallTestDrawerRef,
   ShareModalRef,
 } from '@/views/KnowledgeBase/types';
-
-const DEFAULT_PARSER_CONFIG = {
-  chunk_token_num: 512,
-  delimiter: '\n',
-  auto_keywords: 0,
-  auto_questions: 0,
-  html4excel: false,
-  graphrag: {
-    use_graphrag: false,
-    scene_name: '',
-    entity_types: [],
-    method: '',
-    resolution: false,
-    community: false,
-  },
-};
+import type { V1KnowledgeListItem } from '@/views/KnowledgeBase/typesV1'
+import type { V1KnowledgePatch } from '@/views/KnowledgeBase/typesV1';
+import type { CreateKnowledgeBaseModalRef } from '@/views/KnowledgeBase/components/CreateKnowledgeBaseModal';
 
 export const usePrivateKnowledgeBaseActions = (
-  knowledgeBase: KnowledgeBaseListItem | null,
-  refreshKnowledgeBase: () => Promise<KnowledgeBaseListItem | null>,
+  knowledgeBase: V1KnowledgeListItem | null,
+  refreshKnowledgeBase: () => Promise<V1KnowledgeListItem | null>,
 ) => {
   const { t } = useTranslation();
   const { message } = App.useApp();
-  const createModalRef = useRef<CreateModalRef>(null);
+  const createKbModalRef = useRef<CreateKnowledgeBaseModalRef>(null);
   const shareModalRef = useRef<ShareModalRef>(null);
   const recallTestDrawerRef = useRef<RecallTestDrawerRef>(null);
   const metadataDrawerRef = useRef<MetadataDrawerRef>(null);
 
   const changeKnowledgeBaseStatus = async (checked: boolean) => {
     if (!knowledgeBase) return;
-    const updateData: KnowledgeBaseFormData = {
-      name: knowledgeBase.name,
-      description: knowledgeBase.description,
-      embedding_id: knowledgeBase.embedding_id,
-      llm_id: knowledgeBase.llm_id,
-      image2text_id: knowledgeBase.image2text_id,
-      reranker_id: knowledgeBase.reranker_id,
-      audio2text_id: knowledgeBase.audio2text_id,
-      video2text_id: knowledgeBase.video2text_id,
-      permission_id: knowledgeBase.permission_id,
-      type: knowledgeBase.type,
+    const updateData: V1KnowledgePatch = {
       status: checked ? 1 : 0,
-      parser_config: knowledgeBase.parser_config || DEFAULT_PARSER_CONFIG,
     };
-    await updateKnowledgeBase(knowledgeBase.id, updateData);
+    await patchKnowledgeBaseV1(knowledgeBase.id, updateData);
     await refreshKnowledgeBase();
   };
 
   return {
-    createModalRef,
+    createKbModalRef,
     shareModalRef,
     recallTestDrawerRef,
     metadataDrawerRef,
@@ -80,8 +54,14 @@ export const usePrivateKnowledgeBaseActions = (
     openMetadata: () => {
       if (knowledgeBase) metadataDrawerRef.current?.handleOpen(knowledgeBase.id);
     },
-    openKnowledgeBaseSettings: (step?: number, type?: string) => {
-      if (knowledgeBase) createModalRef.current?.handleOpen(knowledgeBase, type, step);
+    openKnowledgeBaseSettings: (type?: string) => {
+      if (!knowledgeBase) return;
+      // v1 edit: fetch the detail first to prefill; rebuild graph switches to the "Advanced Settings" section.
+      getKnowledgeBaseDetailV1(knowledgeBase.id)
+        .then((detail) => {
+          createKbModalRef.current?.handleOpen(detail, type === 'rebuild' ? 'advanced' : undefined, undefined, type === 'rebuild');
+        })
+        .catch(() => undefined);
     },
     batchDownloadKnowledgeBase: () => {
       if (!knowledgeBase) return;

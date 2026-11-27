@@ -2,9 +2,10 @@ import { useTranslation } from 'react-i18next';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
 
-import { getKnowledgeBaseDetail } from '@/api/knowledgeBase';
+import { getKnowledgeBaseDetailV1 } from '@/api/knowledgeBaseV1';
 import { useBreadcrumbManager, type BreadcrumbItem } from '@/hooks/useBreadcrumbManager';
-import type { FolderFormData, KnowledgeBaseListItem } from '@/views/KnowledgeBase/types';
+import type { FolderFormData } from '@/views/KnowledgeBase/types';
+import type { V1KnowledgeListItem } from '@/views/KnowledgeBase/typesV1'
 
 import type { PrivateFileWorkspaceRef } from '../PrivateFiles/PrivateFileWorkspace';
 
@@ -32,7 +33,7 @@ export const usePrivateKnowledgeBasePage = () => {
   const { updateBreadcrumbs } = useBreadcrumbManager({ breadcrumbType: 'detail' });
   const fileWorkspaceRef = useRef<PrivateFileWorkspaceRef>(null);
   const [loading, setLoading] = useState(Boolean(knowledgeBaseId));
-  const [knowledgeBase, setKnowledgeBase] = useState<KnowledgeBaseListItem | null>(null);
+  const [knowledgeBase, setKnowledgeBase] = useState<V1KnowledgeListItem | null>(null);
   const [parentId, setParentId] = useState<string>(knowledgeBaseId);
   const [folder, setFolder] = useState<FolderFormData>({
     kb_id: knowledgeBaseId,
@@ -53,10 +54,9 @@ export const usePrivateKnowledgeBasePage = () => {
     if (!id) return null;
     setLoading(true);
     try {
-      const response = await getKnowledgeBaseDetail(id);
-      const listItem = response as unknown as KnowledgeBaseListItem;
-      setKnowledgeBase(listItem);
-      return listItem;
+      const detail = await getKnowledgeBaseDetailV1(id);
+      setKnowledgeBase(detail);
+      return detail;
     } finally {
       setLoading(false);
     }

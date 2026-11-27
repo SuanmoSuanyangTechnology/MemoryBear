@@ -10,11 +10,11 @@ import clsx from 'clsx';
 import { getKnowledgeWikiPagesUrl } from '@/api/kbWiki';
 import PageScrollList from '@/components/PageScrollList';
 import RbDrawer from '@/components/RbDrawer';
-import type { KnowledgeBaseDocumentData } from '@/views/KnowledgeBase/types';
 import type { PageType, WikiPageItem } from '../Wiki/types';
+import type { V1DocumentsItem } from '@/views/KnowledgeBase/typesDocumentV1';
 
 export interface RelatedWikiDrawerRef {
-  handleOpen: (document: KnowledgeBaseDocumentData) => void;
+  handleOpen: (document: V1DocumentsItem) => void;
 }
 
 interface RelatedWikiDrawerProps {
@@ -33,7 +33,7 @@ const RelatedWikiDrawer = forwardRef<RelatedWikiDrawerRef, RelatedWikiDrawerProp
 }, ref) => {
   const { t } = useTranslation();
   const [visible, setVisible] = useState(false);
-  const [document, setDocument] = useState<KnowledgeBaseDocumentData | null>(null);
+  const [document, setDocument] = useState<V1DocumentsItem | null>(null);
   const [total, setTotal] = useState<number | null>(0);
 
   useImperativeHandle(ref, () => ({

@@ -33,6 +33,7 @@ export const faq = {
   'question&answer': '问题和答案',
   question: '问题',
   answer: '答案',
+  noWikiSource: '无 Wiki 来源',
   updatedAt: '更新时间',
   actions: '操作',
   search: '搜索问题或答案',

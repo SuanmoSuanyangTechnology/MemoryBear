@@ -41,3 +41,33 @@ export const getFileIconClassByExtension = (fileExt?: string, fileName?: string)
     .pop() ?? '';
   return FILE_ICON_CLASSES[EXTENSION_ICON_TYPES[extension] ?? 'text'];
 };
+
+/**
+ * Resolve the icon type from MIME, following the `includes` matching rules of
+ * `getFileIconType` in components/Chat/utils so long vendor MIME values are recognized.
+ */
+const getFileIconTypeByMime = (mimeType?: string): keyof typeof FILE_ICON_CLASSES | undefined => {
+  const type = (mimeType || '').toLowerCase();
+
+  if (type.includes('audio')) return 'audio';
+  if (type.includes('video')) return 'video';
+  if (type.includes('image')) return 'image';
+  if (type.includes('pdf')) return 'pdf';
+  if (type.includes('excel') || type.includes('spreadsheetml.sheet') || type.includes('xls')) return 'excel';
+  if (type.includes('csv')) return 'csv';
+  if (type.includes('html')) return 'html';
+  if (type.includes('json')) return 'json';
+  if (type.includes('ppt')) return 'ppt';
+  if (type.includes('markdown')) return 'markdown';
+  if (type.includes('text') && !type.includes('document')) return 'text';
+  if (type.includes('doc') || type.includes('word') || type.includes('wordprocessingml.document')) return 'word';
+
+  return undefined;
+};
+
+/** Resolve the icon class from a File's MIME type, with extension fallback; unknown types use the txt icon */
+export const getFileIconClassByMimeType = (mimeType?: string, fileName?: string): string => {
+  const extension = (fileName?.split('.').pop() || '').toLowerCase();
+  const iconType = getFileIconTypeByMime(mimeType) ?? EXTENSION_ICON_TYPES[extension] ?? 'text';
+  return FILE_ICON_CLASSES[iconType];
+};

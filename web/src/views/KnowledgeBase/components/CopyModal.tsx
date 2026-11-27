@@ -4,13 +4,13 @@ import { useTranslation } from 'react-i18next';
 
 import RbModal from '@/components/RbModal'
 import { copyKnowledgeBase } from '@/api/knowledgeBase.ts'
-import type { KnowledgeBase } from '../types'
+import type { V1KnowledgeListItem } from '../typesV1'
 
 const FormItem = Form.Item;
 
 export interface CopyModalRef {
   /** Open copy modal */
-  handleOpen: (data: KnowledgeBase) => void;
+  handleOpen: (data: V1KnowledgeListItem) => void;
 }
 interface CopyModalProps {
   refresh: () => void;
@@ -22,7 +22,7 @@ const CopyModal = forwardRef<CopyModalRef, CopyModalProps>(({ refresh }, ref) =>
   const [visible, setVisible] = useState(false);
   const [form] = Form.useForm<{ name?: string; }>();
   const [loading, setLoading] = useState(false)
-  const [data, setData] = useState<KnowledgeBase | null>(null)
+  const [data, setData] = useState<V1KnowledgeListItem | null>(null)
 
   useEffect(() => {
     form.resetFields();
@@ -37,7 +37,7 @@ const CopyModal = forwardRef<CopyModalRef, CopyModalProps>(({ refresh }, ref) =>
   };
 
   /** Open modal */
-  const handleOpen = (data: KnowledgeBase) => {
+  const handleOpen = (data: V1KnowledgeListItem) => {
     setVisible(true);
     setData(data)
   };
@@ -80,7 +80,7 @@ const CopyModal = forwardRef<CopyModalRef, CopyModalProps>(({ refresh }, ref) =>
         form={form}
         layout="vertical"
       >
-        {/* KnowledgeBase name */}
+        {/* V1KnowledgeListItem name */}
         <FormItem
           name="name"
           label={t('knowledgeBase.knowledgeBaseName')}

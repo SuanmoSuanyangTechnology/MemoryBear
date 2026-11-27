@@ -184,7 +184,7 @@ export default function FaqWorkspace({ knowledgeBaseId, onOpenWikiPage }: {
               {value}
             </span>
             {row.origin === "manual" &&
-              <Tag color="default" className="rb:cursor-default">无 Wiki 来源</Tag>
+              <Tag color="default" className="rb:cursor-default">{t('knowledgeBase.faq.noWikiSource')}</Tag>
             }
             {row.source?.title && row.source.wiki_page_id && row.source.source_status === 'available' && (
               <Tag color="default" className="rb:hover:text-blue-500 rb:hover:border-[rgba(21,94,239,0.25)] rb:hover:bg-[rgba(21,94,239,0.06)]"

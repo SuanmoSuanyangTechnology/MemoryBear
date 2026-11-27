@@ -10,10 +10,10 @@ import {
   type SetStateAction,
 } from 'react';
 import { MoreOutlined } from '@ant-design/icons';
-import { App, Button, Dropdown, Flex, Space, Tooltip } from 'antd';
-import type { MenuProps } from 'antd';
-import type { AnyObject } from 'antd/es/_util/type';
+import { App, Button, Dropdown, Flex, Space, Tooltip, Upload } from 'antd';
+import type { MenuProps, UploadProps } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
+import type { UploadRef } from 'antd/es/upload/Upload';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
 import clsx from 'clsx';
@@ -22,8 +22,8 @@ import {
   createSync,
   deleteDocument,
   downloadFile,
-  getDocumentListUrl,
 } from '@/api/knowledgeBase';
+import { getDocumentListV1Url, rechunkDocumentV1 } from '@/api/knowledgeBaseDocument';
 import SearchInput from '@/components/SearchInput';
 import StatusTag from '@/components/StatusTag';
 import Table, { type TableRef } from '@/components/Table';
@@ -31,20 +31,17 @@ import { formatDateTime, formatFileSize } from '@/utils/format';
 import { getFileIconClassByExtension } from '@/utils/fileIcon';
 import type { BreadcrumbItem } from '@/hooks/useBreadcrumbManager';
 import type {
-  CreateDatasetModalRef,
   CreateFolderModalRef,
-  CreateSetModalRef,
   FolderFormData,
-  KnowledgeBaseDocumentData,
-  KnowledgeBaseListItem,
 } from '@/views/KnowledgeBase/types';
+import type { V1KnowledgeListItem } from '@/views/KnowledgeBase/typesV1'
 import DirectoryToggle from '../DirectoryToggle';
-import PrivateKnowledgeBaseDialogs from '../PrivateKnowledgeBaseDialogs';
 import RelatedWikiDrawer, { type RelatedWikiDrawerRef } from './RelatedWikiDrawer';
+import UploadFileModalV1, { type UploadFileModalV1Ref } from '../../UploadFileModalV1';
+import type { V1DocumentListQuery, V1DocumentsItem } from '../../../typesDocumentV1'
 
 export interface PrivateFileWorkspaceRef {
   refreshTable: () => void;
-  openKnowledgeBaseEditor: () => void;
   openCreateFolder: (parentId: string, parentName?: string, parentPath?: string[]) => void;
 }
 
@@ -58,7 +55,7 @@ const stripFileNameExtension = (fileName: string, fileExt?: string): string => {
 };
 
 interface PrivateFileWorkspaceProps {
-  knowledgeBase: KnowledgeBaseListItem;
+  knowledgeBase: V1KnowledgeListItem;
   knowledgeBaseId: string;
   parentId: string;
   folder: FolderFormData;
@@ -68,7 +65,7 @@ interface PrivateFileWorkspaceProps {
   setQuery: Dispatch<SetStateAction<Record<string, unknown>>>;
   directoryCollapsed: boolean;
   onToggleDirectory: () => void;
-  onRefreshKnowledgeBase: () => Promise<KnowledgeBaseListItem | null>;
+  onRefreshKnowledgeBase: () => Promise<V1KnowledgeListItem | null>;
   onRefreshDirectory: () => Promise<void>;
   onOpenWikiPage: (pageId: string) => void;
 }
@@ -85,7 +82,6 @@ const PrivateFileWorkspace = forwardRef<PrivateFileWorkspaceRef, PrivateFileWork
   directoryCollapsed,
   onToggleDirectory,
   onRefreshKnowledgeBase,
-  onRefreshDirectory,
   onOpenWikiPage,
 }, ref) => {
   const { t } = useTranslation();
@@ -94,14 +90,15 @@ const PrivateFileWorkspace = forwardRef<PrivateFileWorkspaceRef, PrivateFileWork
   const tableRef = useRef<TableRef>(null);
   const relatedWikiDrawerRef = useRef<RelatedWikiDrawerRef>(null);
   const createFolderModalRef = useRef<CreateFolderModalRef>(null);
-  const createImageDatasetRef = useRef<CreateSetModalRef>(null);
-  const createContentModalRef = useRef<CreateSetModalRef>(null);
-  const datasetModalRef = useRef<CreateDatasetModalRef>(null);
+  const uploadFileModalRef = useRef<UploadFileModalV1Ref>(null);
+  const uploadRef = useRef<UploadRef>(null);
+  const uploadContextRef = useRef({ knowledgeBaseId: '', parentId: '' });
+  const uploadModeRef = useRef<'open' | 'append'>('open');
   const syncIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const syncTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const syncStartTimeRef = useRef<number | null>(null);
   const [isSyncing, setIsSyncing] = useState(false);
-  const apiUrl = getDocumentListUrl(knowledgeBaseId);
+  const apiUrl = getDocumentListV1Url(knowledgeBaseId);
   const tableQuery = useMemo(() => ({ ...query, include_wiki_count: true }), [query]);
 
   const refreshTable = useCallback(() => tableRef.current?.loadData(), []);
@@ -155,16 +152,8 @@ const PrivateFileWorkspace = forwardRef<PrivateFileWorkspaceRef, PrivateFileWork
     }
   };
 
-  const openKnowledgeBaseEditor = () => createFolderModalRef.current?.handleOpen({
-    id: knowledgeBase.id,
-    parent_id: knowledgeBase.parent_id,
-    kb_id: knowledgeBase.id,
-    folder_name: knowledgeBase.name,
-  }, 'edit');
-
   useImperativeHandle(ref, () => ({
     refreshTable,
-    openKnowledgeBaseEditor,
     openCreateFolder: (targetParentId, parentName, parentPath) => createFolderModalRef.current?.handleOpen({
       kb_id: knowledgeBase.id,
       parent_id: targetParentId,
@@ -172,22 +161,44 @@ const PrivateFileWorkspace = forwardRef<PrivateFileWorkspaceRef, PrivateFileWork
     }, undefined, parentPath),
   }));
 
-  const handleRechunking = (item: KnowledgeBaseListItem) => {
-    const document = item as unknown as KnowledgeBaseDocumentData;
-    navigate(`/knowledge-base/${knowledgeBaseId}/create-dataset`, {
-      state: {
-        source: 'local',
-        knowledgeBaseId,
-        parentId: parentId || knowledgeBaseId,
-        documentFolderPath: folderPath,
-        knowledgeBaseFolderPath,
-        startStep: 'parameterSettings',
-        fileId: document.id || document.file_id,
-      },
-    });
+  // File selection is handled by antd Upload: beforeUpload intercepts the upload and passes the whole batch to the modal.
+  const handleBeforeUpload: NonNullable<UploadProps['beforeUpload']> = (file, fileList) => {
+    // When multiple is selected, beforeUpload is called once per file; process the batch only on the first file.
+    if (file !== fileList[0]) return false;
+
+    const selected: File[] = fileList.map((item) => item as File);
+    if (selected.length === 0) return false;
+
+    if (uploadModeRef.current === 'open') {
+      const { knowledgeBaseId: kbId, parentId } = uploadContextRef.current;
+      uploadFileModalRef.current?.handleOpen(selected, kbId, parentId, knowledgeBase.name);
+    } else {
+      uploadFileModalRef.current?.handleAddFiles(selected);
+    }
+    return false;
   };
 
-  const handleDelete = (item: KnowledgeBaseDocumentData) => {
+  const openFilePicker = (mode: 'open' | 'append', parentId?: string) => {
+    uploadModeRef.current = mode;
+    uploadContextRef.current = { knowledgeBaseId: knowledgeBase.id, parentId: parentId ?? knowledgeBase.id };
+    uploadRef.current?.nativeElement?.querySelector('input')?.click();
+  };
+
+  const handleRechunking = (item: V1DocumentsItem) => {
+    modal.confirm({
+      title: t('knowledgeBase.reparseTitle'),
+      content: t('knowledgeBase.reparseConfirmContent', { name: item.file_name }),
+      onOk: () => {
+        rechunkDocumentV1(item.id)
+          .then(() => {
+            messageApi.success(t('common.operateSuccess'));
+            refreshTable();
+          })
+      },
+    })
+  };
+
+  const handleDelete = (item: V1DocumentsItem) => {
     if (!item?.id) return
     modal.confirm({
       title: t('common.deleteWarning'),
@@ -200,61 +211,93 @@ const PrivateFileWorkspace = forwardRef<PrivateFileWorkspaceRef, PrivateFileWork
     });
   };
 
-  const getOptMenuItems = (row: KnowledgeBaseListItem): MenuProps['items'] => {
-    const document = row as unknown as KnowledgeBaseDocumentData;
+  const getOptMenuItems = (row: V1DocumentsItem): MenuProps['items'] => {
     const options: MenuProps['items'] = [
       {
         key: 'download',
         label: t('knowledgeBase.download'),
-        onClick: () => void downloadFile(document.file_id ?? '', document.file_name ?? ''),
+        onClick: () => void downloadFile(row.file_id ?? '', row.file_name ?? ''),
       },
       {
         key: 'delete',
         label: t('knowledgeBase.delete'),
-        onClick: () => handleDelete(document),
+        onClick: () => handleDelete(row),
       },
     ];
-    if (row.parser_config?.doc_type === 'qa') return options;
+    if (row.processing_configuration?.parsing.document_kind === 'qa') return options;
     return [{
       key: 'rechunking',
-      label: t('knowledgeBase.rechunking'),
+      label: t('knowledgeBase.reparseTitle'),
       onClick: () => handleRechunking(row),
     }, ...options];
   };
 
-  const columns: ColumnsType = [
+  const columns: ColumnsType<V1DocumentsItem> = [
     {
       title: t('knowledgeBase.name'),
       dataIndex: 'file_name',
       key: 'file_name',
-      render: (text: string, record: AnyObject) => {
-        const document = record as KnowledgeBaseDocumentData;
+      render: (text, record) => {
         return (
           <Flex align="center" gap={8} className="rb:min-w-0">
             <div
               className={clsx(
                 'rb:size-5 rb:shrink-0 rb:bg-cover',
-                getFileIconClassByExtension(document.file_ext, document.file_name),
+                getFileIconClassByExtension(record.file_ext, record.file_name),
               )}
             />
             <span
               className="rb:min-w-0 rb:cursor-pointer rb:truncate rb:font-medium rb:text-gray-900 rb:hover:underline"
-              onClick={() => document.id && navigate(`/knowledge-base/${knowledgeBaseId}/DocumentDetails`, {
+              onClick={() => record.id && navigate(`/knowledge-base/${knowledgeBaseId}/DocumentDetails`, {
                 state: {
-                  documentId: document.id,
+                  documentId: record.id,
                   parentId: parentId || knowledgeBaseId,
                   breadcrumbPath: {
                     knowledgeBaseFolderPath,
                     knowledgeBase: { id: knowledgeBase.id, name: knowledgeBase.name, type: 'knowledgeBase' },
                     documentFolderPath: folderPath,
-                    document: { id: document.id, name: document.file_name || '', type: 'document' },
+                    document: { id: record.id, name: record.file_name || '', type: 'record' },
                   },
                 },
               })}
             >
-              {stripFileNameExtension(document.file_name || text, document.file_ext)}
+              {stripFileNameExtension(record.file_name || text, record.file_ext)}
             </span>
           </Flex>
+        );
+      },
+    },
+    { title: t('knowledgeBase.dataSize'), dataIndex: 'file_size', key: 'file_size', render: (file_size) => formatFileSize(file_size) },
+    {
+      title: t('knowledgeBase.uploadTime'),
+      dataIndex: 'created_at',
+      key: 'created_at',
+      render: (value) => <span>{formatDateTime(value)}</span>,
+    },
+    {
+      title: t('knowledgeBase.wikiColumn'),
+      key: 'wiki',
+      width: 120,
+      render: (_, record) => {
+        // Match the prototype: only "Organized · N" is a clickable link; other states are plain gray text
+        const count = record.wiki_count ?? 0;
+        if (count > 0) {
+          return (
+            <button
+              type="button"
+              onClick={() => relatedWikiDrawerRef.current?.handleOpen(record)}
+              className="rb:p-0! rb:border-0 rb:bg-transparent rb:cursor-pointer rb:text-primary-600 rb:whitespace-nowrap rb:hover:underline"
+            >
+              {t('knowledgeBase.documentWiki.ready', { count })}
+            </button>
+          );
+        }
+        const processing = typeof record.progress === 'number'
+          && record.progress > 0 && record.progress < 1;
+        return (
+          <span className="rb:text-gray-600">
+            {processing ? t('knowledgeBase.documentWiki.processing') : t('knowledgeBase.documentWiki.pending')}
+          </span>
         );
       },
     },
@@ -262,8 +305,8 @@ const PrivateFileWorkspace = forwardRef<PrivateFileWorkspaceRef, PrivateFileWork
       title: t('knowledgeBase.status'),
       dataIndex: 'progress',
       key: 'progress',
-      width: 160,
-      render: (value: string | number, record: KnowledgeBaseDocumentData) => (
+      width: 120,
+      render: (value, record) => (
         <StatusTag
           status={record.run === 0 && typeof value === 'number' && value < 0
             ? 'error' : value === 1 ? 'success' : value === 0 ? 'warning' : 'default'}
@@ -274,39 +317,11 @@ const PrivateFileWorkspace = forwardRef<PrivateFileWorkspaceRef, PrivateFileWork
       ),
     },
     {
-      title: t('knowledgeBase.wikiColumn'),
-      key: 'wiki',
-      width: 150,
-      render: (_, record: AnyObject) => {
-        const document = record as KnowledgeBaseDocumentData;
-        // Match the prototype: only "Organized · N" is a clickable link; other states are plain gray text
-        const count = document.wiki_count ?? 0;
-        if (count > 0) {
-          return (
-            <button
-              type="button"
-              onClick={() => relatedWikiDrawerRef.current?.handleOpen(document)}
-              className="rb:p-0! rb:border-0 rb:bg-transparent rb:cursor-pointer rb:text-primary-600 rb:whitespace-nowrap rb:hover:underline"
-            >
-              {t('knowledgeBase.documentWiki.ready', { count })}
-            </button>
-          );
-        }
-        const processing = typeof document.progress === 'number'
-          && document.progress > 0 && document.progress < 1;
-        return (
-          <span className="rb:text-gray-600">
-            {processing ? t('knowledgeBase.documentWiki.processing') : t('knowledgeBase.documentWiki.pending')}
-          </span>
-        );
-      },
-    },
-    {
       title: t('knowledgeBase.processMsg'),
       dataIndex: 'progress_msg',
       key: 'progress_msg',
       width: 320,
-      render: (value: string) => {
+      render: (value) => {
         if (!value) return '-';
         const formattedText = value.replace(/\\n/g, '\n');
         return (
@@ -322,13 +337,6 @@ const PrivateFileWorkspace = forwardRef<PrivateFileWorkspaceRef, PrivateFileWork
       },
     },
     { title: t('knowledgeBase.processingMode'), dataIndex: 'parser_id', key: 'parser_id', width: 100 },
-    { title: t('knowledgeBase.dataSize'), dataIndex: 'file_size', key: 'file_size', render: (file_size) => formatFileSize(file_size) },
-    {
-      title: t('knowledgeBase.createUpdateTime'),
-      dataIndex: 'created_at',
-      key: 'created_at',
-      render: (value: string) => <span>{formatDateTime(value, 'YYYY-MM-DD HH:mm:ss')}</span>,
-    },
     { title: 'ID', dataIndex: 'id', key: 'id' },
     {
       title: t('common.operation'),
@@ -337,7 +345,7 @@ const PrivateFileWorkspace = forwardRef<PrivateFileWorkspaceRef, PrivateFileWork
       width: 100,
       render: (_, record) => (
         <Space size="middle">
-          <Dropdown menu={{ items: getOptMenuItems(record as KnowledgeBaseListItem) }} trigger={['click']}>
+          <Dropdown menu={{ items: getOptMenuItems(record) }} trigger={['click']}>
             <MoreOutlined className="rb:text-base rb:font-semibold" />
           </Dropdown>
         </Space>
@@ -347,29 +355,24 @@ const PrivateFileWorkspace = forwardRef<PrivateFileWorkspaceRef, PrivateFileWork
 
   const createItems: MenuProps['items'] = [
     {
+      key: 'uploadFile',
+      icon: <div className="rb:size-4 rb:bg-cover rb:bg-[url('@/assets/images/knowledgeBase/image.png')]" />,
+      label: t('common.uploadFile'),
+      onClick: () => openFilePicker('open', folder.parent_id ?? knowledgeBase.id),
+    },
+    {
       key: 'folder',
-      icon: <div className="rb:size-4 rb:bg-cover rb:bg-[url('@/assets/images/knowledgeBase/folder.png')]" />,
-      label: t('knowledgeBase.folder'),
+      icon: <div className="rb:size-4 rb:bg-cover rb:bg-[url('@/assets/images/knowledgeBase/folder.svg')]" />,
+      label: <span>{t('knowledgeBase.createA')}{t('knowledgeBase.folder')}</span>,
       onClick: () => createFolderModalRef.current?.handleOpen({
         kb_id: knowledgeBase.id,
         parent_id: folder.parent_id ?? knowledgeBase.id,
         parent_name: folderPath.find((item) => item.id === folder.parent_id)?.name,
       }, undefined, folderPath.map((item) => item.name)),
     },
-    {
-      key: 'dataset',
-      icon: <div className="rb:size-4 rb:bg-cover rb:bg-[url('@/assets/images/knowledgeBase/text.png')]" />,
-      label: <span>{t('knowledgeBase.createA')} {t('knowledgeBase.dataset')}</span>,
-      onClick: () => datasetModalRef.current?.handleOpen(
-        knowledgeBase.id,
-        folder.parent_id ?? knowledgeBase.id,
-        folderPath,
-        knowledgeBaseFolderPath,
-      ),
-    },
   ];
 
-  const isSyncKnowledgeBase = knowledgeBase.type === 'Web' || knowledgeBase.type === 'Third-party';
+  const isSyncKnowledgeBase = typeof knowledgeBase?.processing_configuration?.sources?.website === 'object' || typeof knowledgeBase?.processing_configuration?.sources?.third_party === 'object';
 
   return (
     <>
@@ -392,18 +395,29 @@ const PrivateFileWorkspace = forwardRef<PrivateFileWorkspaceRef, PrivateFileWork
                 {isSyncing ? t('knowledgeBase.syncing') : t('knowledgeBase.syncNow')}
               </Button>
             ) : (
-              <Dropdown menu={{ items: createItems }} trigger={['click']}>
-                <Button type="primary">+ {t('knowledgeBase.createImport')}</Button>
-              </Dropdown>
+              <>
+                <Dropdown menu={{ items: createItems }} trigger={['click']}>
+                  <Button type="primary">+ {t('knowledgeBase.createImport')}</Button>
+                </Dropdown>
+                <Upload
+                  ref={uploadRef}
+                  multiple
+                  showUploadList={false}
+                  beforeUpload={handleBeforeUpload}
+                  className="rb:hidden"
+                >
+                  <span />
+                </Upload>
+              </>
             )}
           </Flex>
         </Flex>
 
         <div className="rb:flex-1 rb:overflow-hidden">
-          <Table
+          <Table<V1DocumentsItem, V1DocumentListQuery>
             ref={tableRef}
             apiUrl={apiUrl}
-            apiParams={tableQuery}
+            apiParams={tableQuery as V1DocumentListQuery}
             columns={columns}
             rowKey="id"
             scrollX={1500}
@@ -411,19 +425,15 @@ const PrivateFileWorkspace = forwardRef<PrivateFileWorkspaceRef, PrivateFileWork
           />
         </div>
       </Flex>
-
-      <PrivateKnowledgeBaseDialogs
-        createContentModalRef={createContentModalRef}
-        createFolderModalRef={createFolderModalRef}
-        createImageDatasetRef={createImageDatasetRef}
-        datasetModalRef={datasetModalRef}
-        onRefreshDirectory={onRefreshDirectory}
-        onRefreshTable={handleRefreshTable}
-      />
       <RelatedWikiDrawer
         ref={relatedWikiDrawerRef}
         knowledgeBaseId={knowledgeBaseId}
         onOpenWikiPage={onOpenWikiPage}
+      />
+      <UploadFileModalV1
+        ref={uploadFileModalRef}
+        refresh={handleRefreshTable}
+        onRequestFiles={() => openFilePicker('append')}
       />
     </>
   );

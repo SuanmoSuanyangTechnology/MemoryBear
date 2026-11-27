@@ -1,13 +1,14 @@
 import { useEffect, useState } from 'react';
 import type { FormInstance } from 'antd';
 import { getCustomWorkspaceModels, getWorkspaceModels } from '@/api/workspaces';
-import type { KnowledgeBaseFormData, KnowledgeBaseListItem } from '@/views/KnowledgeBase/types';
+import type { KnowledgeBaseFormData } from '@/views/KnowledgeBase/types';
 import type { Model } from '@/views/ModelManagement/types';
+import type { V1KnowledgeListItem } from '@/views/KnowledgeBase/typesV1'
 import { baseModelFields, multimodalModelFields } from '../../constants'
 
 interface UseCreateModalModelsOptions {
   form: FormInstance<KnowledgeBaseFormData>;
-  datasets: KnowledgeBaseListItem | null;
+  datasets: V1KnowledgeListItem | null;
   visible: boolean;
 }
 

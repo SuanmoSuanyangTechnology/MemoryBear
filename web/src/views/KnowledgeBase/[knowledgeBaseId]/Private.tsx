@@ -7,7 +7,7 @@ import { usePrivateKnowledgeBaseActions } from '../components/Private/hooks/useP
 import MetadataDrawer from '../components/MetadataDrawer';
 import RecallTestDrawer from '../components/RecallTestDrawer';
 import ShareModal from '../components/ShareModal';
-import CreateModal from '../components/CreateModal';
+import CreateKnowledgeBaseModal from '../components/CreateKnowledgeBaseModal';
 import NoData from '@/assets/images/knowledgeBase/noData.png';
 import FolderTree from '../components/Private/PrivateFiles/FolderTree';
 import PrivateKnowledgeBaseWorkspace from '../components/Private/PrivateKnowledgeBaseWorkspace';
@@ -79,7 +79,6 @@ const Private: FC = () => {
         onOpenRecallTest={actions.openRecallTest}
         onOpenMetadata={actions.openMetadata}
         onOpenKnowledgeBaseSettings={actions.openKnowledgeBaseSettings}
-        onEditKnowledgeBase={() => fileWorkspaceRef.current?.openKnowledgeBaseEditor()}
         onBatchDownloadKnowledgeBase={actions.batchDownloadKnowledgeBase}
         onExportKnowledgeBaseQa={actions.exportKnowledgeBaseQa}
         onRefreshFiles={() => {
@@ -129,9 +128,9 @@ const Private: FC = () => {
       />
       <MetadataDrawer ref={actions.metadataDrawerRef} />
       <RecallTestDrawer ref={actions.recallTestDrawerRef} />
-      <ShareModal ref={actions.shareModalRef} handleShare={() => undefined} />
-      <CreateModal
-        ref={actions.createModalRef}
+      <ShareModal ref={actions.shareModalRef} />
+      <CreateKnowledgeBaseModal
+        ref={actions.createKbModalRef}
         refreshTable={() => {
           void fetchKnowledgeBaseDetail();
         }}
