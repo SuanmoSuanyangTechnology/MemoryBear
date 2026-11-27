@@ -1,58 +1,74 @@
 """Delegating facade for the workspace memory-config resolver.
 
-The active memory configuration id is owned by the monolith memory module;
-during the coexistence period this service reads it through the internal
-``memory/workspace-config`` endpoint with an explicit workspace header. An
-unconfigured channel fails closed, and upstream rejections (for example a
-workspace without an enabled memory config) surface with the upstream error
-message and code.
+The active memory configuration id belongs to memory-profile; during the
+coexistence period this service reads it through the internal
+``memory_config/workspace_active_config`` route with the end user acting as
+the internal principal. An unconfigured channel fails closed, and upstream
+rejections (for example a workspace without an enabled memory config) surface
+with the upstream error message and code.
 """
 
 import logging
 import uuid
 
 from ..errors import BizCode, BusinessException, as_biz_code
-from ..infrastructure.upstream import UpstreamUnavailableError, get_monolith_upstream
+from ..integrations.memory_profile import (
+    MemoryProfileProtocolError,
+    MemoryProfileUnavailableError,
+    get_memory_profile_client,
+)
+from ..memory.memory_service import resolve_internal_identity
+from ..trace import get_trace_id
 
 logger = logging.getLogger(__name__)
 
 _UNAVAILABLE_MESSAGE = (
-    "The active memory configuration is served by the memory API and is "
-    "not readable from this service yet"
+    "The active memory configuration is served by memory-profile and its "
+    "channel is not configured (MEMORY_PROFILE_BASE_URL)"
 )
-
-_WORKSPACE_CONFIG_PATH = "/api/internal/app-service/memory/workspace-config"
 
 
 class MemoryConfigService:
-    """Monolith-compatible facade backed by the internal memory endpoint."""
-
-    def __init__(self, db=None) -> None:
-        self.db = db
+    """Monolith-compatible facade backed by memory-profile's internal route."""
 
     async def get_workspace_active_config_id_async(
             self,
             workspace_id: uuid.UUID,
+            end_user_id: str,
     ) -> uuid.UUID:
-        upstream = get_monolith_upstream()
-        if upstream is None or not upstream.configured:
+        client = get_memory_profile_client()
+        if client is None or not client.configured:
             raise BusinessException(_UNAVAILABLE_MESSAGE, code=BizCode.SERVICE_UNAVAILABLE)
+        actor_id, tenant_id, workspace_uuid = await resolve_internal_identity(
+            end_user_id, str(workspace_id)
+        )
         try:
-            response = await upstream.forward_async(
-                "GET",
-                _WORKSPACE_CONFIG_PATH,
-                headers={"X-Workspace-Id": str(workspace_id)},
+            envelope = await client.fetch_workspace_active_config(
+                workspace_id=workspace_uuid,
+                tenant_id=tenant_id,
+                actor_id=actor_id,
+                trace_id=get_trace_id() or uuid.uuid4().hex,
             )
-        except UpstreamUnavailableError as exc:
+        except MemoryProfileUnavailableError as exc:
             raise BusinessException(
                 f"forward to memory API failed: {exc}",
                 code=BizCode.SERVICE_UNAVAILABLE,
             ) from exc
-        body = response.body if isinstance(response.body, dict) else {}
-        if response.status_code != 200 or body.get("code") != 0:
+        except MemoryProfileProtocolError as exc:
             raise BusinessException(
-                str(body.get("msg") or body.get("error") or "memory API rejected the request"),
-                code=as_biz_code(body.get("code")),
+                str(exc), code=BizCode.SERVICE_UNAVAILABLE
+            ) from exc
+        if envelope.get("code") != 0:
+            detail = envelope.get("msg") or envelope.get("error")
+            raise BusinessException(
+                str(detail or "memory API rejected the request"),
+                code=as_biz_code(envelope.get("code")),
             )
-        data = body.get("data") or {}
-        return uuid.UUID(str(data["config_id"]))
+        data = envelope.get("data") if isinstance(envelope.get("data"), dict) else {}
+        try:
+            return uuid.UUID(str(data["config_id"]))
+        except (KeyError, TypeError, ValueError) as exc:
+            raise BusinessException(
+                "memory API returned no active config id",
+                code=BizCode.SERVICE_UNAVAILABLE,
+            ) from exc

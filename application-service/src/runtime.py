@@ -8,6 +8,7 @@ from .config import AppServiceSettings
 from .db import DatabaseManager
 from .infrastructure import RedisManager
 from .infrastructure.upstream import MonolithUpstream
+from .integrations.memory_enterprise import MemoryEnterpriseClient
 from .integrations.memory_profile import MemoryProfileClient
 from .protocols.market_gateway import DisabledMarketGateway, MarketGateway
 from .services.readiness import ReadinessMonitor
@@ -23,10 +24,12 @@ class ProcessRuntime:
         self.readiness = ReadinessMonitor(settings)
         self.upstream = MonolithUpstream.from_settings(settings)
         self.memory_profile = MemoryProfileClient.from_settings(settings)
+        self.memory_enterprise = MemoryEnterpriseClient.from_settings(settings)
         self.market_gateway: MarketGateway = DisabledMarketGateway()
 
     def _close_sync_resources(self) -> None:
         self.memory_profile.close()
+        self.memory_enterprise.close()
         self.upstream.close()
         self.redis.close_sync()
         self.database.close_sync()
@@ -38,6 +41,7 @@ class ProcessRuntime:
             self.database.aclose_async,
             self.upstream.aclose,
             self.memory_profile.aclose,
+            self.memory_enterprise.aclose,
         ):
             try:
                 await close()

@@ -571,7 +571,9 @@ class AppService:
 
     def _load_ontology_map(
             self,
-            app_ids: list[uuid.UUID]
+            app_ids: list[uuid.UUID],
+            tenant_id: uuid.UUID | None = None,
+            workspace_id: uuid.UUID | None = None,
     ) -> dict[uuid.UUID, dict] | None:
         """Batch-load the effective ontology (ontology sub-object) per app.
 
@@ -596,10 +598,14 @@ class AppService:
                 # serialization queries fail.
                 with self.db.begin_nested():
                     return binder.load_app_ontology_batch(self.db, app_ids)
-            # Remote binder (memory-domain callback): never hold a transaction
-            # across the HTTP call. Callers serialize rows before reaching here.
+            # Remote binder (memory-enterprise): never hold a transaction across
+            # the HTTP call. Callers serialize rows before reaching here. The
+            # bindings are tenant-scoped, so the tenant resolves from the
+            # workspace before the transaction ends.
+            if tenant_id is None and workspace_id is not None:
+                tenant_id = cross_domain_read.get_workspace_tenant_id(self.db, workspace_id)
             self.db.rollback()
-            return binder.load_app_ontology_batch(self.db, app_ids)
+            return binder.load_app_ontology_batch(self.db, app_ids, tenant_id)
         except Exception as e:
             logger.error("应用本体聚合失败", extra={"error": str(e)}, exc_info=True)
             return None
@@ -712,7 +718,8 @@ class AppService:
     def to_schemas_with_ontology(
             self,
             apps: list[App],
-            current_workspace_id: uuid.UUID
+            current_workspace_id: uuid.UUID,
+            tenant_id: uuid.UUID | None = None,
     ) -> list[app_schema.App]:
         """Batch-convert apps to schemas and fill the effective ontology.
 
@@ -727,7 +734,9 @@ class AppService:
             self._convert_to_schema(a, current_workspace_id, None, context)
             for a in apps
         ]
-        ontology_map = self._load_ontology_map(app_ids)
+        ontology_map = self._load_ontology_map(
+            app_ids, tenant_id, current_workspace_id,
+        )
         if ontology_map is not None:
             # A remote binder ends the transaction, which expires the ORM rows;
             # read the pre-captured ids so the fill loop issues no refresh queries.
@@ -740,10 +749,13 @@ class AppService:
     def to_schema_with_ontology(
             self,
             app: App,
-            current_workspace_id: uuid.UUID
+            current_workspace_id: uuid.UUID,
+            tenant_id: uuid.UUID | None = None,
     ) -> app_schema.App:
         """Convert a single app to a schema and fill the effective ontology."""
-        return self.to_schemas_with_ontology([app], current_workspace_id)[0]
+        return self.to_schemas_with_ontology(
+            [app], current_workspace_id, tenant_id,
+        )[0]
 
     def _convert_to_schema(
             self,
@@ -1045,10 +1057,10 @@ class AppService:
             tenant_id: uuid.UUID | None,
             ontology_id: uuid.UUID,
     ) -> None:
-        """Bind after the local commit; soft-delete the app when the callback fails.
+        """Bind after the local commit; soft-delete the app when the call fails.
 
-        The monolith business code is passed through to the client (validation
-        codes like 4000/3001); transport failures surface as 10003.
+        The business code is passed through to the client (validation codes
+        like 4000/3001); transport failures surface as 10003.
         """
         try:
             binder.bind_app(app.id, tenant_id, ontology_id)
@@ -1125,13 +1137,15 @@ class AppService:
             self,
             *,
             app_id: uuid.UUID,
-            workspace_id: uuid.UUID | None = None
+            workspace_id: uuid.UUID | None = None,
+            tenant_id: uuid.UUID | None = None,
     ) -> None:
         """Delete an app.
 
         Args:
             app_id: App ID
             workspace_id: Workspace ID (for permission checks)
+            tenant_id: Acting tenant (for the tenant-scoped ontology unbind)
 
         Raises:
             ResourceNotFoundException: When the app does not exist
@@ -1203,18 +1217,20 @@ class AppService:
             .returning(ToolConfig.id)
         ).all())
 
-        # Bindings belong to the memory domain: only the remote callback binder
-        # can unbind them, after the local commit (no remote call inside a
+        # Bindings belong to the memory domain: only the remote binder can
+        # unbind them, after the local commit (no remote call inside a
         # transaction). The in-process binder lives in the monolith and runs its
         # own delete path, so this service never sees one.
         binder = get_plugin(ONTOLOGY_BINDING_PLUGIN)
         remote_unbind = binder is not None and not getattr(binder, "uses_local_db", True)
+        if remote_unbind and tenant_id is None:
+            tenant_id = cross_domain_read.get_workspace_tenant_id(self.db, app.workspace_id)
 
         self.db.commit()
 
         if remote_unbind:
             self._unbind_ontology_remote(
-                binder, app, share_ids, installation_ids, workflow_tool_ids
+                binder, app, tenant_id, share_ids, installation_ids, workflow_tool_ids
             )
 
         logger.info(
@@ -1230,6 +1246,7 @@ class AppService:
             self,
             binder: Any,
             app: App,
+            tenant_id: uuid.UUID | None,
             share_ids: list[uuid.UUID],
             installation_ids: list[uuid.UUID],
             workflow_tool_ids: list[uuid.UUID],
@@ -1243,7 +1260,7 @@ class AppService:
         the caller as a whole-delete failure it can retry.
         """
         try:
-            binder.unbind_app(app.id)
+            binder.unbind_app(app.id, tenant_id)
         except OntologyUpstreamError as exc:
             self._compensate_failed_delete(
                 app, share_ids, installation_ids, workflow_tool_ids
@@ -1836,6 +1853,7 @@ class AppService:
             ontology_status: str = "all",
             field_search: str | None = None,
             orchestration_mode: str | None = None,
+            tenant_id: uuid.UUID | None = None,
     ) -> tuple[list[App], int]:
         """List apps in a workspace (paginated).
 
@@ -1934,8 +1952,8 @@ class AppService:
                 )
             )
         # Ontology filter: the local binder supplies SQL predicates (premium
-        # tables); the remote binder filters candidate ids over the monolith
-        # callback channel after the scope query. Without a plugin the
+        # tables); the remote binder filters candidate ids through
+        # memory-enterprise after the scope query. Without a plugin the
         # ontology parameters have no effect (community behavior).
         field_search = field_search.strip() if field_search else None
         ontology_filter = (ontology_status and ontology_status != "all") or field_search
@@ -1991,16 +2009,19 @@ class AppService:
             scope = and_(scope, *filters)
 
         if ontology_filter:
-            # Candidate ids under the non-ontology scope; the monolith returns
-            # the subset matching the ontology filter. End the transaction
-            # before the HTTP call (no remote calls inside a transaction).
+            # Candidate ids under the non-ontology scope; memory-enterprise
+            # returns the subset matching the ontology filter. The match is
+            # tenant-scoped, so the tenant resolves from the workspace before
+            # the transaction ends (no remote calls inside a transaction).
             candidates = list(
                 self.db.scalars(select(App.id).where(scope)).all()
             )
+            if tenant_id is None:
+                tenant_id = cross_domain_read.get_workspace_tenant_id(self.db, workspace_id)
             self.db.rollback()
             try:
                 matched = ontology_binder.filter_app_ids(
-                    candidates, ontology_status, field_search
+                    candidates, ontology_status, field_search, tenant_id
                 )
             except Exception as e:
                 logger.error("本体筛选回调失败", extra={"error": str(e)}, exc_info=True)

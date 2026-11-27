@@ -4,12 +4,13 @@ The end-user memory-side effects execute inside memory-profile: it owns the
 memory write locks (``memory_write:<end_user_id>``, shared with the monolith),
 every derived memory artifact (graph reassignment, RAG migration, reflection
 dispatch), the alias graph sync, the assembled domain display projection and
-the long-term memory read pipeline. The end-user callbacks run on the
-management plane (sync); the read callback runs inside the agent runtime
-(async), so this client carries one sync and one async transport. Every failure
-is raised so the caller decides the posture (the merge and info-update paths
-fail closed, the projection read degrades to empty, the memory read fails the
-tool call visibly).
+the long-term memory read pipeline. The management-plane callbacks (merge,
+domain profile, info update) run sync; the runtime-plane callbacks (memory
+read, agent ingestion, the workspace active-config lookup) run async, so this
+client carries one sync and one async transport. Every failure is raised so
+the caller decides the posture (the merge and info-update paths fail closed,
+the projection read degrades to empty, the memory read fails the tool call
+visibly).
 """
 
 from __future__ import annotations
@@ -23,6 +24,8 @@ from ...config import AppServiceSettings
 
 MERGE_PATH = "/internal/v1/memory/merge"
 READ_APP_SERVICE_PATH = "/internal/v1/memory/read/app-service"
+INGEST_AGENT_PATH = "/internal/v1/memory/ingest-agent"
+WORKSPACE_ACTIVE_CONFIG_PATH = "/internal/v1/memory_config/workspace_active_config"
 DOMAIN_PROFILE_PATH = "/internal/v1/end-user/domain-profile"
 INFO_UPDATE_PATH = "/internal/v1/end-user/info-update"
 _SOURCE_INTERNAL = "in_api"
@@ -160,6 +163,60 @@ class MemoryProfileClient:
             ),
         )
 
+    async def ingest_agent(
+        self,
+        *,
+        payload: dict[str, Any],
+        workspace_id: UUID,
+        tenant_id: UUID,
+        actor_id: UUID,
+        trace_id: str,
+    ) -> dict[str, Any]:
+        """Run one agent turn's ingestion; returns the raw envelope.
+
+        ``payload`` is the host ingest body (``messages`` / ``conversation_id``
+        / ``app_id`` / ``config_id`` / ``end_user_id`` / storage and language
+        fields); memory-profile owns the write locks and the derived artifacts.
+        Business failures keep the legacy envelope (HTTP 200 + non-zero
+        ``code``); only transport and malformed responses raise here.
+        """
+
+        return await self._apost(
+            INGEST_AGENT_PATH,
+            payload,
+            self._internal_headers(
+                workspace_id=workspace_id,
+                tenant_id=tenant_id,
+                actor_id=actor_id,
+                trace_id=trace_id,
+            ),
+        )
+
+    async def fetch_workspace_active_config(
+        self,
+        *,
+        workspace_id: UUID,
+        tenant_id: UUID,
+        actor_id: UUID,
+        trace_id: str,
+    ) -> dict[str, Any]:
+        """Read the acting workspace's active config id; raw envelope.
+
+        A workspace without an enabled configuration answers with a non-zero
+        business code (the route replaces the host's failing lookup), so only
+        transport and malformed responses raise here.
+        """
+
+        return await self._aget(
+            WORKSPACE_ACTIVE_CONFIG_PATH,
+            self._internal_headers(
+                workspace_id=workspace_id,
+                tenant_id=tenant_id,
+                actor_id=actor_id,
+                trace_id=trace_id,
+            ),
+        )
+
     def fetch_domain_profile(
         self,
         *,
@@ -243,10 +300,24 @@ class MemoryProfileClient:
             ) from error
         return _parse_envelope(response)
 
+    async def _aget(self, path: str, headers: dict[str, str]) -> dict[str, Any]:
+        """Async twin of :meth:`_post` for query-less runtime-plane reads."""
+
+        if not self.configured:
+            raise MemoryProfileUnavailableError("memory profile service is not configured")
+
+        try:
+            response = await self._get_async_client().get(path, headers=headers)
+        except httpx.HTTPError as error:
+            raise MemoryProfileUnavailableError(
+                f"memory profile call failed: {error}"
+            ) from error
+        return _parse_envelope(response)
+
     async def _apost(
         self, path: str, payload: dict[str, Any], headers: dict[str, str]
     ) -> dict[str, Any]:
-        """Async twin of :meth:`_post` for the runtime-plane read callback."""
+        """Async twin of :meth:`_post` for the runtime-plane callbacks."""
 
         if not self.configured:
             raise MemoryProfileUnavailableError("memory profile service is not configured")
@@ -306,8 +377,10 @@ def get_memory_profile_client() -> MemoryProfileClient | None:
 __all__ = [
     "DOMAIN_PROFILE_PATH",
     "INFO_UPDATE_PATH",
+    "INGEST_AGENT_PATH",
     "MERGE_PATH",
     "READ_APP_SERVICE_PATH",
+    "WORKSPACE_ACTIVE_CONFIG_PATH",
     "MemoryProfileClient",
     "MemoryProfileProtocolError",
     "MemoryProfileUnavailableError",

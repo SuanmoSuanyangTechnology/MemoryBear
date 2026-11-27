@@ -5,7 +5,7 @@ Responsibilities:
   hard 1s timeout; timeout/exception/missing config all degrade to None and never
   affect the normal reply.
 - Reply strategies come from the enterprise ``memory.emotion_reply_policy`` provider
-  (app-bound ontology via the monolith callback) when registered, otherwise from the
+  (app-bound ontology via memory-enterprise) when registered, otherwise from the
   bundled community JSON policy file.
 - This module **never raises**; the return value is always at least base_prompt.
 """
@@ -202,12 +202,13 @@ async def resolve_policy(
     app_id: Any = None,
     tenant_id: Any = None,
     *,
+    workspace_id: Any = None,
     db: Any = None,
 ) -> Optional[dict]:
     """Resolve this turn's reply policy as ``{tone, do_list, avoid_list}``.
 
     With the enterprise provider registered the strategy comes from the app's
-    bound ontology through the monolith callback; there is no JSON fallback on
+    bound ontology through memory-enterprise; there is no JSON fallback on
     provider errors because the bundled JSON is the community default, not the
     enterprise system-default ontology. Without the provider the bundled JSON
     remains the source.
@@ -232,7 +233,7 @@ async def resolve_policy(
             "hit" if policy else "miss",
         )
         return policy
-    if not app_id or not tenant_id:
+    if not app_id or not tenant_id or not workspace_id:
         logger.warning(
             "[EmotionReply] skipped event=policy_lookup tenant_id=%s app_id=%s reason=missing_identity",
             tenant_id, app_id,
@@ -241,11 +242,13 @@ async def resolve_policy(
     if db is not None:
         from ...db import end_read_transaction
 
-        # End the preparation read transaction so the callback does not hold a
-        # pooled connection while the monolith re-reads the shared database.
+        # End the preparation read transaction so the provider call does not
+        # hold a pooled connection while memory-enterprise serves the lookup.
         await end_read_transaction(db, "emotion_policy")
     try:
-        strategy = await provider.get_strategy(app_id, tenant_id, emotion)
+        strategy = await provider.get_strategy(
+            app_id, tenant_id, emotion, workspace_id=workspace_id,
+        )
     except Exception as e:
         logger.warning(
             "[EmotionReply] failed event=policy_lookup tenant_id=%s app_id=%s "
@@ -319,6 +322,7 @@ async def apply_detection(
     *,
     app_id: Any = None,
     tenant_id: Any = None,
+    workspace_id: Any = None,
     db: Any = None,
     write_cache: bool = True,
 ) -> str:
@@ -361,7 +365,9 @@ async def apply_detection(
         # UUID -> str, strictly matching the str form of original_message_id on the fast-write side
         await set_cached_emotion(str(message_id), result)
 
-    policy = await resolve_policy(result, app_id, tenant_id, db=db)
+    policy = await resolve_policy(
+        result, app_id, tenant_id, workspace_id=workspace_id, db=db,
+    )
     prompt = build_prompt(base_prompt, policy, app_id=app_id, tenant_id=tenant_id)
     elapsed_ms = (perf_counter() - started) * 1000
     if prompt == (base_prompt or ""):
@@ -406,6 +412,7 @@ async def resolve_and_inject(
     *,
     app_id: Any = None,
     tenant_id: Any = None,
+    workspace_id: Any = None,
     db: Any = None,
     write_cache: bool = True,
 ) -> str:
@@ -416,5 +423,6 @@ async def resolve_and_inject(
     """
     return await apply_detection(
         base_prompt, asyncio.create_task(detect_emotion(message)), message_id,
-        app_id=app_id, tenant_id=tenant_id, db=db, write_cache=write_cache,
+        app_id=app_id, tenant_id=tenant_id, workspace_id=workspace_id, db=db,
+        write_cache=write_cache,
     )
