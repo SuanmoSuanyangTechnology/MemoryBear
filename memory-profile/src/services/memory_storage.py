@@ -1237,7 +1237,14 @@ class MemoryStorageService:
             is_uploaded_file = file.transfer_method == TransferMethod.LOCAL_FILE
             if is_uploaded_file:
                 try:
-                    file = await multimodal_service.resolve_uploaded_file_url(file, workspace_id)
+                    if file.type in {FileType.IMAGE, FileType.VIDEO}:
+                        file = await multimodal_service.resolve_uploaded_file_url(
+                            file,
+                            workspace_id,
+                            get_permanent_url=self.runtime.file_service.get_permanent_url,
+                        )
+                    else:
+                        file = await multimodal_service.resolve_uploaded_file_url(file, workspace_id)
                 except Exception:
                     logger.error(
                         "[TRIAL_RUN_CHAT_STREAM] Failed to resolve attachment URL: file_id=%s",
