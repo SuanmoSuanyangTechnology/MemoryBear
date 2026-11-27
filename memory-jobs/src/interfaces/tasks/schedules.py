@@ -27,6 +27,7 @@ from task_bridge.mem_router import QueueName, TaskName, TaskPriority
 
 from src.bootstrap import get_settings
 from src.config import JobsSettings
+from src.extensions import extension_periodic, load_extensions
 
 #: Beat only publishes; every entry therefore lands on this service's queue.
 DEFAULT_BEAT_QUEUE = QueueName.MEMORY_JOBS
@@ -65,7 +66,7 @@ def periodic_tasks(settings: JobsSettings | None = None) -> tuple[PeriodicTask, 
     """
 
     settings = settings or get_settings()
-    return (
+    open_build = (
         # Nightly sweep for stale insight/summary caches, taken over from the
         # API's ``regenerate-memory-cache`` entry. That entry is still live on
         # this branch, so both scanners fire at the same hour until its removal
@@ -93,7 +94,52 @@ def periodic_tasks(settings: JobsSettings | None = None) -> tuple[PeriodicTask, 
             expires=3600,
             priority=TaskPriority.BACKGROUND,
         ),
+        PeriodicTask(
+            key="admission-recover",
+            task=TaskName.ADMISSION_RECOVER.value,
+            schedule=settings.admission_recover_interval_seconds,
+            enabled=settings.admission_recover_enabled,
+            # A missed sweep only means the next one sees the same state, so a
+            # backlog entry can be dropped instead of run late.
+            expires=settings.admission_recover_interval_seconds * 2,
+            # The dispatch units must not queue behind the work they wake.
+            queue=QueueName.MEMORY_ADMISSION.value,
+            priority=TaskPriority.BACKGROUND,
+        ),
+        # Storage-outbox projection, taken over from the API's
+        # ``scan-outbox-projection`` beat entry. The PostgreSQL lease keeps
+        # the two services from projecting the same row twice.
+        PeriodicTask(
+            key="outbox-projection",
+            task=TaskName.OUTBOX_PROJECTION.value,
+            schedule=settings.outbox_scan_interval_seconds,
+            enabled=settings.outbox_projection_enabled,
+            # The next run re-enumerates the outbox, so a backlog entry may be
+            # dropped instead of run late.
+            expires=settings.outbox_scan_interval_seconds,
+            # Projection owns a dedicated worker: it must not wait behind the
+            # memory work it is only weakly related to.
+            queue=QueueName.MEMORY_PROJECTION.value,
+            priority=TaskPriority.BACKGROUND,
+        ),
+        # Daily retention cleanup, taken over from the API's ``cleanup-outbox``
+        # entry. It shares the rollout switch with the projection loop: enabling
+        # one without the other would either grow the table forever or delete
+        # rows another service still depends on.
+        PeriodicTask(
+            key="outbox-cleanup",
+            task=TaskName.OUTBOX_CLEANUP.value,
+            schedule=crontab(hour=settings.outbox_cleanup_hour, minute=0),
+            enabled=settings.outbox_projection_enabled,
+            expires=3600,
+            # Same dedicated projection worker as the scan.
+            queue=QueueName.MEMORY_PROJECTION.value,
+            priority=TaskPriority.BACKGROUND,
+        ),
     )
+    # Extension entries carry their own queue and enable switch; the open build
+    # contributes none and never imports the package.
+    return open_build + extension_periodic(load_extensions(settings))
 
 
 def build_beat_schedule(settings: JobsSettings | None = None) -> dict[str, dict[str, Any]]:

@@ -36,6 +36,12 @@ class TaskBridgeManager:
     def initialized(self) -> bool:
         return self._bridge is not None
 
+    @property
+    def result_backend_url(self) -> str:
+        """The resolved Celery result-backend URL (what workers write to)."""
+
+        return str(self._config().result_backend)
+
     def _config(self) -> CeleryConfig:
         """Env-derived broker/backend, with this service's queue policy applied.
 
@@ -94,7 +100,7 @@ class TaskBridgeManager:
         *,
         kwargs: Mapping[str, Any],
         queue: str = QueueName.MEMORY_JOBS.value,
-        priority: int = TaskPriority.INTERACTIVE,
+        priority: int | None = TaskPriority.INTERACTIVE,
     ) -> str:
         """Publish one task to memory-jobs and return its task id.
 

@@ -12,12 +12,11 @@ from fastapi import FastAPI
 from .api.error_handlers import register_error_handlers
 from .api.router import internal_v1_router, mount_registered_routers
 from .api.schemas.response_schema import ApiResponse
+from .assembly import assemble_process
 from .auth import AppAuthConfig, AppAuthMiddleware, _load_gateway_auth
-from .bootstrap import get_settings
-from .config import AppServiceSettings, configure_settings
+from .config import AppServiceSettings
 from .grpc.server import build_grpc_server
-from .i18n import LanguageContextMiddleware, load_catalogs
-from .i18n import configure as configure_i18n
+from .i18n import LanguageContextMiddleware
 from .integrations.knowledge.runtime import (
     close_knowledge_integration,
     initialize_knowledge_integration,
@@ -26,11 +25,8 @@ from .integrations.sandbox.runtime import (
     close_sandbox_integration,
     initialize_sandbox_integration,
 )
-from .logging import setup_logging
-from .protocols.market_gateway import DisabledMarketGateway, MarketGateway
 from .request_logging import RequestLoggingFastAPI
-from .runtime import ProcessRuntime, set_process_runtime
-from .sensitive import SensitiveDataFilter
+from .runtime import ProcessRuntime
 from .services.batch_persist_queue import BatchPersistQueue
 from .trace import TraceIdMiddleware
 from .workflow.nodes.http_client import close_http_client, init_http_client
@@ -44,49 +40,6 @@ _LEGACY_ERROR_RESPONSES = {
     }
     for status_code in (400, 401, 404, 409, 422, 500)
 }
-
-
-def _register_enterprise_market() -> None:
-    """Register the community market's enterprise implementation.
-
-    Must run **before** ``ProcessRuntime`` is constructed: the market gateway is
-    resolved from the plugin registry by name (``MARKET_GATEWAY_FACTORY``), and
-    `http` mode without it is a startup error rather than a per-request 500.
-    Open-source builds cannot install the package, so the import failure is
-    expected and leaves the registry empty (switch 3 then fails closed with 6020).
-    """
-    try:
-        from enterprise_ext.app import register_app_market
-    except ImportError:
-        return
-    register_app_market()
-
-
-def _register_enterprise_plugins(runtime: ProcessRuntime) -> None:
-    """Register enterprise plugins when the private package is installed.
-
-    Open-source builds cannot install enterprise-extensions, so the import
-    failure is expected and leaves the community plugin registry empty.
-    """
-    try:
-        from enterprise_ext.app import register_app_plugins
-    except ImportError:
-        return
-    register_app_plugins(runtime.upstream)
-
-
-def load_market_gateway(runtime: ProcessRuntime) -> MarketGateway:
-    settings = runtime.settings
-    if settings.application_service_market_mode == "disabled":
-        return DisabledMarketGateway()
-    try:
-        from enterprise_ext.app_market import build_market_gateway
-    except ImportError as exc:
-        raise RuntimeError(
-            "APPLICATION_SERVICE_MARKET_MODE=gateway requires the private "
-            "'enterprise-extensions' package (not installed in open-source builds)"
-        ) from exc
-    return build_market_gateway(settings)
 
 
 def _seed_categories(runtime: ProcessRuntime) -> None:
@@ -108,21 +61,9 @@ def _seed_categories(runtime: ProcessRuntime) -> None:
 def create_app(settings: AppServiceSettings | None = None) -> FastAPI:
     """Construct the internal API without connecting to dependencies."""
 
-    load_catalogs()
-    service_settings = settings or get_settings()
-    setup_logging(service_settings)
-    SensitiveDataFilter.configure(service_settings)
-    configure_i18n(service_settings.i18n_default_language)
-    configure_settings(service_settings)
-    # Enterprise market wiring first: `ProcessRuntime` resolves the market gateway
-    # from the plugin registry, and route registration must precede mounting.
-    _register_enterprise_market()
-    runtime = ProcessRuntime(service_settings)
-    # Deep workflow-runtime code (carried over from the monolith) resolves
-    # process resources through this module-level registration.
-    set_process_runtime(runtime)
-    _register_enterprise_plugins(runtime)
-    runtime.market_gateway = load_market_gateway(runtime)
+    assembled = assemble_process(settings)
+    service_settings = assembled.settings
+    runtime = assembled.runtime
 
     app_auth_config = AppAuthConfig(
         auth_mode=service_settings.application_service_auth_mode,
@@ -182,9 +123,11 @@ def create_app(settings: AppServiceSettings | None = None) -> FastAPI:
         await BatchPersistQueue.start()
         if grpc_server is not None:
             await grpc_server.start()
+        runtime.readiness.start()
         try:
             yield
         finally:
+            await runtime.readiness.aclose()
             if grpc_server is not None:
                 await grpc_server.stop(grace_s=service_settings.grpc_shutdown_grace_s)
             if gateway_auth is not None:

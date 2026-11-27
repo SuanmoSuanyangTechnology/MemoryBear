@@ -15,10 +15,12 @@ from pydantic import WrapValidator
 from sqlalchemy import select
 from starlette.background import BackgroundTask
 
-from ...error_mapping import map_connector_check_error, map_model_error
+from ...application.runtime import ProcessRuntime
 from ...errors import KnowledgeError
-from ...model_errors import ModelRole
+from ...errors.mapping import map_connector_check_error, map_model_error
+from ...errors.model_errors import ModelRole
 from ...models.owned import FILE_ROLE_SOURCE, File, KnowledgeType, ParserType, PermissionType
+from ...parser_configuration.api import require_sync_source
 from ...rag.integrations.feishu import FeishuAPIClient
 from ...rag.integrations.yuque import YuqueAPIClient
 from ...rag.knowledge_graph.config import (
@@ -28,7 +30,7 @@ from ...rag.knowledge_graph.config import (
 from ...rag.knowledge_graph.elasticsearch_store import GraphElasticsearchStore
 from ...rag.retrieval.async_elasticsearch import collection_name_for_knowledge
 from ...repositories.model_registry import AsyncSQLModelRegistry
-from ...runtime import ProcessRuntime
+from ...repositories.parser_configuration import AsyncParserConfigurationRepository
 from ...services import file as file_service
 from ...services import graph as graph_service
 from ...services import knowledge as knowledge_service
@@ -61,6 +63,7 @@ from ..dependencies import (
     require_knowledge_copy_principal,
 )
 from ..error_handlers import render_error
+from ..knowledge_capacity import check_workspace_capacity
 from ..query_validation import localized_query_validation
 from ..schemas.chunk import KnowledgeRetrievalSource
 from ..schemas.common import SERVICE_UNAVAILABLE_RESPONSE, SuccessEnvelope, success
@@ -282,6 +285,7 @@ async def create_knowledge(
     runtime: Annotated[ProcessRuntime, Depends(get_runtime)],
     source: Annotated[KnowledgeRetrievalSource, Depends(get_source)],
 ) -> SuccessEnvelope[dict[str, Any]]:
+    await check_workspace_capacity(request, runtime, principal)
     await validate_requested_knowledge_model_availability(
         create_data.model_dump(exclude_unset=True), principal, runtime.model_runtime
     )
@@ -312,6 +316,7 @@ async def copy_knowledge(
         str | None, Body(embed=True, description="Optional copied knowledge name")
     ] = None,
 ) -> SuccessEnvelope[dict[str, Any]]:
+    await check_workspace_capacity(request, runtime, principal)
     async with runtime.database.async_session() as db:
         data = await knowledge_copy_service.copy_knowledge_configuration(
             db,
@@ -362,7 +367,12 @@ async def get_knowledge_chunk_policy(
         knowledge = await knowledge_service.get_knowledge(db, knowledge_id, principal)
         if knowledge is None:
             raise knowledge_service._not_found()
-        parent_child_mode = {0: None, 1: False, 2: True}[knowledge.chunk_mode]
+        config = await AsyncParserConfigurationRepository(db).get_effective_knowledge(knowledge_id)
+        if config is None:
+            raise KnowledgeError.from_code("KB_KNOWLEDGE_PARSER_CONFIG_INVALID")
+        parent_child_mode = (
+            None if config.chunk_method is None else config.chunk_method == "parent_child"
+        )
     return _success(
         request,
         {"parent_child_mode": parent_child_mode},
@@ -406,6 +416,20 @@ async def update_knowledge(
             wiki_backfill_batch_size=runtime.settings.kb_wiki_backfill_batch_size,
             max_folder_depth=runtime.settings.kb_knowledge_folder_max_depth,
         )
+    message = await dispatch_knowledge_update(request, runtime, outcome)
+    response_data = outcome.response_data
+    if source is KnowledgeRetrievalSource.EXTERNAL_API and response_data is not None:
+        response_data = project_public_knowledge_data(response_data)
+    return _success(request, response_data, message)
+
+
+async def dispatch_knowledge_update(
+    request: Request,
+    runtime: ProcessRuntime,
+    outcome: knowledge_service.KnowledgeMutationOutcome,
+) -> str:
+    """Both management versions use the same saved-update dispatch behavior."""
+    knowledge_id = outcome.knowledge_id
     if outcome.invalidate_workspace_id is not None:
         await knowledge_service.invalidate_storage_type_cache(
             runtime.redis,
@@ -415,16 +439,29 @@ async def update_knowledge(
     graph_dispatch_failed = False
     reparse_dispatch_failed = False
     if outcome.wiki_backfill_required:
-        from ...rag.wiki.config import BACKFILL_REGISTERED_HEADER, BACKFILL_TASK, WIKI_QUEUE
+        from ...rag.wiki.config import (
+            BACKFILL_REGISTERED_HEADER,
+            BACKFILL_TASK,
+            BATCH_TASK,
+            MAP_QUEUE,
+            WIKI_QUEUE,
+        )
         from ...rag.wiki.diagnostics import diagnostic_json, exception_details
-        from ...services.wiki.backfill import record_backfill_publish_failure
+        from ...services.wiki.backfill import confirm_batch_trigger, record_backfill_publish_failure
         from ...services.wiki.runtime import transaction
 
         try:
-            await dispatcher.send(BACKFILL_TASK, kwargs={
-                "kb_id": str(knowledge_id), "upper_at_ms": outcome.wiki_backfill_upper_at_ms,
-            }, queue=WIKI_QUEUE, task_id=outcome.wiki_backfill_task_id,
-                headers={BACKFILL_REGISTERED_HEADER: True})
+            if runtime.settings.wiki_batch_enabled(knowledge_id):
+                await dispatcher.send(
+                    BATCH_TASK, kwargs={"kb_id": str(knowledge_id)}, queue=MAP_QUEUE,
+                    task_id=outcome.wiki_backfill_task_id,
+                    countdown=runtime.settings.kb_wiki_batch_delay_seconds,
+                )
+            else:
+                await dispatcher.send(BACKFILL_TASK, kwargs={
+                    "kb_id": str(knowledge_id), "upper_at_ms": outcome.wiki_backfill_upper_at_ms,
+                }, queue=WIKI_QUEUE, task_id=outcome.wiki_backfill_task_id,
+                    headers={BACKFILL_REGISTERED_HEADER: True})
         except Exception as exc:
             logger.error(
                 "Wiki 配置与待处理状态已保存，但补录派发失败 "
@@ -446,12 +483,17 @@ async def update_knowledge(
                     diagnostic_json(exception_details(state_exc)),
                 )
             raise KnowledgeError.from_code("KB_WIKI_BACKFILL_DISPATCH_FAILED") from exc
-    if plan.graph_enabled_before is not None:
+        if runtime.settings.wiki_batch_enabled(knowledge_id):
+            await asyncio.to_thread(
+                transaction, runtime, confirm_batch_trigger,
+                knowledge_id, outcome.wiki_backfill_task_id,
+            )
+    if outcome.graph_enabled_before is not None:
         try:
             await dispatch_graph_transition(
                 dispatcher,
                 knowledge_id,
-                plan.graph_enabled_before,
+                outcome.graph_enabled_before,
                 outcome.parser_config,
             )
         except Exception:
@@ -460,7 +502,7 @@ async def update_knowledge(
                 "Failed to dispatch graph transition knowledge_id=%s",
                 knowledge_id,
             )
-    if plan.embedding_changed:
+    if outcome.reparse_required:
         try:
             async with runtime.database.async_session() as db:
                 snapshots, skipped = await load_reparse_snapshots(db, knowledge_id)
@@ -476,9 +518,6 @@ async def update_knowledge(
                 "Failed to dispatch reparse tasks knowledge_id=%s",
                 knowledge_id,
             )
-    response_data = outcome.response_data
-    if source is KnowledgeRetrievalSource.EXTERNAL_API and response_data is not None:
-        response_data = project_public_knowledge_data(response_data)
     message = "The knowledge base information has been successfully updated"
     if graph_dispatch_failed or reparse_dispatch_failed:
         from ..error_handlers import request_locale
@@ -503,7 +542,7 @@ async def update_knowledge(
         message = notices[(graph_dispatch_failed, reparse_dispatch_failed)][
             1 if request_locale(request) == "en" else 0
         ]
-    return _success(request, response_data, message)
+    return message
 
 
 @router.delete("/{knowledge_id}", response_model=SuccessEnvelope[None])
@@ -652,6 +691,12 @@ async def sync_knowledge(
         knowledge = await knowledge_service.get_knowledge(db, knowledge_id, principal)
         if knowledge is None:
             raise knowledge_service._not_found()
+        configuration = await AsyncParserConfigurationRepository(db).get_effective_knowledge(
+            knowledge_id
+        )
+        if configuration is None:
+            raise KnowledgeError.from_code("KB_KNOWLEDGE_PARSER_CONFIG_INVALID")
+        require_sync_source(configuration)
     task_id = await dispatch_sync(TaskDispatcher(runtime=runtime), knowledge_id)
     return _success(
         request,

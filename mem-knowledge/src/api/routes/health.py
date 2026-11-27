@@ -9,8 +9,8 @@ from collections.abc import Awaitable, Callable
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 
-from ...request_logging import log_request_failure
-from ...runtime import ProcessRuntime
+from ...application.runtime import ProcessRuntime
+from ...observability.request_logging import log_request_failure
 from ..schemas.health import ComponentHealth, HealthResponse
 
 router = APIRouter(prefix="/health", tags=["Health"])

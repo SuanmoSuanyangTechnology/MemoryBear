@@ -17,8 +17,10 @@ from ..api.schemas.knowledge_share import (
 )
 from ..errors import KnowledgeError
 from ..models.owned import KnowledgeShare, KnowledgeType, PermissionType
+from ..parser_configuration import to_legacy
 from ..repositories import knowledge as knowledge_repository
 from ..repositories import knowledge_share as share_repository
+from ..repositories.parser_configuration import knowledge_configuration
 from ..repositories.reference import ReferenceRepository
 from ..utils.datetime_utils import to_timestamp_ms
 from . import knowledge as knowledge_service
@@ -123,13 +125,14 @@ async def create_share(
         doc_num=source.doc_num,
         chunk_num=source.chunk_num,
         parser_id=source.parser_id,
-        parser_config=source.parser_config,
+        parser_config=to_legacy(knowledge_configuration(source)),
     )
     target = await knowledge_service.create_shared_knowledge(
         db,
         mirrored,
         principal,
         create_data.target_workspace_id,
+        knowledge_configuration(source),
     )
     share_create = create_data.model_copy(deep=True)
     share_create.source_workspace_id = principal.workspace_id
@@ -156,15 +159,27 @@ async def delete_share(
     share_id: uuid.UUID,
     principal: Principal,
 ) -> None:
-    share = await get_share(db, share_id, principal)
-    if share is None:
-        raise _not_found("KB_KNOWLEDGE_SHARE_NOT_FOUND")
-    await knowledge_repository.delete_knowledge_by_id_async(db, share.target_kb_id)
-    await share_repository.delete_knowledgeshare_by_id_in_source_workspace_async(
-        db,
-        share_id,
-        principal.workspace_id,
-    )
+    try:
+        share = await get_share(db, share_id, principal)
+        if share is None:
+            raise _not_found("KB_KNOWLEDGE_SHARE_NOT_FOUND")
+
+        target_kb_id = share.target_kb_id
+        await knowledge_repository.lock_share_source_async(db, share.source_kb_id)
+        deleted = await share_repository.delete_knowledgeshare_by_id_in_source_workspace_async(
+            db,
+            share.id,
+            principal.workspace_id,
+            commit=False,
+        )
+        if not deleted:
+            raise _not_found("KB_KNOWLEDGE_SHARE_NOT_FOUND")
+
+        # The target deletion commits both deletes together.
+        await knowledge_repository.delete_knowledge_by_id_async(db, target_kb_id)
+    except Exception:
+        await db.rollback()
+        raise
 
 
 async def create_or_reuse_share(
@@ -250,9 +265,9 @@ async def create_or_reuse_share(
                     doc_num=source.doc_num,
                     chunk_num=source.chunk_num,
                     parser_id=source.parser_id,
-                    parser_config=source.parser_config,
+                    parser_config=to_legacy(knowledge_configuration(source)),
                 ),
-                preserve_source_parser_config=True,
+                configuration=knowledge_configuration(source),
                 commit=False,
             )
             target.builtin_metadata_enabled = source.builtin_metadata_enabled

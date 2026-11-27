@@ -150,6 +150,42 @@ class EndUserRepository:
     def __init__(self, postgres: PostgresManager) -> None:
         self.postgres = postgres
 
+    async def workspace_of(self, end_user_id: UUID) -> UUID | None:
+        """The workspace an id belongs to, or ``None`` when it does not exist.
+
+        Deliberately ignores active/merge state: the write path uses this only
+        to tell "no such user" from "user of another workspace", then resolves
+        the canonical id with :meth:`resolve_user_in_workspace`.
+        """
+
+        statement = select(EndUser.workspace_id).where(EndUser.id == end_user_id).limit(1)
+        async with self.postgres.session() as session:
+            return await session.scalar(statement)
+
+    async def resolve_id_by_other_id(self, workspace_id: UUID, other_id: str) -> UUID | None:
+        """Match the earliest active user, then the latest merge within the workspace."""
+        direct = (
+            select(EndUser.id)
+            .where(*active_users_in_workspace(workspace_id), EndUser.other_id == other_id)
+            .order_by(EndUser.created_at.asc())
+            .limit(1)
+        )
+        latest_target = (
+            select(EndUserMerge.target_id)
+            .where(
+                EndUserMerge.workspace_id == workspace_id,
+                EndUserMerge.origin_other_id == other_id,
+            )
+            .order_by(EndUserMerge.id.desc())
+            .limit(1)
+            .scalar_subquery()
+        )
+        merged = select(EndUser.id).where(
+            *active_users_in_workspace(workspace_id), EndUser.id == latest_target
+        )
+        async with self.postgres.session() as session:
+            return (await session.scalar(direct)) or (await session.scalar(merged))
+
     async def user_exists_in_workspace(self, end_user_id: UUID, workspace_id: UUID) -> bool:
         """Strict membership check: active user of an active workspace.
 
@@ -191,6 +227,56 @@ class EndUserRepository:
                 .order_by(EndUser.id)
             )
             return [row[0] for row in result.all()]
+
+    async def write_target(self, end_user_id: UUID) -> dict[str, Any] | None:
+        """Resolve the host's write target for one id.
+
+        Mirrors the monolith's ``EndUserRepository.get_end_user_by_id_async``
+        exactly: an active row by id wins; otherwise the newest merge edge
+        (``end_user_merge.id DESC``) redirects to its active target. The
+        workspace boundary is *not* applied here — the host checks the resolved
+        user's workspace afterwards, and so does the write handler.
+        """
+
+        direct = (
+            select(
+                EndUser.id.label("id"),
+                EndUser.workspace_id.label("workspace_id"),
+                # The write face needs the stored identity to decide whether the
+                # caller's feature string is a no-op — the host's fast path reads
+                # the same two columns off the row it resolved.
+                EndUser.identity_features.label("identity_features"),
+                EndUser.identity_status.label("identity_status"),
+                sa.literal(0).label("priority"),
+            )
+            .where(EndUser.id == end_user_id, EndUser.is_active.is_(True))
+            .limit(1)
+        )
+        merged = (
+            select(
+                EndUser.id.label("id"),
+                EndUser.workspace_id.label("workspace_id"),
+                EndUser.identity_features.label("identity_features"),
+                EndUser.identity_status.label("identity_status"),
+                sa.literal(1).label("priority"),
+            )
+            .select_from(EndUserMerge)
+            .join(EndUser, EndUser.id == EndUserMerge.target_id)
+            .where(
+                EndUserMerge.origin_id == end_user_id,
+                EndUser.is_active.is_(True),
+            )
+            .order_by(EndUserMerge.id.desc())
+            .limit(1)
+        )
+        statement = (
+            union_all(direct, merged)
+            .order_by(sa.literal_column("priority"))
+            .limit(1)
+        )
+        async with self.postgres.session() as session:
+            row = (await session.execute(statement)).mappings().first()
+        return dict(row) if row is not None else None
 
     async def resolve_user_in_workspace(
         self, end_user_id: UUID, workspace_id: UUID
@@ -234,3 +320,25 @@ class EndUserRepository:
         if row is None:
             return None
         return {"id": row["id"], "other_name": row["other_name"]}
+
+    async def memory_user_snapshot(self, end_user_id: UUID) -> dict[str, Any] | None:
+        """Resolve only identity and ownership for the migrated memory controllers."""
+        async with self.postgres.session() as session:
+            row = (await session.execute(
+                select(EndUser.id, EndUser.workspace_id).where(
+                    EndUser.id == end_user_id, EndUser.is_active.is_(True)
+                ).limit(1)
+            )).mappings().first()
+            if row is None:
+                target_id = await session.scalar(
+                    select(EndUserMerge.target_id).where(
+                        EndUserMerge.origin_id == end_user_id
+                    ).order_by(EndUserMerge.id.desc()).limit(1)
+                )
+                if target_id is not None:
+                    row = (await session.execute(
+                        select(EndUser.id, EndUser.workspace_id).where(
+                            EndUser.id == target_id, EndUser.is_active.is_(True)
+                        ).limit(1)
+                    )).mappings().first()
+        return dict(row) if row is not None else None

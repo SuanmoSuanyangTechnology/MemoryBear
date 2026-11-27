@@ -14,17 +14,43 @@ from error_core.knowledge_upload import (
     upload_responses,
 )
 from fastapi import APIRouter, Depends, File, Query, Request, UploadFile
+from fastapi.responses import RedirectResponse
 
+from ...application.runtime import ProcessRuntime
 from ...errors import KnowledgeError
-from ...runtime import ProcessRuntime
 from ...services import file as file_service
 from ...services.knowledge_file_storage import KnowledgeFileStorage
 from ...services.qa_import import dispatch_qa_import, prepare_qa_import_resources
 from ...services.upload_deduplication import discard_unpublished_qa_upload, save_new_upload
 from ...tasks.dispatch import TaskDispatcher, TaskNotPublishedError
-from ..dependencies import Principal, get_principal, get_runtime
+from ..dependencies import Principal, get_principal, get_runtime, get_source
+from ..knowledge_capacity import check_workspace_capacity
+from ..schemas.chunk import KnowledgeRetrievalSource
+from ..upload_contract import (
+    GATEWAY_DOCUMENT_UPLOAD_PATH,
+    GATEWAY_QA_UPLOAD_PATH,
+    GATEWAY_UPLOAD_PREFIX,
+)
 
 router = APIRouter(tags=["knowledge-upload-v2"])
+gateway_router = APIRouter(tags=["knowledge-upload-v2"])
+
+
+@gateway_router.post(GATEWAY_DOCUMENT_UPLOAD_PATH + "/", include_in_schema=False)
+@gateway_router.post(GATEWAY_QA_UPLOAD_PATH + "/", include_in_schema=False)
+async def redirect_upload(
+    request: Request,
+    source: Annotated[KnowledgeRetrievalSource, Depends(get_source)],
+) -> RedirectResponse:
+    """尾斜杠请求重定向到调用方使用的入口，保留查询参数和 POST。"""
+    path = request.url.path.removesuffix("/")
+    if source is KnowledgeRetrievalSource.MANAGER_API:
+        path = "/api" + path.removeprefix(GATEWAY_UPLOAD_PREFIX)
+    elif source is KnowledgeRetrievalSource.EXTERNAL_API:
+        path = "/v1" + path.removeprefix(GATEWAY_UPLOAD_PREFIX)
+    if request.url.query:
+        path += "?" + request.url.query
+    return RedirectResponse(path, status_code=307)
 
 
 async def read_upload(file: UploadFile, runtime: ProcessRuntime) -> bytes:
@@ -37,7 +63,11 @@ async def read_upload(file: UploadFile, runtime: ProcessRuntime) -> bytes:
 
 
 @router.post(
-    UploadKind.DOCUMENT, status_code=201, responses=upload_responses(),
+    UploadKind.DOCUMENT, status_code=201, responses=upload_responses(outer_status=402),
+    response_model=UploadCreated[UploadedDocument],
+)
+@gateway_router.post(
+    GATEWAY_DOCUMENT_UPLOAD_PATH, status_code=201, responses=upload_responses(outer_status=402),
     response_model=UploadCreated[UploadedDocument],
 )
 async def upload_document(
@@ -48,6 +78,7 @@ async def upload_document(
     principal: Annotated[Principal, Depends(get_principal)],
     runtime: Annotated[ProcessRuntime, Depends(get_runtime)],
 ) -> dict:
+    await check_workspace_capacity(request, runtime, principal)
     content = await read_upload(file, runtime)
     filename = file.filename or ""
     storage = KnowledgeFileStorage(runtime.storage)
@@ -64,6 +95,10 @@ async def upload_document(
 
 @router.post(
     UploadKind.QA, status_code=201, responses=upload_responses(qa=True),
+    response_model=UploadCreated[UploadedQA],
+)
+@gateway_router.post(
+    GATEWAY_QA_UPLOAD_PATH, status_code=201, responses=upload_responses(qa=True),
     response_model=UploadCreated[UploadedQA],
 )
 async def upload_qa(

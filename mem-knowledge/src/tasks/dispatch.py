@@ -12,9 +12,9 @@ from typing import Any
 
 from kombu.exceptions import OperationalError
 
-from ..bootstrap import get_settings
+from ..application.bootstrap import get_settings
 from ..errors import KnowledgeError
-from ..trace import get_trace_id
+from ..observability.trace import get_trace_id
 from .celery_app import PUBLISHABLE_KNOWLEDGE_TASK_ROUTES, celery_app
 from .observability import current_parent_task_id
 
@@ -31,9 +31,13 @@ class TaskNotPublishedError(KnowledgeError):
 class TaskDispatcher:
     """Validate and publish messages for the existing knowledge workers."""
 
-    def __init__(self, application: Any = celery_app, *, runtime: Any = None):
+    def __init__(
+        self, application: Any = celery_app, *, runtime: Any = None,
+        classify_preparation_errors: bool = False,
+    ):
         self._application = application
         self._runtime = runtime
+        self._classify_preparation_errors = classify_preparation_errors
 
     async def send(
         self,
@@ -45,6 +49,8 @@ class TaskDispatcher:
         task_id: str | None = None,
         headers: Mapping[str, Any] | None = None,
         connect_before_publish: bool = False,
+        countdown: int | None = None,
+        soft_time_limit: int | None = None,
     ) -> str:
         return await asyncio.to_thread(
             self.send_sync,
@@ -55,6 +61,8 @@ class TaskDispatcher:
             task_id=task_id,
             headers=dict(headers) if headers is not None else None,
             connect_before_publish=connect_before_publish,
+            countdown=countdown,
+            soft_time_limit=soft_time_limit,
         )
 
     def send_sync(
@@ -67,6 +75,8 @@ class TaskDispatcher:
         task_id: str | None = None,
         headers: Mapping[str, Any] | None = None,
         connect_before_publish: bool = False,
+        countdown: int | None = None,
+        soft_time_limit: int | None = None,
     ) -> str:
         """Validate and publish a task from a synchronous execution context."""
 
@@ -92,7 +102,12 @@ class TaskDispatcher:
                 document_id = args[1]
             if document_id is not None:
                 task_id = task_id or str(uuid.uuid4())
-                prepare_source_dispatch(self._runtime, document_id, task_id)
+                try:
+                    prepare_source_dispatch(self._runtime, document_id, task_id)
+                except Exception as exc:
+                    if self._classify_preparation_errors:
+                        raise TaskNotPublishedError() from exc
+                    raise
         try:
             send_task_kwargs: dict[str, Any] = {
                 "args": list(args or ()),
@@ -110,6 +125,10 @@ class TaskDispatcher:
                     if value is not None
                 },
             }
+            if soft_time_limit is not None:
+                send_task_kwargs["soft_time_limit"] = soft_time_limit
+            if countdown is not None:
+                send_task_kwargs["countdown"] = countdown
             if task_id:
                 send_task_kwargs["task_id"] = task_id
             with ExitStack() as stack:

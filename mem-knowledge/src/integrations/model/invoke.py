@@ -35,10 +35,10 @@ from redbear_model.runtime.remote import (
     envelope_failure,
 )
 
-from ...config import KnowledgeSettings
-from ...trace import get_trace_id
-from ...usage_context import get_usage_resource
+from ...application.config import KnowledgeSettings
+from ...observability.trace import get_trace_id
 from .errors import ModelInvokeProtocolError, ModelInvokeUnavailableError, to_invoke_error
+from .usage_context import get_usage_resource
 
 logger = logging.getLogger(__name__)
 

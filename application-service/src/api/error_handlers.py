@@ -10,7 +10,8 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from error_core.codes import BizCode, is_known_code
+from error_core.codes import BizCode, http_status_for, is_known_code
+from error_core.diagnostics import format_diagnostics
 from error_core.envelope import fail
 from error_core.fastapi_handlers import (
     ErrorHandlerDeps,
@@ -28,11 +29,12 @@ from error_core.fastapi_handlers import (
     validation_error_content as _validation_error_content,
 )
 from error_core.knowledge import knowledge_message
+from error_core.messages import user_message
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, Response
 from pydantic import ValidationError as PydanticValidationError
 
-from ..errors import BusinessException, I18nException
+from ..errors import BusinessException, ChatDatabaseBusy, I18nException
 from ..i18n import get_default_locale, translate
 from ..integrations.knowledge.errors import KnowledgeClientError, KnowledgeServiceError
 from ..integrations.model.errors import ModelInvokeCancelledError
@@ -108,6 +110,27 @@ def render_error(
 def register_error_handlers(application: FastAPI) -> None:
     _register_error_handlers(application, _deps)
     original_unhandled_handler = application.exception_handlers[Exception]
+
+    @application.exception_handler(ChatDatabaseBusy)
+    async def chat_database_busy_handler(request: Request, exc: ChatDatabaseBusy):
+        code = BizCode.SERVICE_UNAVAILABLE
+        language = getattr(request.state, "language", None) or get_default_locale()
+        message = user_message(code, language) or exc.message
+        response = render_error(
+            request,
+            status_code=http_status_for(code),
+            content=fail(
+                code,
+                message,
+                format_diagnostics(trace_id=get_trace_id(), detail=exc.message),
+            ),
+            error_code=code.name,
+            message=message,
+            retryable=True,
+        )
+        response.headers["Retry-After"] = exc.retry_after
+        response.headers.add_vary_header("X-Language-Type, Accept-Language")
+        return response
 
     @application.exception_handler(Exception)
     async def knowledge_error_handler(request: Request, exc: Exception):

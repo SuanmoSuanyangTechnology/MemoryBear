@@ -33,6 +33,10 @@ class LocalIdentityDecision(Output):
     right_label: str | None = Field(default=None, max_length=70)
 
 
+class IdentityEvidenceReview(LocalIdentityDecision):
+    evidence_quote: str | None = Field(default=None, max_length=300)
+
+
 class Candidates(Output):
     candidates: list[Candidate]
 

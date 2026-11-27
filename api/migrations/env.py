@@ -90,6 +90,16 @@ import_all_models_from_package('app.models') # <--- NEW CALL
 # ... etc.
 
 
+_KNOWLEDGE_SERVICE_TABLES = frozenset({
+    "knowledges",
+    "documents",
+    "files",
+    "knowledge_metadatas",
+    "knowledge_metadata_bindings",
+    "knowledge_shares",
+})
+
+
 def include_object(obj, name, type_, reflected, compare_to):
     """autogenerate 只对比老单体链自有表，避免把微服务同库自有表判为删除。
 
@@ -106,7 +116,8 @@ def include_object(obj, name, type_, reflected, compare_to):
     table a future model-service chain may add.
     """
     if type_ == "table":
-        return name in Base.metadata.tables
+        # 存量知识库表后续由 mem-knowledge 的 Alembic 链管理。
+        return name not in _KNOWLEDGE_SERVICE_TABLES and name in Base.metadata.tables
     return True
 
 

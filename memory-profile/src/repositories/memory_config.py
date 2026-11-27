@@ -12,7 +12,7 @@ from collections.abc import Iterable
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import String, cast, desc, select, true
+from sqlalchemy import String, cast, desc, func, select, true
 
 from src.infrastructure.postgres import PostgresManager
 from src.models.references import (
@@ -78,6 +78,21 @@ PERSONALITY_COLUMNS = _columns(
     "personality_anchor_read_preferences",
     "personality_anchor_sync_cycle",
     "personality_anchor_base_principles",
+)
+SPATIOTEMPORAL_ANCHOR_COLUMNS = (
+    func.coalesce(MemoryConfigRow.is_default, False).label("is_default"),
+    *_columns(
+        "config_id",
+        "spatiotemporal_enabled",
+        "spatiotemporal_auto_extract",
+        "scene_merge_window_minutes",
+        "scene_location_normalize_enabled",
+        "geo_coordinate_enabled",
+        "temporal_chain_enabled",
+        "temporal_chain_interval_minutes",
+        "temporal_chain_rebuild_limit",
+        "scene_label_vocabulary",
+    ),
 )
 EXTRACTED_COLUMNS = _columns(
     "is_default",
@@ -197,6 +212,34 @@ WORKSPACE_VALIDATION_COLUMNS = (
 class MemoryConfigReadRepository:
     def __init__(self, postgres: PostgresManager) -> None:
         self.postgres = postgres
+
+    async def get_reflection_trial(
+        self, config_id: UUID | int, workspace_id: UUID, tenant_id: UUID
+    ) -> dict[str, Any] | None:
+        """Trial-only legacy integer compatibility, scoped before returning data.
+
+        Other config endpoints continue to accept UUIDs only. The preview uses
+        the workspace's literal LLM slot, not the active config or preset.
+        """
+        identifier = (
+            MemoryConfigRow.config_id == config_id
+            if isinstance(config_id, UUID)
+            else MemoryConfigRow.config_id_old == config_id
+        )
+        statement = (
+            select(*REFLECTION_COLUMNS, Workspace.llm)
+            .join(Workspace, Workspace.id == MemoryConfigRow.workspace_id)
+            .where(
+                identifier,
+                MemoryConfigRow.workspace_id == workspace_id,
+                Workspace.tenant_id == tenant_id,
+                Workspace.is_active.is_(True),
+            )
+            .limit(1)
+        )
+        async with self.postgres.session() as session:
+            row = (await session.execute(statement)).mappings().one_or_none()
+        return dict(row) if row is not None else None
 
     async def get_with_workspace(self, config_id: UUID) -> dict[str, Any] | None:
         """One configuration joined with its workspace's tenant and model slots.
@@ -377,3 +420,36 @@ class MemoryConfigReadRepository:
                     Workspace.is_active.is_(True),
                 )
             )
+
+    async def resolve_trial_config_id(self, config_id, workspace_id):
+        if isinstance(config_id, UUID):
+            return config_id
+        if isinstance(config_id, str):
+            value = config_id.strip()
+            try:
+                legacy_id = int(value)
+            except ValueError:
+                legacy_id = None
+            if legacy_id is None or legacy_id <= 0:
+                try:
+                    return UUID(value)
+                except ValueError:
+                    raise ValueError(
+                        f"无效的 config_id 格式: '{config_id}'（必须是 UUID 或正整数）"
+                    ) from None
+        elif isinstance(config_id, int):
+            if config_id <= 0:
+                raise ValueError(f"config_id 必须是正整数: {config_id}")
+            legacy_id = config_id
+        else:
+            raise ValueError(f"不支持的 config_id 类型: {type(config_id).__name__}")
+
+        statement = select(MemoryConfigRow.config_id).where(
+            MemoryConfigRow.config_id_old == legacy_id,
+            MemoryConfigRow.workspace_id == workspace_id,
+        )
+        async with self.postgres.session() as session:
+            resolved = await session.scalar(statement)
+        if resolved is None:
+            raise ValueError(f"未找到 config_id_old={legacy_id} 对应的配置")
+        return resolved

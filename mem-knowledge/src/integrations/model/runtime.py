@@ -24,7 +24,7 @@ from urllib.parse import urlparse
 
 from memorybear_grpc.client import ChannelPool, SyncChannelPool
 
-from ...config import KnowledgeSettings
+from ...application.config import KnowledgeSettings
 from .errors import ModelInvokeConfigurationError
 from .invoke import (
     ModelInvokeClient,

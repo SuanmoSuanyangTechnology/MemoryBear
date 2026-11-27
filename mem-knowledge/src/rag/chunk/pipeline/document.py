@@ -8,7 +8,7 @@ import tempfile
 from dataclasses import replace
 from pathlib import Path
 
-from ....bootstrap import get_settings
+from ....application.bootstrap import get_settings
 from ..context import ChunkContext, ParseResult
 from ..file_utils import extract_html, extract_links_from_docx
 from ..libreoffice import convert_to_pdf

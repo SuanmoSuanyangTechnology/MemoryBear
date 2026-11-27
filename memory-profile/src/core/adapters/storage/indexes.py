@@ -1,8 +1,10 @@
 """Read-only mirror of the API-owned Elasticsearch / Neo4j index definitions.
 
-This module is the single index registry of memory-profile. The writer owns every
-index and its schema; this service only reads them. Rather than hand-copying
-aliases and field names (which drifts silently), the registry loads
+The Elasticsearch schema (labels, aliases, fields, embedding dimensions) comes
+from ``memory_storage_schema`` — the API-aligned shared package that memory-jobs
+uses too, so the two consumers cannot drift from each other. The remaining
+API-owned data the package does not carry (Neo4j index names and embedding
+fields, the writer's default projection, routing) is mirrored from
 ``storage_index_contract.json`` — a snapshot generated from the API source by
 ``scripts/sync_storage_index_contract.py`` and verified in CI. Regenerate the
 snapshot whenever the API-side definitions change; the import-time validation
@@ -11,7 +13,7 @@ below fails fast if the file is missing, malformed, or internally inconsistent.
 What the storage/retrieval code uses:
 
 * Elasticsearch aliases (``{index_name}_current``), full-text fields, embedding
-  fields and the supported dense-vector dimensions;
+  fields and the supported dense-vector dimensions (from the shared package);
 * the writer's default node projection (``DEFAULT_PROJECTION``);
 * Neo4j full-text index names and embedding property names;
 * ``ELASTIC_ONLY_LABELS`` (labels that exist only in Elasticsearch).
@@ -26,8 +28,20 @@ from __future__ import annotations
 import json
 import logging
 from collections.abc import Iterable, Mapping
+from copy import deepcopy
 from pathlib import Path
 from typing import Any
+
+from memory_storage_schema.definitions import (
+    DEFAULT_EMBEDDING_DIMENSION as _SHARED_DEFAULT_EMBEDDING_DIMENSION,
+)
+from memory_storage_schema.definitions import (
+    EMBEDDING_DIMENSIONS,
+    EMBEDDING_FIELDS,
+    FULLTEXT_FIELDS,
+    INDEX_DEFINITIONS,
+    INDEX_SHARD_COUNT,
+)
 
 from src.core.domain.enums import MemorySource
 
@@ -195,31 +209,40 @@ def _validate(contract: Mapping[str, Any], path: Path) -> None:
 CONTRACT = _load(CONTRACT_PATH)
 _validate(CONTRACT, CONTRACT_PATH)
 
-_ELASTICSEARCH = CONTRACT["elasticsearch"]
 _NEO4J = CONTRACT["neo4j"]
 
-#: Full Elasticsearch index definitions keyed by node label value.
-ES_INDEX_DEFINITIONS: dict[str, dict[str, Any]] = dict(
-    _ELASTICSEARCH["index_definitions"]
-)
+#: Full Elasticsearch index definitions keyed by node label value. The shared
+#: package is the single source; the mutable settings/mappings are copied so a
+#: reader can never mutate the process-wide registry.
+ES_INDEX_DEFINITIONS: dict[str, dict[str, Any]] = {
+    label.value: {
+        "name": definition.name,
+        "alias": definition.alias,
+        "schema_version": definition.schema_version,
+        "generation": definition.generation,
+        "settings": deepcopy(definition.settings),
+        "mappings": deepcopy(definition.mappings),
+    }
+    for label, definition in INDEX_DEFINITIONS.items()
+}
 #: Stable read alias per node label (``{name}_current``).
 ES_INDEX_ALIAS: dict[str, str] = {
     label: definition["alias"] for label, definition in ES_INDEX_DEFINITIONS.items()
 }
 #: Analyzed full-text fields per node label.
 ES_FULLTEXT_FIELDS: dict[str, tuple[str, ...]] = {
-    label: tuple(fields) for label, fields in _ELASTICSEARCH["fulltext_fields"].items()
+    label.value: tuple(fields) for label, fields in FULLTEXT_FIELDS.items()
 }
 #: Dimension-agnostic embedding property per node label.
-ES_EMBEDDING_FIELD: dict[str, str] = dict(_ELASTICSEARCH["embedding_fields"])
+ES_EMBEDDING_FIELD: dict[str, str] = {
+    label.value: field for label, field in EMBEDDING_FIELDS.items()
+}
 #: Shard count the writer uses for every index (diagnostics only).
-ES_INDEX_SHARD_COUNT: int = int(_ELASTICSEARCH["index_shard_count"])
+ES_INDEX_SHARD_COUNT: int = INDEX_SHARD_COUNT
 #: Default dense-vector dimension (un-suffixed field name).
-DEFAULT_EMBEDDING_DIMENSION: int = int(_ELASTICSEARCH["default_embedding_dimension"])
+DEFAULT_EMBEDDING_DIMENSION: int = _SHARED_DEFAULT_EMBEDDING_DIMENSION
 #: Every dense-vector dimension the writer indexes.
-SUPPORTED_EMBEDDING_DIMENSIONS: tuple[int, ...] = tuple(
-    _ELASTICSEARCH["supported_embedding_dimensions"]
-)
+SUPPORTED_EMBEDDING_DIMENSIONS: tuple[int, ...] = tuple(EMBEDDING_DIMENSIONS)
 
 #: Full-text index name per node label on the Neo4j side.
 NEO4J_FULLTEXT_INDEX: dict[str, str] = dict(

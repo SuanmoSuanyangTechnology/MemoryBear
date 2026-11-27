@@ -39,6 +39,7 @@ from src.schemas.memory_config import (
     SceneConfigData,
     SimpleSceneData,
     ValidateConfigResult,
+    WorkspaceActiveConfigData,
 )
 from src.schemas.memory_config_requests import (
     CommunityPreviewBody,
@@ -60,6 +61,10 @@ from src.schemas.scene_community import (
     CommunityPreviewResult,
 )
 from src.schemas.scene_demo import SceneSplitDemoResponse
+from src.schemas.spatiotemporal_anchor_config import (
+    SpatiotemporalAnchorData,
+    SpatiotemporalAnchorUpdate,
+)
 
 router = APIRouter(prefix="/memory_config", tags=["Memory Config"])
 community_router = APIRouter(prefix="/memory/configs/community", tags=["Memory Config"])
@@ -73,6 +78,23 @@ def _handler(request: Request) -> MemoryConfigHandler:
 # ── Reads ────────────────────────────────────────────────────────────────────
 
 
+@router.get(
+    "/workspace_active_config",
+    response_model=ApiResponse[WorkspaceActiveConfigData],
+)
+async def workspace_active_config(
+    request: Request,
+    context: Context,
+) -> ApiResponse[WorkspaceActiveConfigData]:
+    """The acting workspace's active configuration id.
+
+    Service-to-service read (the application service resolves the config before
+    a memory call), so it stays off the API-key contract.
+    """
+
+    return await _handler(request).workspace_active_config(context, request)
+
+
 @router.get("/scenes/simple", response_model=ApiResponse[list[SimpleSceneData]])
 @external_api
 async def list_simple_scenes(
@@ -80,6 +102,19 @@ async def list_simple_scenes(
     context: Context,
 ) -> ApiResponse[list[SimpleSceneData]] | JSONResponse:
     return await _handler(request).list_simple_scenes(context, request)
+
+
+@router.get(
+    "/read_config_spatiotemporal_anchor",
+    response_model=ApiResponse[SpatiotemporalAnchorData],
+)
+@external_api
+async def read_config_spatiotemporal_anchor(
+    request: Request,
+    context: Context,
+    config_id: Annotated[UUID, Query()],
+) -> ApiResponse[SpatiotemporalAnchorData] | JSONResponse:
+    return await _handler(request).read_spatiotemporal_anchor(context, config_id, request)
 
 
 @router.get(
@@ -195,6 +230,19 @@ async def read_config_prediction(
 
 
 @router.post(
+    "/update_config_spatiotemporal_anchor",
+    response_model=ApiResponse[SpatiotemporalAnchorData],
+)
+@external_api
+async def update_config_spatiotemporal_anchor(
+    request: Request,
+    context: Context,
+    body: SpatiotemporalAnchorUpdate,
+) -> ApiResponse[SpatiotemporalAnchorData] | JSONResponse:
+    return await _handler(request).update_spatiotemporal_anchor(context, body, request)
+
+
+@router.post(
     "/update_config_personality_anchor",
     response_model=ApiResponse[PersonalityAnchorData],
 )
@@ -217,6 +265,11 @@ async def create_config(
     return await _handler(request).create_config(context, body, request)
 
 
+# ``update_config*`` serve both faces through one internal route: the monolith's
+# /api (user-JWT) face called POST and its /v1 (API-key) face called PUT. The
+# method is therefore declared twice here, but the gateway's ``/v1/memory_config``
+# API-key allowlist publishes PUT only (mirroring the monolith's v1 face and
+# ``api/openapi-baseline.json``); POST stays on the JWT face.
 @router.api_route(
     "/update_config",
     methods=["PUT", "POST"],

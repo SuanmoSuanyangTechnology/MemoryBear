@@ -82,7 +82,8 @@ export default function FaqWorkspace({ knowledgeBaseId, onOpenWikiPage }: {
     openImport,
     closeImport: closeImportDrawer,
     readFile: readImportFile,
-  } = useFaqImport({ knowledgeBaseId, onCompleted: refresh });
+    confirmImport,
+  } = useFaqImport({ knowledgeBaseId, onCompleted: refresh, existingCount: totalAll });
 
   const handleSwitch = (vo: FaqItem) => {
     setBusy(true)
@@ -399,6 +400,7 @@ export default function FaqWorkspace({ knowledgeBaseId, onOpenWikiPage }: {
         stage={importStage}
         parseResult={importParseResult}
         onFile={readImportFile}
+        onConfirm={confirmImport}
         onClose={closeImportDrawer}
       />
     </Flex>

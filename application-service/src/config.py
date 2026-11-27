@@ -191,6 +191,22 @@ class AppServiceSettings(BaseSettings):
     # their own events; set explicitly only when those deployments share a
     # database name as well.
     model_usage_stream: str = Field(default="", validation_alias="MODEL_USAGE_STREAM")
+    # Celery broker/result storage. Empty URLs fall back to Redis DB 3 (broker)
+    # and DB 4 (backend) - the same databases the monolith uses, so both sides
+    # of the handover share one broker. CELERY_BROKER_URL /
+    # CELERY_RESULT_BACKEND accept full URLs (e.g. amqp://...) as overrides.
+    # Never use BROKER_URL / RESULT_BACKEND / CELERY_BROKER / CELERY_BACKEND:
+    # those names are hijacked by the Celery CLI.
+    celery_broker_url: str = Field(default="", validation_alias="CELERY_BROKER_URL")
+    celery_result_backend: str = Field(
+        default="", validation_alias="CELERY_RESULT_BACKEND"
+    )
+    celery_broker_db: int = Field(
+        default=3, ge=0, validation_alias="REDIS_DB_CELERY_BROKER"
+    )
+    celery_result_db: int = Field(
+        default=4, ge=0, validation_alias="REDIS_DB_CELERY_BACKEND"
+    )
 
     # Application service environment variables
     application_service_host: str = Field(
@@ -241,9 +257,14 @@ class AppServiceSettings(BaseSettings):
         validation_alias="APPLICATION_SERVICE_REDIS_POOL_SIZE",
     )
     application_service_health_probe_timeout_seconds: float = Field(
-        default=3.0,
+        default=1.0,
         gt=0,
         validation_alias="APPLICATION_SERVICE_HEALTH_PROBE_TIMEOUT_SECONDS",
+    )
+    application_service_chat_db_acquire_timeout_seconds: float = Field(
+        default=3.0,
+        gt=0,
+        validation_alias="APPLICATION_SERVICE_CHAT_DB_ACQUIRE_TIMEOUT_SECONDS",
     )
     # Key namespace of this service's own Redis entries (the instance is shared
     # with the monolith's Celery broker and cache during the coexistence period).
@@ -355,6 +376,17 @@ class AppServiceSettings(BaseSettings):
         gt=0,
         validation_alias="MARKET_OPERATOR_IMPORT_CONTENT_MAX_TOTAL_BYTES",
     )
+    # Independent file service (core/file-service) internal API. An empty base
+    # URL or service token fails the upload paths closed at call time; the
+    # dependency is runtime-only, so startup is not gated on it.
+    file_service_base_url: str = Field(
+        default="",
+        validation_alias="FILE_SERVICE_BASE_URL",
+    )
+    file_service_internal_token: SecretStr = Field(
+        default=SecretStr(""),
+        validation_alias="FILE_SERVICE_INTERNAL_TOKEN",
+    )
     # Operator MCP availability probes (interface doc §8.8): loopback, link-local,
     # metadata and unspecified targets are always rejected; private ranges are
     # rejected unless listed here. Comma-separated CIDRs; empty means deny all
@@ -381,6 +413,26 @@ class AppServiceSettings(BaseSettings):
         gt=0,
         validation_alias="APPLICATION_SERVICE_UPSTREAM_TIMEOUT_SECONDS",
     )
+    # East-west write face of memory-profile (end-user merge). The merge owns
+    # the memory write locks and every derived memory artifact, so it must run
+    # there; same env names and defaults as the monolith's outbound client. An
+    # empty base URL fails the merge path closed at call time.
+    memory_profile_base_url: str = Field(
+        default="",
+        validation_alias="MEMORY_PROFILE_BASE_URL",
+    )
+    memory_profile_connect_timeout_seconds: float = Field(
+        default=5.0, gt=0, validation_alias="MEMORY_PROFILE_CONNECT_TIMEOUT_SECONDS"
+    )
+    memory_profile_pool_timeout_seconds: float = Field(
+        default=5.0, gt=0, validation_alias="MEMORY_PROFILE_POOL_TIMEOUT_SECONDS"
+    )
+    memory_profile_read_timeout_seconds: float = Field(
+        default=120.0, gt=0, validation_alias="MEMORY_PROFILE_READ_TIMEOUT_SECONDS"
+    )
+    memory_profile_write_timeout_seconds: float = Field(
+        default=600.0, gt=0, validation_alias="MEMORY_PROFILE_WRITE_TIMEOUT_SECONDS"
+    )
     # East-west direct dependency on model-service (annotation embeddings),
     # never routed through the gateway; same env name as the monolith's
     # outbound knob. Unset or unreachable degrades annotation writes to a
@@ -388,6 +440,19 @@ class AppServiceSettings(BaseSettings):
     model_service_base_url: str | None = Field(
         default=None,
         validation_alias="MODEL_SERVICE_BASE_URL",
+    )
+    # East-west read of the home-page version card (ops-service owns
+    # version_notes). Unset or unreachable degrades to SYSTEM_VERSION with
+    # empty structured intros — the monolith's last-resort fallback.
+    ops_service_base_url: str = Field(
+        default="",
+        validation_alias="OPS_SERVICE_BASE_URL",
+    )
+    ops_service_connect_timeout_seconds: float = Field(
+        default=2.0, gt=0, validation_alias="OPS_SERVICE_CONNECT_TIMEOUT_SECONDS"
+    )
+    ops_service_read_timeout_seconds: float = Field(
+        default=5.0, gt=0, validation_alias="OPS_SERVICE_READ_TIMEOUT_SECONDS"
     )
     # gRPC server (same process as FastAPI; --loop asyncio is mandatory because
     # grpc.aio cannot run on uvloop). Port 0 binds an ephemeral port in tests.
@@ -620,6 +685,8 @@ class AppServiceSettings(BaseSettings):
         default=SecretStr("a_default_secret_key_that_is_long_and_random"),
         validation_alias="SECRET_KEY",
     )
+    # A non-default absolute value is the local storage root (share it between
+    # services); the default keeps the legacy cwd-relative storage/files root.
     file_path: str = Field(default="/files", validation_alias="FILE_PATH")
     storage_type: str = Field(default="local", validation_alias="STORAGE_TYPE")
     minio_endpoint_url: str = Field(default="", validation_alias="MINIO_ENDPOINT_URL")
@@ -779,6 +846,18 @@ class AppServiceSettings(BaseSettings):
     @property
     def redis_url(self) -> str:
         return self.redis_url_for_db(self.redis_db)
+
+    @property
+    def celery_broker(self) -> str:
+        return self.celery_broker_url.strip() or self.redis_url_for_db(
+            self.celery_broker_db
+        )
+
+    @property
+    def celery_result_backend_url(self) -> str:
+        return self.celery_result_backend.strip() or self.redis_url_for_db(
+            self.celery_result_db
+        )
 
     def _deployment_scoped_name(self, explicit: str, base: str, env_name: str) -> str:
         """Resolve a deployment-scoped Redis name from an override or DB_NAME."""

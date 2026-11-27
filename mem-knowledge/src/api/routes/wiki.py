@@ -9,11 +9,11 @@ from typing import Annotated, Any, Literal
 from fastapi import APIRouter, Depends, Query, Request
 from pydantic import WrapValidator
 
-from ...error_mapping import map_wiki_error
+from ...application.runtime import ProcessRuntime
 from ...errors import KnowledgeError
+from ...errors.mapping import map_wiki_error
 from ...rag.wiki.config import WikiError
 from ...repositories.wiki import read
-from ...runtime import ProcessRuntime
 from ...services.wiki.runtime import transaction
 from ..dependencies import Principal, get_principal, get_runtime, is_manager_request
 from ..query_validation import localized_query_validation

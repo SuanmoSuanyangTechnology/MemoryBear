@@ -110,6 +110,7 @@ from app.models import App, AppRelease, Document, File, Knowledge, User, Workspa
 from app.models.end_user_model import EndUser
 from app.models.file_model import FILE_ROLE_SOURCE
 from app.repositories.end_user_repository import (
+    EndUserRepository,
     count_inactive_end_users_by_workspace,
     get_all_active_workspaces,
     get_recently_active_end_user_ids_page,
@@ -5096,7 +5097,7 @@ def do_extract_ai_personality_for_user(
         self,
         end_user_id: str,
         workspace_id: str,
-        expected_source_version: str,
+        expected_source_version: str | None,
         lock_token: str,
 ) -> Dict[str, Any]:
     """通过企业插件读取证据，提取人格条目并发布企业 pending 批次。"""
@@ -5111,6 +5112,9 @@ def do_extract_ai_personality_for_user(
     from app.core.memory.pipelines.base_pipeline import ModelClientMixin
     from app.schemas.memory_config_schema import ConfigurationError
 
+    from premium.memory.ai_personality.errors import StaleBatchError
+
+    is_manual = expected_source_version is None
     started_at = time.time()
     redis_client = get_sync_redis_client()
     inflight_key = AI_PERSONALITY_INFLIGHT_KEY_FMT.format(end_user_id=end_user_id)
@@ -5121,7 +5125,8 @@ def do_extract_ai_personality_for_user(
     # 排队超过派发去重窗口也可执行；运行锁在启动时获取并覆盖任务硬超时。
     acquired = redis_client.set(running_key, lock_token, nx=True, ex=AI_PERSONALITY_RUNNING_TTL_SEC)
     if not acquired:
-        redis_client.eval(UNLOCK_SCRIPT, 1, inflight_key, lock_token)
+        if not is_manual:
+            redis_client.eval(UNLOCK_SCRIPT, 1, inflight_key, lock_token)
         return {"status": "skipped_inflight", "entry_count": 0}
 
     async def _run() -> Dict[str, Any]:
@@ -5135,7 +5140,7 @@ def do_extract_ai_personality_for_user(
                 if memory_config is None:
                     logger.info("AI人格do跳过未启用空间 user=%s workspace=%s", end_user_id, workspace_id)
                     return {"status": "skipped_disabled", "entry_count": 0}
-            except (BusinessException, ValueError) as exc:
+            except (BusinessException, ConfigurationError, ValueError) as exc:
                 logger.warning("AI人格do跳过无可用配置 user=%s workspace=%s: %s", end_user_id, workspace_id, exc)
                 return {"status": "skipped_no_config", "entry_count": 0}
 
@@ -5155,7 +5160,7 @@ def do_extract_ai_personality_for_user(
         if (
             snapshot.end_user_id != end_user_id
             or snapshot.workspace_id != workspace_id
-            or snapshot.source_version != expected_source_version
+            or (not is_manual and snapshot.source_version != expected_source_version)
         ):
             raise RuntimeError("Enterprise evidence snapshot identity or source version mismatch")
 
@@ -5181,7 +5186,7 @@ def do_extract_ai_personality_for_user(
                     expires_at=expires_at,
                     outcome=outcome,
                     entries=entries,
-                ))
+                ), allow_repeat=is_manual)
             except SourceChangedError:
                 return False
             return True
@@ -5238,9 +5243,12 @@ def do_extract_ai_personality_for_user(
             "expires_at": to_iso_z(expires_at),
         }
 
-    loop = set_asyncio_event_loop()
+    loop = None
     try:
+        loop = set_asyncio_event_loop()
         result = loop.run_until_complete(_run())
+    except StaleBatchError:
+        result = {"status": "skipped_stale_batch", "entry_count": 0}
     except Exception as exc:
         logger.error(
             "AI人格提取失败 user=%s workspace=%s error_type=%s",
@@ -5251,9 +5259,11 @@ def do_extract_ai_personality_for_user(
         )
         raise
     finally:
-        _shutdown_loop_gracefully(loop)
-        # 仅释放本任务持有的锁，避免误删后续任务的 token。
-        for key in (running_key, inflight_key):
+        if loop is not None:
+            _shutdown_loop_gracefully(loop)
+        # 仅释放本任务持有的锁；手动任务没有派发锁。
+        lock_keys = (running_key,) if is_manual else (running_key, inflight_key)
+        for key in lock_keys:
             try:
                 redis_client.eval(UNLOCK_SCRIPT, 1, key, lock_token)
             except Exception:
@@ -7473,7 +7483,7 @@ def flush_conversation_task(self) -> None:
     )
 
 
-@celery_app.task(name="app.tasks.scan_workflow_schedule_triggers", queue="periodic_tasks", time_limit=50,
+@celery_app.task(name="app.tasks.scan_workflow_schedule_triggers", queue="workflow_trigger_tasks", time_limit=50,
                  soft_time_limit=45)
 def scan_workflow_schedule_triggers():
     """扫描并派发已发布工作流中的定时触发器。"""
@@ -7722,7 +7732,7 @@ def generate_scene_summary(
         close_reason=close_reason,
     )
     started_at = time.monotonic()
-    stage = "generate_summary"
+    stage = "check_end_user"
     loop = set_asyncio_event_loop()
 
     async def _run():
@@ -7734,7 +7744,15 @@ def generate_scene_summary(
             await storage_client.close()
 
     try:
-        result = loop.run_until_complete(_run())
+        with get_db_context() as db:
+            active_user_ids = EndUserRepository(db).filter_existing_ids(
+                [uuid.UUID(end_user_id)]
+            )
+        if active_user_ids:
+            stage = "generate_summary"
+            result = loop.run_until_complete(_run())
+        else:
+            result = {"status": "skipped", "reason": "inactive_or_missing_end_user"}
         if result.get("community_dispatch_required"):
             stage = "dispatch_scene_community"
             community_task = run_scene_community_incremental.apply_async(
@@ -7801,10 +7819,23 @@ def run_scene_community_incremental(self, end_user_id: str, trigger: str = "thre
 
     async def _run():
         nonlocal stage
-        stage = "load_config"
+        stage = "check_end_user"
         with get_db_context() as db:
+            workspace_id = db.execute(
+                select(EndUser.workspace_id).where(
+                    EndUser.id == uuid.UUID(end_user_id),
+                    EndUser.is_active.is_(True),
+                )
+            ).scalar_one_or_none()
+            if workspace_id is None:
+                return {
+                    "status": "skipped",
+                    "reason": "inactive_or_missing_end_user",
+                    "dispatch_next": False,
+                }
+            stage = "load_config"
             config_service = MemoryConfigService(db)
-            current_config_id = config_service.get_config_id_by_end_user(end_user_id)
+            current_config_id = config_service.get_workspace_active_config_id(workspace_id)
             memory_config = config_service.load_memory_config(current_config_id)
 
         stage = "connect_neo4j"
@@ -7916,7 +7947,7 @@ def scan_scene_community_pending():
         expire=300,
         timeout=0,
     )
-    stats = dict(pages=0, candidates=0, dispatched=0, dispatch_failed=0)
+    stats = dict(pages=0, candidates=0, skipped=0, dispatched=0, dispatch_failed=0)
     if not lock.acquire():
         logger.info("[SceneCommunity] scheduled scan skipped: reason=lock_held")
         return {**stats, "skipped_due_to_lock": True}
@@ -7933,7 +7964,24 @@ def scan_scene_community_pending():
                     break
                 stats["pages"] += 1
                 stats["candidates"] += len(user_ids)
+                user_uuids = {}
                 for end_user_id in user_ids:
+                    try:
+                        user_uuids[end_user_id] = uuid.UUID(end_user_id)
+                    except ValueError:
+                        stats["skipped"] += 1
+                        logger.warning(
+                            "[SceneCommunity] invalid end-user ID in pending scan: user=%s",
+                            end_user_id,
+                        )
+                with get_db_context() as db:
+                    active_user_ids = EndUserRepository(db).filter_existing_ids(
+                        list(user_uuids.values())
+                    )
+                for end_user_id, user_uuid in user_uuids.items():
+                    if str(user_uuid) not in active_user_ids:
+                        stats["skipped"] += 1
+                        continue
                     lock.ensure_valid()
                     try:
                         run_scene_community_incremental.apply_async(
@@ -8146,34 +8194,6 @@ def scan_scene_summary_idle(
             except Exception as exc:
                 logger.warning("[SceneSummary] idle scanner lock release failed: %s", exc)
 
-
-@celery_app.task(
-    name="app.tasks.consume_model_gateway_alerts",
-    bind=False,
-    ignore_result=False,
-    max_retries=0,
-    acks_late=False,
-    time_limit=60,
-    soft_time_limit=50,
-)
-def consume_model_gateway_alerts_task() -> dict[str, Any]:
-    """定时任务：消费部署域用量流（model:usage:<DB_NAME>）做网关健康告警评估（B9）。
-
-    服务侧（model-service）的调用终态只进 stream，本任务用独立消费组
-    `model-usage-alerts` 读该 stream 喂给宿主企业告警插件；beat 周期由
-    settings.MODEL_USAGE_ALERT_INTERVAL_SECONDS（默认 30s）驱动。
-    社区版无 premium 插件时插件层直接跳过（不建组不读流）；Redis 层异常不抛，
-    下轮重试（事件已 ACK 的不重放，属尽力而为 + 新鲜度优先口径）。
-    """
-    from app.core.alert_metric_bridge import consume_model_gateway_alerts
-
-    try:
-        return consume_model_gateway_alerts()
-    except Exception as exc:
-        logger.warning(
-            f"consume_model_gateway_alerts 本轮失败（下轮重试）: {exc}", exc_info=True
-        )
-        return {"status": "RETRY_LATER", "error": str(exc)}
 
 @celery_app.task(
     name="app.tasks.run_reembed_job",

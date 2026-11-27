@@ -7,8 +7,8 @@ Independent, internal-only service hosting Memory domain modules. Routes are com
 - Read modules keep HTTP adaptation in `modules`, business reads in `services`, SQL in `repositories`, and response fields/enums in `schemas`. Strict reads reuse `EndUserService.require_in_workspace`; SQL composes the shared predicates in `repositories/end_user.py`. Combined display reads check the user once before loading each source. Cached implicit profile sections remain extensible JSON; display records and perceptual envelopes use explicit models. Preference date comparisons use UTC for both numeric and ISO timestamps, and engine presentation is checked against the API's current ten event types in both languages.
 - This service accesses shared PostgreSQL tables through mappings declared in `src/models/references/`, plus Neo4j, Redis, and Elasticsearch. It does not import `api` or `app` code.
 - Reads are the default: the repositories listed in `scripts/check_import_boundaries.py` are `select`-only, and the AST check enforces it. It is a per-repository convention, not a connection-level read-only setting.
-- Writes are owned by named mutation repositories, never by a read repository. The one in use today is `src/repositories/memory_config_mutation.py`, which owns `memory_config` DML and the `workspaces.memory_config` pointer for the memory-config domain. Generation endpoints submit their work to memory-jobs, which performs the only writes to `end_users` (the two cached text groups).
-- LLM calls go to the model service over its invoke face. The one exception to "no provider credentials" is the Scene continuity BERT probe used by `scene/split-demo`: it reads `SCENE_CONTINUITY_URL` / `_API_KEY` / `_MODEL` / `_TIMEOUT_SECONDS` (`src/infrastructure/scene_continuity.py`). Credentials are never logged or echoed in error bodies. Everything else names a `model_configs` row and its tenant, and the model service resolves channels and failover (`src/infrastructure/model_service.py`).
+- Writes live in repositories. `src/repositories/memory_config_mutation.py` owns memory-config changes; `src/repositories/memory_storage.py` owns memory deletion, audit and Outbox writes plus user state/count updates. Cached text generation remains delegated to memory-jobs.
+- LLM and embedding calls go to the model service over its invoke face, which resolves credentials, channels, and failover from a `model_configs` row and its tenant. Dedicated classifier/pruning endpoints in the extraction engine, Scene continuity and emotion reply classifiers use their configured URLs and credentials directly. Credentials are never logged or echoed in error bodies.
 - PostgreSQL, Neo4j, Redis, Elasticsearch, and the model-service client each have a dedicated lifecycle manager under `src/infrastructure/`; `src/runtime.py` only composes, probes, and closes them. The model service is not part of readiness: only generation endpoints need it.
 - `src/common/redis_cache.py` provides shared JSON helpers, zset JSON reads, exact/prefix/pattern invalidation, and the async `@redis_cache` cache-aside decorator. It reuses the existing `ProfileRuntime.redis` provider and does not add cache state to runtime.
 - `src/services/` holds the cross-module services other modules call; their repositories live under `src/repositories/`. `EndUserService` owns the end-user rules: is this end user addressable from the caller's workspace? It exposes `exists_in_workspace()` for a strict one-lookup membership answer (no merge branch, no payload columns), `resolve_in_workspace()` for the merge-aware identity used by profile, summary and graph endpoints, and `active_end_user_ids()` for the batch target set; both require the user and the workspace to be active and collapse malformed/foreign/missing ids to `False`/`None`. `ModelConfigService` owns model resolution for every workspace slot (`llm`, `embedding`, `rerank`, `vision`, `audio`, `video`): workspace → active `memory_config` → preset/slot column → `model_configs` tenant/active check, with typed calls (`chat_model_for_workspace`, `embed_texts_for_workspace`, `rerank_for_workspace`) and `WorkspaceModelMemo` making the LLM a once-per-request lookup shared by every user in a batch. `WorkspaceService` owns the one workspace row (`row()`): identity, active/storage flags and all six model columns, so validation and model resolution read it once per request. Profile, interest distribution, graph and cache generation all go through these services, so neither the workspace boundary nor the model choice can drift between endpoints. The boundary predicates and the narrow-read template live in `src/repositories/end_user.py` (`active_user_in_workspace`, `active_users_in_workspace`, `scoped_end_user_select`, `active_workspace_exists`); the access repository, the profile reads and the generation writes all compose them instead of repeating the conditions.
@@ -148,6 +148,13 @@ reachable routes and their parameter contract are mirrored in
 
 Required direct-mode headers are `x-tenant-id`, `x-workspace-id`, `x-source`, and the acting id — whose header the face decides: `ex_api` carries the key that authenticated as `x-api-key-id`, and every other face carries the user as `x-user-id`. Both terminators follow that rule (the Gateway when it terminates an API key, the API's own proxy on its `/v1` route), so an `ex_api` request resolves to one principal whichever hop terminated it, and the acting id is never a key id on one path and a creator's user id on another. The request log records which of the two it got, as `actor_kind` (`apikey` or `actor`), so a key id is never read as an actor. `X-Trace-Id` is optional; all identity IDs must be UUIDs. In gateway mode the actor, tenant, workspace, and authenticated face come from verified token claims (the claim keeps its own `api_key` / absent spelling and is mapped onto `ex_api` / `in_api`); conflicting request headers are ignored.
 
+Emotion reply uses the trusted API proxy channel. Route its public face through
+the API to verify the API key type, workspace binding, and tenant context.
+With `MEMORY_ENTERPRISE_BASE_URL` and `MEMORY_INTERNAL_TOKEN` configured,
+memory-profile sends the emotion code to memory-enterprise after BERT classification.
+memory-enterprise compares the token against its own `MEMORY_INTERNAL_TOKEN` and
+reads the tenant from `X-Tenant-Id`; no identity ACL rule is involved.
+
 The legacy response envelope is exactly:
 
 ```json
@@ -223,11 +230,79 @@ Generation is a later, explicitly scoped extension over the read service:
   with `PRECONDITION_FAILED`.
 - Deployments that enable `generate_cache` must grant `UPDATE` on `end_users`
   to the **memory-jobs** PostgreSQL role (all generation now runs there). This
-  service's role can stay read-only for that table; without the grant only the
-  generation endpoints fail.
+  service's role also needs `UPDATE` on `end_users` when memory-storage deletion
+  is enabled (user status and memory counts).
 - The memory-config endpoints need `SELECT/INSERT/UPDATE/DELETE` on
   `memory_config` and `UPDATE` on `workspaces` (for `active_config`). Grant
   them only when those endpoints are served by this deployment.
+- Memory-storage deletion also needs `INSERT/SELECT` on
+  `memory_storage_outbox_events`, `INSERT` on `memory_forget_log`, Neo4j write
+  access and Elasticsearch delete-by-query access to `rag_memory_current`.
+  Keep the existing API Outbox consumer running to synchronize graph deletions.
+- Implicit profile generation (`POST /api/memory/implicit-memory/generate_profile`)
+  remains in the API and is not forwarded to memory-profile. This service retains
+  cached implicit profile reads only; it does not generate or persist profiles.
+- Trial extraction runs independently under `src/storage_services/extraction_engine`, with
+  the API-compatible configured output directory. Configure
+  classifier/pruning settings and attachment storage as in `.env.example`.
+  Local attachments require the API files to be mounted at the same storage
+  path; object storage requires the corresponding bucket access. The API
+  forwards trial/chat SSE without buffering. Model-service and intermediary
+  timeouts follow the existing client configuration without a per-route override.
+- The complete extraction engine keeps `steps`, `knowledge_extraction`,
+  `data_preprocessing` and `deduplication` under `src/storage_services/extraction_engine`.
+  Engine data structures live directly under `src/schemas/`; runtime
+  configuration is defined in `src/schemas/memory_config.py` and assembled
+  in `src/services/memory_config/service.py`. Utilities retain their API subdirectories under `src/common/`; shared date helpers
+  live in `src/common/datetime_utils.py`. The chunker client lives in
+  `src/common/llm_tools/chunker_client.py`; prompt rendering lives under `src/common/prompt/`.
+  Prompt templates live in
+  `src/prompt/extraction_engine/`; business
+  orchestration is `MemoryStorageService._run_pilot_extraction`, with no
+  `runner.py` or extraction subpackage under `modules/memory_storage`.
+  Statement classification remains in its original extraction step; pruning HTTP
+  calls live in `src/services/extract_pruning_client.py`. Attachment backends reuse `packages/storage-core` (`mem-storage-core`).
+  `src/infrastructure/attachment_storage.py` only maps service settings and manages
+  the shared client lifecycle; no backend implementation is copied locally.
+  Chunker defaults live in `storage_services/extraction_engine/data_preprocessing/config_utils.py`;
+  extraction enums live in `storage_services/extraction_engine/enums.py`.
+- Extraction, attachment storage and trial history configuration is defined in
+  `src/config.py` and read through the existing `src/bootstrap.py` loader.
+  Environment variable names, defaults, pruning normalization and timeout
+  clamping match the API implementation. `MEMORY_OUTPUT_DIR`
+  defaults to `logs/memory-output`; output path helpers live in `src/config.py`,
+  and trial results remain in that directory as in the API.
+- Migrated business, prompt, template and timing logs use
+  `src/common/observability/logging.py`, controlled by `PROFILE_LOG_LEVEL` and
+  `PROFILE_LOG_FORMAT`. Callers use `get_logger()` directly without file
+  handlers; template details use DEBUG.
+  No separate prompt/template/timing log files are created. Pilot SSE retains
+  `time_log` as null; extraction result files remain unchanged.
+- Tabular-input processing uses the API's locked pandas version. Unused ontology-class
+  generation and its dedicated validator, schema and prompts are removed. OWL
+  import/export and semantic validation are also removed, along with Owlready2
+  and RDFLib dependencies. Ontology type merging used by extraction is retained. The Docker builder includes native
+  build tools; the runtime includes libmagic for attachment type detection.
+  Java is not installed; OWL reasoning is not part of this service.
+  Deprecated emotion extraction stays unregistered; the old placeholder
+  `data_chunker.py` is replaced by the actual `data_preprocessing/chunker.py`.
+
+## Develop baseline alignment
+
+The task branch is `codex/memory-storage-migration`, based on `origin/develop`
+at `8590dd13f`. Its memory-read
+core, routes and shared-table columns are retained alongside the seven migrated
+interfaces. SSE forwarding reuses the API's existing
+`app/integrations/profile/stream.py` and `client.stream`; this migration no longer
+extends `client.py` or `proxy.py` for streaming.
+
+Memory node labels reuse `src/storage/enums.py`. Outbox contracts and enqueue
+adaptation live in `src/storage/outbox/`; the unchanged graph-deletion helpers
+live in `src/storage/custom/end_user_delete.py`. PostgreSQL event persistence and
+manual-delete auditing remain in `src/repositories/memory_storage.py`. The former
+`src/common/storage_contracts.py` and `src/common/outbox/` are removed. Attachment
+backends reuse `packages/storage-core`, a separate concern from the graph/document
+storage layer. `src/models/` contains database mappings only.
 
 ## Source layout
 
@@ -240,10 +315,12 @@ src/entry.py
   -> src/services/                     # 用例编排 + 纯逻辑/常量 + 跨模块服务（end_user / model_config / workspace_service）
   -> src/repositories/                 # 全部数据访问（含 end_user_scope 边界谓词）
   -> src/schemas/                      # DTO（graph / profile / workspace）
+  -> src/storage_services/extraction_engine/  # 萃取算法与步骤，对应 API 引擎主体
+  -> src/pipelines/                         # pilot_write_pipeline.py，对应 API 流水线
   -> src/infrastructure/               # 客户端与 producer；task_bridge.py 只投递任务，不注册任务
 ```
 
-`src/modules/__init__.py` composes every domain router into the single router `src/app.py` mounts, so a new module is registered there and nowhere else. `src/modules/` is transport only: routes bind HTTP parameters, handlers translate transport contracts and response envelopes, and the module's `schemas.py` describes only the HTTP interface's input/output (request/response shapes) — no business logic and no data access. Use-case orchestration and pure logic/constants live in `src/services/`; data access lives in `src/repositories/`; response value objects (DTOs) live in `src/schemas/`. Repositories depend on shared infrastructure managers, and the workspace-boundary predicates live in `src/repositories/end_user.py`. LLM prompts, pipelines and their templates live in memory-jobs, which executes the generation tasks. The full layering contract and its automated enforcement are documented in `docs/architecture.md`.
+`src/modules/__init__.py` composes every domain router into the single router `src/app.py` mounts, so a new module is registered there and nowhere else. `src/modules/` is transport only: routes bind HTTP parameters, handlers translate transport contracts and response envelopes, and the module's `schemas.py` describes only the HTTP interface's input/output (request/response shapes) — no business logic and no data access. Use-case orchestration and pure logic/constants live in `src/services/`; data access lives in `src/repositories/`; response value objects (DTOs) live in `src/schemas/`. Repositories depend on shared infrastructure managers, and the workspace-boundary predicates live in `src/repositories/end_user.py`. Task-based cache generation remains in memory-jobs; the extraction engine, and its prompts execute locally for the migrated interfaces. The full layering contract and its automated enforcement are documented in `docs/architecture.md`.
 
 API-owned PostgreSQL tables are mapped under `src/models/references/` with a separate `ReadOnlyBase.metadata`, no foreign keys, and no relationships. Profile-owned tables belong under `src/models/owned/`, inherit `ProfileBase`, and are the only tables exposed to Alembic. PostgreSQL read repositories use SQLAlchemy ORM/select expressions only; native `text()` SQL and ORM write methods are rejected by the boundary script. The runtime pool explicitly uses rollback-on-return and invalidates any asyncpg connection still in a transaction at checkin or checkout; Alembic uses a separate short-lived migration engine without pooling.
 
@@ -299,8 +376,9 @@ Quota limits are owned by this service: the community free plan comes from
 `QUOTA_PRE_USER_MEMORY_WRITE_QPS_LIMIT` (same names as the API). When
 `MEMORY_ENTERPRISE_BASE_URL` points at the closed-source `memory-enterprise`
 service, the effective plan and resource-pack grants are queried over HTTP with
-`X-Internal-Token: MEMORY_ENTERPRISE_TOKEN`; an unconfigured or unreachable
-service falls back to the free plan.
+the shared `MEMORY_INTERNAL_TOKEN` (`X-Internal-Token`); the tenant travels in
+`X-Tenant-Id`. An unconfigured or unreachable service falls back to the free
+plan.
 
 This service must use the same Redis logical DB as the API (the shared
 deployment uses `REDIS_DB=3`) so keys written by API workers stay visible.
@@ -334,6 +412,30 @@ and `locales/en/memory.json` catalogs. API forwarding failures and API-key
 prechecks use the API's existing `app.i18n` translation service. Business codes,
 HTTP statuses, data payloads and technical exception details retain their
 existing behavior; an intentionally empty cached-profile error stays empty.
+
+## Reflection configuration preview
+
+`GET /api/memory/reflection/run?config_id=...` forwards to
+`GET /internal/v1/memory/reflection/run`. This management endpoint is not added
+to the API-key contract. The API retains authentication and waits up to 600
+seconds for the preview; there is no local fallback or memory-jobs task.
+
+`modules/reflection` adapts HTTP, and `services/memory_config_trial/reflection.py`
+owns the preview. It uses packaged sample data and prompts, calls model-service
+through `ProfileChatModel`, and never reads or writes live memory in Neo4j.
+The read repository scopes configuration access to the active workspace and its
+tenant. This endpoint alone retains legacy integer `config_id_old` compatibility;
+the existing memory-config endpoints remain UUID-only.
+
+Model selection retains the literal `workspace.llm` value, even when previewing
+an inactive configuration. It does not use `reflection_model_id`, the active
+config pointer, or a model preset. Missing, inaccessible or disabled models
+produce HTTP 500; the legacy code's documented default-model fallback was not
+implemented by its invoke client. Detection/resolution failures retain the
+legacy HTTP 200 envelope with `data.success=false`; missing or out-of-scope
+configurations return HTTP 404. English output now retains `baseline`, nullable
+assessment results can be translated safely, and failure duration uses one
+monotonic clock.
 
 ## Scene community graph
 
@@ -441,6 +543,15 @@ uv run python -m compileall -q src scripts migrations
 uv run python scripts/check_import_boundaries.py
 ```
 
+The reflection-log contract tests seed their own throwaway PostgreSQL database
+and drop it afterwards. Point them at any database whose role can
+`CREATE DATABASE`; they are skipped when the variable is unset:
+
+```bash
+PROFILE_TEST_DATABASE_URL=postgresql+asyncpg://postgres:postgres@127.0.0.1:5432/postgres \
+  uv run pytest tests
+```
+
 Build from the repository root so Docker can use the service-specific ignore file:
 
 ```bash
@@ -448,3 +559,14 @@ docker build -f memory-profile/Dockerfile -t memory-profile:local .
 ```
 
 The image runs as UID/GID 10001 and exposes port 8082.
+
+The migrated single-source `locales/en/errors.json` and `locales/zh/errors.json`
+match the complete API files; existing memory locale extensions are retained.
+
+API-aligned support layout: memory utils keep their `data/`, `validation/`,
+`log/`, `prompt/` and `config/` subdirectories under `src/common/`; Redis locking
+stays under infrastructure. Emotion buckets live under `src/emotion/`, ontology
+merging under `src/services/ontology_services/`, and the ontology registry alongside its merger under `src/services/ontology_services/`. API-owned file metadata mappings
+live under `src/models/references/`. Chunking lives under `src/common/llm_tools/`. Multimodal and
+permanent-file URL helpers are separate services, as in the API. Existing
+`src.common.validation` imports continue to work through its package initializer.

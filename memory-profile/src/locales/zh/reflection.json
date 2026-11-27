@@ -1,0 +1,9 @@
+{
+  "trial": {
+    "success": "反思试运行",
+    "forbidden": "反思试运行需要管理端账号",
+    "failed": "反思失败，未解决冲突",
+    "config_not_found": "未找到config_id为 {config_id} 的配置",
+    "unavailable": "反思试运行失败，请检查模型配置或稍后重试"
+  }
+}

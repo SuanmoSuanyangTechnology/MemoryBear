@@ -33,9 +33,11 @@ class JobsRuntime:
         self.settings = settings or get_settings()
         self.postgres = PostgresManager(self.settings)
         self.redis = RedisManager(self.settings)
-        # API memory_write 锁固定使用 Celery backend DB，不是业务缓存 DB。
+        #: Read-only view of the Celery result backend (its own Redis logical
+        #: database). The dispatch-admission sweep reads result metadata from
+        #: here; it is not a dependency of this service's health.
         self.result_backend_redis = RedisManager(
-            self.settings, db=self.settings.redis_db_celery_backend,
+            self.settings, url=self.settings.resolved_celery_result_backend
         )
         self.elasticsearch = ElasticsearchManager(self.settings)
         self.neo4j = Neo4jManager(self.settings)

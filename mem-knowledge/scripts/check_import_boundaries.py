@@ -20,6 +20,8 @@ AUTHORIZED_TASKS_BY_MODULE = {
     "tasks/wiki_faq.py": {"mem_knowledge.tasks.generate_wiki_faq"},
     "tasks/wiki.py": {
         "mem_knowledge.tasks.sync_wiki_document",
+        "mem_knowledge.tasks.open_wiki_map_batch",
+        "mem_knowledge.tasks.run_wiki_page_delivery",
         "mem_knowledge.tasks.reduce_wiki_page",
         "mem_knowledge.tasks.enqueue_unprocessed_wiki_documents",
     },
@@ -43,7 +45,10 @@ REQUIRED_RUNTIME_ROOT_MODULES = frozenset(
     {
         "main.py",
         "api/router.py",
-        "migration_policy.py",  # Also loaded by the Alembic CLI outside src.
+        "database_migrations.py",
+        "infrastructure/database/migrations.py",
+        "infrastructure/database/migration_policy.py",  # Also loaded by the Alembic CLI outside src.
+        "parser_configuration/cli.py",  # Explicit offline/authorized migration entry point.
         "rag/chunk/router.py",
         "tasks/celery_worker.py",
         *AUTHORIZED_TASKS_BY_MODULE,
@@ -53,7 +58,10 @@ RUNTIME_ROOT_MODULES = frozenset(
     {
         "main.py",
         "api/router.py",
-        "migration_policy.py",  # Also loaded by the Alembic CLI outside src.
+        "database_migrations.py",
+        "infrastructure/database/migrations.py",
+        "infrastructure/database/migration_policy.py",  # Also loaded by the Alembic CLI outside src.
+        "parser_configuration/cli.py",  # Explicit offline/authorized migration entry point.
         "services/wiki/taxonomy.py",  # scripts/replan_wiki_taxonomy.py 的显式运维入口。
         "rag/chunk/router.py",
         "tasks/celery_worker.py",
@@ -93,7 +101,7 @@ DUPLICATE_PUBLIC_CLASS_ALLOWLIST: dict[tuple[str, tuple[str, ...]], str] = {
     ): "Internal API transport contract and owned ORM model intentionally share the legacy name.",
     (
         "KnowledgeBase",
-        ("api/schemas/knowledge.py", "db.py"),
+        ("api/schemas/knowledge.py", "infrastructure/database/manager.py"),
     ): "API request contract base and SQLAlchemy metadata base are separate protocol boundaries.",
     (
         "KnowledgeShare",
@@ -472,6 +480,8 @@ def _scan_worker_observability(root: Path) -> list[str]:
         ("graphrag_worker", "graphrag_tasks"),
         ("qa_import_worker", "qa_import"),
         ("wiki_worker", "wiki_tasks"),
+        ("wiki_map_worker", "wiki_map_tasks"),
+        ("wiki_reduce_worker", "wiki_reduce_tasks"),
         ("faq_worker", "faq_tasks"),
     ):
         if role not in worker_source or queue not in worker_source:

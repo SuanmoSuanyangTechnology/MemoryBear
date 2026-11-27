@@ -10,6 +10,16 @@ import {
   finalizeOutputs,
   replaceOutputByNodeId,
 } from '@/components/Chat/utils/messageOutputs'
+import {
+  appendTimelineMessage,
+  finalizeTimelineEnd,
+  finalizeTimelineError,
+  isTimelineStart,
+  mergeTimelineAgentLog,
+  upsertTimelineAgent,
+  upsertTimelineAgentComplete,
+  upsertTimelineTool,
+} from '@/components/Chat/utils/timelineStream'
 import type { StreamData } from '../types';
 
 /** start/node_start event: backfills the most recent user message's id with the real user_message_id */
@@ -152,6 +162,25 @@ const markInterventionTimeout = (
   }
 }
 
+/**
+ * Sync the sidebar history and the active conversation id with the conversation
+ * reported by the stream. Called on `start`, `error` and `end`/`workflow_end` so
+ * an early failure can't leave the newly created conversation out of the list.
+ */
+export const syncConversation = (
+  targetConversationId: string | null | undefined,
+  currentConversationId: string | null,
+  upsertHistory: (conversationId: string, title?: string) => void,
+  setConversationId: (id: string | null) => void,
+  title?: string,
+) => {
+  if (!targetConversationId) return
+  upsertHistory(targetConversationId, title)
+  if (targetConversationId !== currentConversationId) {
+    setConversationId(targetConversationId)
+  }
+}
+
 export interface StreamHandlerDeps {
   /** Current conversation id */
   conversationId: string | null
@@ -192,9 +221,15 @@ export const createSendStreamHandler = (deps: StreamHandlerDeps) => {
   } = deps
 
   let currentConversationId: string | null = null
+  let hasTimeline = false
 
   return (data: SSEMessage[]) => {
     data.forEach((item) => {
+      console.log('event', item)
+      // SSE heartbeat/comment frames carry no event/data; never route them.
+      if (item.comment !== undefined || !item.event || item.data === undefined) return
+      const payload = item.data as any
+      if (!hasTimeline && isTimelineStart(item)) hasTimeline = true
       const {
         message_id,
         user_message_id,
@@ -205,7 +240,12 @@ export const createSendStreamHandler = (deps: StreamHandlerDeps) => {
       switch (item.event) {
         case 'start':
         case 'node_start': {
-          currentConversationId = curId
+          if (curId) {
+            currentConversationId = curId
+            // The conversation is created on the backend at `start`; show it in the
+            // sidebar right away so an early `error` (with no `end`) doesn't lose it.
+            upsertHistory(curId, title)
+          }
           setChatList(prev => {
             const withUserId = applyUserMessageId(prev, user_message_id)
             const lastList = [...withUserId]
@@ -238,6 +278,19 @@ export const createSendStreamHandler = (deps: StreamHandlerDeps) => {
               return [...prev, { role: 'assistant', content: errorMsg, created_at: Date.now(), meta_data: { error: errorMsg } }]
             })
           }
+          // `error` can terminate the stream before `end`; keep sidebar/active id in
+          // sync with the id received in `start`.
+          syncConversation(
+            curId || currentConversationId || conversationId,
+            conversationId,
+            upsertHistory,
+            setConversationId,
+            title,
+          )
+          if (hasTimeline) {
+            setChatList(prev => finalizeTimelineError(prev, payload))
+            streamLoadingRef.current = false
+          }
           setLoading(false)
           chatIsEnded.current = true
           break
@@ -250,11 +303,31 @@ export const createSendStreamHandler = (deps: StreamHandlerDeps) => {
         case 'memory_stage':
         case 'tool_end':
         case 'tool_error':
+          // Memory trace frames must always feed memory_retrieval, even when
+          // they carry a seq and are also reduced into a timeline tool step.
           updateAssistantMemoryRetrieval(item.event as MemoryTraceEvent, item.data as MemoryTraceEventData)
+          if (hasTimeline && typeof payload?.seq === 'number') {
+            const status = item.event === 'tool_start' ? 'pending' : item.event === 'tool_error' ? 'failed' : 'completed'
+            setChatList(prev => upsertTimelineTool(prev, payload, status))
+          }
+          break
+        case 'agent_dispatch':
+          if (hasTimeline) setChatList(prev => upsertTimelineAgent(prev, payload))
+          break
+        case 'agent_log':
+        case 'agent_log_final':
+          if (hasTimeline) setChatList(prev => mergeTimelineAgentLog(prev, payload))
+          break
+        case 'agent_complete':
+          if (hasTimeline) setChatList(prev => upsertTimelineAgentComplete(prev, payload))
           break
         case 'message':
-          updateAssistantMessage(content, audio_url, audio_url ? 'pending' : undefined)
-          setChatList(prev => appendOutputByNodeId(prev, node_id, content))
+          if (hasTimeline && typeof payload?.seq === 'number') {
+            setChatList(prev => appendTimelineMessage(prev, content || '', payload.seq))
+          } else {
+            updateAssistantMessage(content, audio_url, audio_url ? 'pending' : undefined)
+            setChatList(prev => appendOutputByNodeId(prev, node_id, content))
+          }
           if (curId) currentConversationId = curId;
           break
         case 'message_replace':
@@ -289,14 +362,18 @@ export const createSendStreamHandler = (deps: StreamHandlerDeps) => {
             updateAssistantMessage(content || '', audio_url, undefined, citations, suggested_questions, errorMsg)
           }
           setChatList(prev => finalizeOutputs(prev))
+          if (hasTimeline) {
+            setChatList(prev => finalizeTimelineEnd(prev, payload))
+            streamLoadingRef.current = false
+          }
           setLoading(false)
-          const targetConvId = currentConversationId || conversationId
-          if (targetConvId) {
-            upsertHistory(targetConvId, title)
-          }
-          if (currentConversationId && currentConversationId !== conversationId) {
-            setConversationId(currentConversationId)
-          }
+          syncConversation(
+            currentConversationId || conversationId,
+            conversationId,
+            upsertHistory,
+            setConversationId,
+            title,
+          )
           chatIsEnded.current = true
           break
         }
@@ -315,15 +392,23 @@ export const createRegenerateStreamHandler = (deps: StreamHandlerDeps & { messag
   } = deps
 
   let currentConversationId: string | null = null
+  let hasTimeline = false
 
   return (data: SSEMessage[]) => {
     data.forEach((item) => {
+      // SSE heartbeat/comment frames carry no event/data; never route them.
+      if (item.comment !== undefined || !item.event || item.data === undefined) return
+      const payload = item.data as any
+      if (!hasTimeline && isTimelineStart(item)) hasTimeline = true
       const { message_id, user_message_id, file_id, node_id, content, conversation_id: curId, audio_url, citations, suggested_questions, msg, error } = item.data as StreamData;
-      
+
       switch (item.event) {
         case 'start':
         case 'node_start': {
-          currentConversationId = curId
+          if (curId) {
+            currentConversationId = curId
+            upsertHistory(curId)
+          }
           setChatList(prev => {
             const withUserId = applyUserMessageId(prev, user_message_id)
             const lastList = [...withUserId]
@@ -357,6 +442,16 @@ export const createRegenerateStreamHandler = (deps: StreamHandlerDeps & { messag
           if (errorMsg) {
             updateAssistantMessage('', undefined, undefined, undefined, undefined, errorMsg, messageId)
           }
+          syncConversation(
+            curId || currentConversationId || conversationId,
+            conversationId,
+            upsertHistory,
+            setConversationId,
+          )
+          if (hasTimeline) {
+            setChatList(prev => finalizeTimelineError(prev, payload))
+            streamLoadingRef.current = false
+          }
           setLoading(false)
           chatIsEnded.current = true
           break
@@ -369,11 +464,31 @@ export const createRegenerateStreamHandler = (deps: StreamHandlerDeps & { messag
         case 'memory_stage':
         case 'tool_end':
         case 'tool_error':
+          // Memory trace frames must always feed memory_retrieval, even when
+          // they carry a seq and are also reduced into a timeline tool step.
           updateAssistantMemoryRetrieval(item.event as MemoryTraceEvent, item.data as MemoryTraceEventData)
+          if (hasTimeline && typeof payload?.seq === 'number') {
+            const status = item.event === 'tool_start' ? 'pending' : item.event === 'tool_error' ? 'failed' : 'completed'
+            setChatList(prev => upsertTimelineTool(prev, payload, status))
+          }
+          break
+        case 'agent_dispatch':
+          if (hasTimeline) setChatList(prev => upsertTimelineAgent(prev, payload))
+          break
+        case 'agent_log':
+        case 'agent_log_final':
+          if (hasTimeline) setChatList(prev => mergeTimelineAgentLog(prev, payload))
+          break
+        case 'agent_complete':
+          if (hasTimeline) setChatList(prev => upsertTimelineAgentComplete(prev, payload))
           break
         case 'message':
-          updateAssistantMessage(content, audio_url, audio_url ? 'pending' : undefined, undefined, undefined, undefined, messageId)
-          setChatList(prev => appendOutputByNodeId(prev, node_id, content))
+          if (hasTimeline && typeof payload?.seq === 'number') {
+            setChatList(prev => appendTimelineMessage(prev, content || '', payload.seq))
+          } else {
+            updateAssistantMessage(content, audio_url, audio_url ? 'pending' : undefined, undefined, undefined, undefined, messageId)
+            setChatList(prev => appendOutputByNodeId(prev, node_id, content))
+          }
           if (curId) currentConversationId = curId;
           break
         case 'message_replace':
@@ -408,14 +523,17 @@ export const createRegenerateStreamHandler = (deps: StreamHandlerDeps & { messag
             updateAssistantMessage(content || '', audio_url, undefined, citations, suggested_questions, errorMsg, messageId)
           }
           setChatList(prev => finalizeOutputs(prev))
+          if (hasTimeline) {
+            setChatList(prev => finalizeTimelineEnd(prev, payload))
+            streamLoadingRef.current = false
+          }
           setLoading(false)
-          const targetConvId = currentConversationId || conversationId
-          if (targetConvId) {
-            upsertHistory(targetConvId)
-          }
-          if (currentConversationId && currentConversationId !== conversationId) {
-            setConversationId(currentConversationId)
-          }
+          syncConversation(
+            currentConversationId || conversationId,
+            conversationId,
+            upsertHistory,
+            setConversationId,
+          )
           chatIsEnded.current = true
           break
         }

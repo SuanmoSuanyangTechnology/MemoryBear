@@ -14,8 +14,7 @@ import time
 import uuid as uuid_module
 from collections import defaultdict
 from dataclasses import dataclass, field
-from datetime import timedelta
-from ..utils.datetime_utils import utcnow_naive
+from datetime import datetime, timedelta
 from typing import Any, ClassVar
 
 from sqlalchemy import (
@@ -23,12 +22,16 @@ from sqlalchemy import (
     insert as sa_insert,
     update as sa_update,
     case as sa_case,
+    func as sa_func,
     text as sa_text,
 )
 from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.exc import DBAPIError
 
 from ..config import current_settings
 from ..db import get_async_db_context
+from ..utils.datetime_utils import utcnow_naive
+from ..utils.text_sanitize import sanitize_text
 
 logger = logging.getLogger(__name__)
 
@@ -316,6 +319,9 @@ def _row(
     meta_data: dict[str, Any] | None = None,
     status: str = "completed",
     parent_message_id: uuid_module.UUID | None = None,
+    *,
+    created_at: datetime | None = None,
+    is_current: bool = True,
 ) -> dict[str, Any]:
     return {
         "id": msg_id,
@@ -325,7 +331,8 @@ def _row(
         "meta_data": meta_data or {},
         "status": status,
         "parent_message_id": parent_message_id,
-        "created_at": utcnow_naive(),
+        "created_at": created_at if created_at is not None else utcnow_naive(),
+        "is_current": is_current,
     }
 
 
@@ -343,11 +350,11 @@ async def _bulk_persist_messages(
     rows actually inserted (via ``RETURNING id``).
     """
     from ..models.conversation_model import Message, Conversation
+    from ..repositories.conversation_repository import select_first_log_user_message
     from .chat_context import StreamResult
 
     rows: list[dict[str, Any]] = []
     row_conv: dict[uuid_module.UUID, uuid_module.UUID] = {}
-    conv_titles: dict[uuid_module.UUID, str | None] = {}
 
     def _add_row(row: dict[str, Any], conv_id: uuid_module.UUID) -> None:
         rows.append(row)
@@ -370,15 +377,27 @@ async def _bulk_persist_messages(
         if task.task_type == "save_failed_message":
             user_msg_id = args.get("user_message_id", uuid_module.uuid4())
             msg_id = args.get("message_id", uuid_module.uuid4())
-            user_content = args.get("user_message_content", "")
-            _add_row(_row(user_msg_id, conv_id, "user",
-                          user_content,
-                          {"files": args.get("files_meta", [])}), conv_id)
-            _add_row(_row(msg_id, conv_id, "assistant",
-                          args.get("error_message", "An error occurred during generation."),
-                          {"error": args.get("error_detail", "")},
-                          status="failed"), conv_id)
-            conv_titles[conv_id] = None
+            user_content = args.get("user_message_content") or ""
+            user_meta = {"files": args.get("files_meta", [])}
+            if args.get("history_files"):
+                user_meta["history_files"] = args["history_files"]
+            error_meta = {"error": args.get("error_detail", "")}
+            log_only = args.get("log_only", False)
+            if log_only:
+                user_meta["log_only"] = True
+                error_meta.update(
+                    log_only=True, error_code=args["error_code"], trace_id=args.get("trace_id")
+                )
+            _add_row(_row(
+                user_msg_id, conv_id, "user", user_content, user_meta,
+                created_at=args.get("started_at"), is_current=not log_only,
+            ), conv_id)
+            _add_row(_row(
+                msg_id, conv_id, "assistant",
+                args.get("error_message", "An error occurred during generation."), error_meta,
+                status="failed", parent_message_id=user_msg_id if log_only else None,
+                created_at=args.get("finished_at"), is_current=not log_only,
+            ), conv_id)
             continue
 
         # --- save_messages ---
@@ -454,12 +473,8 @@ async def _bulk_persist_messages(
         assistant_content = args.get("content_override") or (
             result.full_content if result else "")
         _add_row(_row(msg_id, conv_id, "assistant", assistant_content, assistant_meta,
+                      status=args.get("assistant_status", "completed"),
                       parent_message_id=user_msg_id), conv_id)
-
-        conv_titles[conv_id] = (
-            user_content[:50] + ("..." if len(user_content) > 50 else "")
-            if user_content else None
-        )
 
     # --- dedupe rows within the batch (same task enqueued twice, or success +
     # failed tasks sharing one message pair) ---
@@ -510,20 +525,71 @@ async def _bulk_persist_messages(
     for mid in inserted_ids:
         actual_deltas[row_conv[mid]] += 1
 
+    content = sa_func.regexp_replace(Message.content, "^[[:space:]]+|[[:space:]]+$", "", "g")
+    title = sa_func.concat(
+        sa_func.left(content, 50),
+        sa_case((sa_func.length(content) > 50, "..."), else_=""),
+    )
     for conv_id, delta in actual_deltas.items():
-        if delta <= 0:
-            continue
+        first_title = select_first_log_user_message(conv_id).with_only_columns(title).scalar_subquery()
         values: dict[str, Any] = {
             "message_count": Conversation.message_count + delta,
-        }
-        if conv_titles.get(conv_id):
-            values["title"] = sa_case(
-                (Conversation.message_count <= 1, conv_titles[conv_id]),
+            "title": sa_case(
+                (
+                    (Conversation.message_count <= 1)
+                    | Conversation.title.is_(None)
+                    | Conversation.title.in_(("", "New Conversation")),
+                    sa_func.coalesce(first_title, Conversation.title),
+                ),
                 else_=Conversation.title,
-            )
+            ),
+        }
         await db.execute(
             sa_update(Conversation).where(Conversation.id == conv_id).values(**values)
         )
+
+
+async def persist_failed_chat_turn(
+    *,
+    conversation_id: uuid_module.UUID,
+    user_message_id: uuid_module.UUID,
+    message_id: uuid_module.UUID,
+    message: str,
+    error_code: int,
+    error_message: str,
+    trace_id: str | None,
+    started_at: datetime,
+    execution_id: uuid_module.UUID | None,
+    files_meta: list | None = None,
+    history_files: dict | None = None,
+) -> None:
+    """Commit a failed turn for log readers before the non-streaming request returns."""
+    error_message = sanitize_text(error_message)
+    args: dict[str, Any] = {
+        "conversation_id": conversation_id,
+        "user_message_id": user_message_id,
+        "message_id": message_id,
+        "user_message_content": sanitize_text(message),
+        "files_meta": files_meta or [],
+        "error_message": error_message,
+        "error_detail": error_message,
+        "error_code": error_code,
+        "trace_id": trace_id,
+        "started_at": started_at,
+        "finished_at": utcnow_naive(),
+        "log_only": True,
+    }
+    if history_files:
+        args["history_files"] = history_files
+    task = PersistTask(task_type="save_failed_message", args=args)
+    async with get_async_db_context() as db:
+        await _bulk_persist_messages(db, [task])
+        await db.commit()
+        if execution_id is not None:
+            await _handle_link_agent_execution_message(
+                db, execution_id=execution_id, message_id=message_id,
+            )
+            await db.commit()
 
 
 def _to_uuid(value: Any) -> uuid_module.UUID | None:
@@ -605,14 +671,24 @@ async def _handle_save_node_executions(
     )
     await db.execute(sa_insert(WorkflowNodeExecution).values(items))
 
-    if not current_settings().workflow_node_execution_retention_enabled:
+    settings = current_settings()
+    if not settings.workflow_node_execution_retention_enabled:
         return
-    # Runs after the INSERT above, inside the same batch transaction: if the
-    # write fails we must not lose the previous execution's records either.
-    result = await db.execute(
-        sa_text(NODE_EXECUTION_RETENTION_SQL),
-        {"eid": str(execution_id)},
-    )
+    # Roll back only cleanup if it hits the maintenance time budget.
+    statement_timeout = settings.application_service_db_statement_timeout_ms
+    timeout_ms = min(500, statement_timeout)
+    try:
+        async with db.begin_nested():
+            await db.execute(sa_text(f"SET LOCAL statement_timeout = '{timeout_ms}ms'"))
+            result = await db.execute(
+                sa_text(NODE_EXECUTION_RETENTION_SQL), {"eid": str(execution_id)}
+            )
+            await db.execute(sa_text(f"SET LOCAL statement_timeout = '{statement_timeout}ms'"))
+    except DBAPIError as exc:
+        if getattr(exc.orig, "sqlstate", None) not in {"55P03", "57014"}:
+            raise
+        logger.info("Deferred node execution retention (execution_id=%s)", execution_id)
+        return
     if result.rowcount:
         logger.debug(
             "node execution retention removed %s stale rows (execution_id=%s)",

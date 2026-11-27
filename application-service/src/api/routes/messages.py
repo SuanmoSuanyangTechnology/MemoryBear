@@ -76,11 +76,7 @@ from ...services.chat_use_case import (
 )
 from ...services.conversation_service import ConversationService
 from ...services.draft_run_service import AgentRunService
-from ...services.file_storage_service import (
-    FileStorageService,
-    get_file_storage_service,
-    upload_workspace_file,
-)
+from ...services.file_storage_service import upload_workspace_file
 from ...services.message_feedback_service import FavoriteService, FeedbackService
 from ...services.message_report_service import ReportService
 from ...services.multi_agent_service import MultiAgentService
@@ -881,6 +877,7 @@ async def v1_chat(
     app_id = await resolve_app_for_chat(
         api_key_id=request.headers.get(API_KEY_ID_HEADER),
         workspace_id=principal.workspace_id,
+        fail_fast=True,
     )
     workspace_id = principal.workspace_id
 
@@ -900,7 +897,6 @@ async def v1_upload_chat_file(
     request: Request,
     principal: Caller,
     file: Annotated[UploadFile, File()],
-    storage_service: Annotated[FileStorageService, Depends(get_file_storage_service)],
 ):
     """Upload one file for multimodal chat, referenced later through the
     ``/chat`` request's ``files`` field."""
@@ -926,7 +922,7 @@ async def v1_upload_chat_file(
             tenant_id=tenant_id,
             workspace_id=principal.workspace_id,
             file=file,
-            storage_service=storage_service,
+            actor_id=principal.actor_id,
         )
     except HTTPException as exc:
         logger.error(f"Storage upload failed: {exc}")

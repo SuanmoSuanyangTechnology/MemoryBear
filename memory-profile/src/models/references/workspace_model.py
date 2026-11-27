@@ -1,6 +1,6 @@
 """Read-only mapping for the API-owned workspace table."""
 
-from sqlalchemy import Boolean, Column, String
+from sqlalchemy import Boolean, Column, DateTime, Integer, String
 from sqlalchemy.dialects.postgresql import UUID
 
 from src.models.base import ReadOnlyBase
@@ -17,6 +17,8 @@ class Workspace(ReadOnlyBase):
     is_active = Column(Boolean, nullable=True)
     is_default_config = Column(Boolean, nullable=False)
     memory_config = Column(UUID(as_uuid=True), nullable=True)
+    retention_days = Column(Integer, nullable=True)
+    updated_at = Column(DateTime, nullable=True)
     #: 「模型选择」六列由 api 侧维护；生成类用例只读 ``llm``（默认配置空间改用 preset）。
     llm = Column(String, nullable=True)
     embedding = Column(String, nullable=True)

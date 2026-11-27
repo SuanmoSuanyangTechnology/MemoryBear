@@ -1,12 +1,12 @@
-"""Wiki release migrations; existing knowledge tables remain on the API chain."""
+"""知识库 PostgreSQL 迁移入口。"""
 
 from alembic import context
 from sqlalchemy import create_engine, pool
 
 from src import models  # noqa: F401 - register runtime metadata, including FK targets
-from src.bootstrap import get_settings
-from src.db import KnowledgeBase
-from src.migration_policy import VERSION_TABLE, include_name, include_object
+from src.application.bootstrap import get_settings
+from src.infrastructure.database.manager import KnowledgeBase
+from src.infrastructure.database.migration_policy import VERSION_TABLE, include_name, include_object
 
 settings = context.config.attributes.get("settings") or get_settings()
 options = {

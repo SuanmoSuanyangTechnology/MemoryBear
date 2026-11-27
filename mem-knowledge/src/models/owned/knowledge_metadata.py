@@ -5,7 +5,7 @@ import uuid
 from sqlalchemy import Column, DateTime, String, UniqueConstraint
 from sqlalchemy.dialects.postgresql import UUID
 
-from ...db import KnowledgeBase
+from ...infrastructure.database.manager import KnowledgeBase
 from ...utils.datetime_utils import utcnow_naive
 
 
@@ -13,17 +13,17 @@ class KnowledgeMetadata(KnowledgeBase):
     __tablename__ = "knowledge_metadatas"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
-    tenant_id = Column(UUID(as_uuid=True), nullable=False, comment="tenant id")
+    tenant_id = Column(UUID(as_uuid=True), nullable=False, comment="租户ID")
     knowledge_id = Column(
         UUID(as_uuid=True),
         nullable=False,
         index=True,
-        comment="knowledge id",
+        comment="知识库ID",
     )
-    type = Column(String, nullable=False, comment="field type: string | number | time")
-    name = Column(String(255), nullable=False, comment="field name")
-    created_by = Column(UUID(as_uuid=True), comment="creator")
-    updated_by = Column(UUID(as_uuid=True), comment="updater")
+    type = Column(String, nullable=False, comment="字段类型: string | number | time")
+    name = Column(String(255), nullable=False, comment="字段名")
+    created_by = Column(UUID(as_uuid=True), comment="创建人")
+    updated_by = Column(UUID(as_uuid=True), comment="更新人")
     created_at = Column(DateTime, default=utcnow_naive)
     updated_at = Column(DateTime, default=utcnow_naive, onupdate=utcnow_naive)
 
@@ -40,16 +40,16 @@ class KnowledgeMetadataBinding(KnowledgeBase):
     __tablename__ = "knowledge_metadata_bindings"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
-    tenant_id = Column(UUID(as_uuid=True), nullable=False, comment="tenant id")
+    tenant_id = Column(UUID(as_uuid=True), nullable=False, comment="租户ID")
     knowledge_id = Column(
         UUID(as_uuid=True),
         nullable=False,
         index=True,
-        comment="knowledge id",
+        comment="知识库ID",
     )
-    metadata_id = Column(UUID(as_uuid=True), nullable=False, comment="metadata id")
-    document_id = Column(UUID(as_uuid=True), nullable=False, comment="document id")
-    created_by = Column(UUID(as_uuid=True), comment="creator")
+    metadata_id = Column(UUID(as_uuid=True), nullable=False, comment="元数据定义ID")
+    document_id = Column(UUID(as_uuid=True), nullable=False, comment="文档ID")
+    created_by = Column(UUID(as_uuid=True), comment="创建人")
     created_at = Column(DateTime, default=utcnow_naive)
 
     __table_args__ = (

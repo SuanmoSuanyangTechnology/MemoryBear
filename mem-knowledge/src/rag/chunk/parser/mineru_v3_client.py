@@ -16,7 +16,7 @@ from typing import Any
 import requests
 from PIL import Image
 
-from ....bootstrap import get_settings
+from ....application.bootstrap import get_settings
 
 LOGGER = logging.getLogger(__name__)
 COMPLETED_STATUSES = {"completed", "complete", "success", "succeeded", "done", "finished"}

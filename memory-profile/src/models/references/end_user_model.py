@@ -38,13 +38,22 @@ class EndUser(ReadOnlyBase):
     one_sentence_summary = Column(Text, nullable=True)
     user_summary_updated_at = Column(DateTime, nullable=True)
     memory_tags = Column(JSONB, nullable=True)
+    memory_tags_updated_at = Column(DateTime, nullable=True)
+    memory_tags_source_fingerprint = Column(String, nullable=True)
     #: RAG-mode profile caches (``user_summary`` is shared with the graph mode).
     rag_tags = Column(String, nullable=True)
     rag_personas = Column(String, nullable=True)
     rag_summary_updated_at = Column(DateTime, nullable=True)
     #: Cached Neo4j memory-node count the API maintenance job also rewrites;
     #: the migrated forgetting cycle keeps it in sync after a run.
-    memory_count = Column(Integer, nullable=False)
+    memory_count = Column(
+        Integer,
+        nullable=False,
+        default=0,
+        server_default="0",
+        index=True,
+        comment="记忆节点总数",
+    )
 
 
 class EndUserMerge(ReadOnlyBase):
@@ -53,4 +62,5 @@ class EndUserMerge(ReadOnlyBase):
     id = Column(UUID(as_uuid=True), primary_key=True)
     workspace_id = Column(UUID(as_uuid=True), nullable=False)
     origin_id = Column(UUID(as_uuid=True), nullable=True)
+    origin_other_id = Column(String, nullable=False)
     target_id = Column(UUID(as_uuid=True), nullable=False)

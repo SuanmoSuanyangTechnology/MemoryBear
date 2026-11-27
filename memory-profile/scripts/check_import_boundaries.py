@@ -9,14 +9,20 @@ from pathlib import Path
 SERVICE_ROOT = Path(__file__).resolve().parents[1]
 FORBIDDEN_IMPORT_ROOTS = {"api", "app"}
 READ_ONLY_PG_REPOSITORIES = {
+    SERVICE_ROOT / "src/repositories/conversation_detail.py",
+    SERVICE_ROOT / "src/repositories/operations.py",
+    SERVICE_ROOT / "src/repositories/dashboard.py",
+    SERVICE_ROOT / "src/repositories/emotion_analytics.py",
+    SERVICE_ROOT / "src/repositories/forgetting.py",
     SERVICE_ROOT / "src/repositories/display.py",
     SERVICE_ROOT / "src/repositories/perceptual.py",
     SERVICE_ROOT / "src/repositories/implicit_memory.py",
     SERVICE_ROOT / "src/repositories/profile.py",
+    SERVICE_ROOT / "src/repositories/reflection_logs.py",
     SERVICE_ROOT / "src/repositories/end_user.py",
     SERVICE_ROOT / "src/repositories/memory_config.py",
     SERVICE_ROOT / "src/repositories/model_config.py",
-    SERVICE_ROOT / "src/repositories/workspace.py",
+    SERVICE_ROOT / "src/repositories/reembed_status.py",
     SERVICE_ROOT / "src/repositories/working_memory.py",
 }
 FORBIDDEN_SQL_BUILDERS = {"text", "insert", "update", "delete"}

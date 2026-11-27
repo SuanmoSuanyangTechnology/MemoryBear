@@ -12,10 +12,14 @@ Adding a job means a handler module here plus one entry in
 ``src/interfaces/tasks/registry.py``.
 """
 
+from src.application.jobs.admission_dispatch import DispatchAdmissionJob
+from src.application.jobs.admission_recover import RecoverAdmissionsJob
 from src.application.jobs.health_ping import PingJob
 from src.application.jobs.interest_generate import GenerateInterestDistributionJob
 from src.application.jobs.interest_prewarm import PrewarmInterestDistributionsJob
 from src.application.jobs.metadata_migration import DoMetadataMigrationJob, ScanMetadataMigrationJob
+from src.application.jobs.outbox_cleanup import OutboxCleanupJob
+from src.application.jobs.outbox_projection import OutboxProjectionJob
 from src.application.jobs.profile_cache_generate import GenerateProfileCacheJob
 from src.application.jobs.profile_cache_generate_workspace import (
     FanOutWorkspaceJob,
@@ -23,11 +27,15 @@ from src.application.jobs.profile_cache_generate_workspace import (
 from src.application.jobs.profile_cache_scan import ScanProfileCachesJob
 
 __all__ = [
+    "DispatchAdmissionJob",
     "FanOutWorkspaceJob",
     "GenerateInterestDistributionJob",
     "GenerateProfileCacheJob",
+    "OutboxCleanupJob",
+    "OutboxProjectionJob",
     "PingJob",
     "PrewarmInterestDistributionsJob",
+    "RecoverAdmissionsJob",
     "ScanProfileCachesJob",
     "DoMetadataMigrationJob",
     "ScanMetadataMigrationJob",

@@ -2,8 +2,10 @@
 
 Same layout as the working-memory module: ``/internal/v1`` prefix comes from
 ``src.modules.router``, paths mirror the monolith's public paths so
-``memory_profile_proxy`` can forward the caller path unchanged, and every
-route is marked ``@external_api`` so the contract snapshot tracks it.
+``memory_profile_proxy`` can forward the caller path unchanged. Only
+``semantics`` is marked ``@external_api``: it is the single explicit-memory
+route the API-key face published (``memory_explicit_api_controller``), while
+``overview``/``episodics``/``details`` stay on the user-JWT face.
 
 Query constraints reproduce the monolith's FastAPI layer exactly (T08: 422 on
 ``page/pagesize`` out of bounds), while business validation lives in the
@@ -44,7 +46,6 @@ def _handler(request: Request) -> ExplicitMemoryHandler:
     "/memory/explicit-memory/overview",
     response_model=ApiResponse[OverviewData],
 )
-@external_api
 async def get_explicit_memory_overview(
     request: Request,
     context: Context,
@@ -57,7 +58,6 @@ async def get_explicit_memory_overview(
     "/memory/explicit-memory/episodics",
     response_model=ApiResponse[EpisodicListData],
 )
-@external_api
 async def get_episodic_memory_list(
     request: Request,
     context: Context,
@@ -96,7 +96,6 @@ async def get_semantic_memory_list(
     "/memory/explicit-memory/details",
     response_model=ApiResponse[ExplicitDetailsData],
 )
-@external_api
 async def get_explicit_memory_details(
     request: Request,
     context: Context,

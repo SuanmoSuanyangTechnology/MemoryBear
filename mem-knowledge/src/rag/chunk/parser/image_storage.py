@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from ....runtime import get_worker_runtime
+from ....application.runtime import get_worker_runtime
 from ..image_assets import StoredMinerUImageAsset
 from ..image_assets import cleanup_mineru_v3_images as _cleanup
 from ..image_assets import store_mineru_v3_image as _store

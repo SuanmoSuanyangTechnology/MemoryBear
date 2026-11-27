@@ -40,6 +40,9 @@ class ReadContextFactory:
         draft: bool = False,
         conversation_id: str | None = None,
         app_id: UUID | None = None,
+        config_id: UUID | None = None,
+        storage_type: str | None = None,
+        user_rag_memory_id: str | None = None,
     ) -> ReadContext:
         resolved = await self._end_users.resolve_in_workspace(
             end_user_id, principal.workspace_id
@@ -50,31 +53,40 @@ class ReadContextFactory:
             )
         canonical_end_user_id = resolved.end_user_id
 
-        config_id = await self._configs.active_config_id(principal.workspace_id)
-        if config_id is None:
+        # A caller-named configuration wins; otherwise the workspace's active
+        # one is used (the host resolves per end user, which lands on the same
+        # row because the user was just validated inside this workspace).
+        resolved_config_id = config_id or await self._configs.active_config_id(
+            principal.workspace_id
+        )
+        if resolved_config_id is None:
             raise ReadConfigUnavailableError(
                 "No memory configuration found for this workspace",
                 reason="memory_config_missing",
             )
-        config = await self._configs.load_config(config_id)
+        config = await self._configs.load_config(resolved_config_id)
         if config is None:
             raise ReadConfigUnavailableError(
                 "Memory configuration not found", reason="memory_config_not_found"
             )
-        storage_type = (
-            await self._configs.workspace_storage_type(principal.workspace_id)
+        resolved_storage_type = (
+            storage_type
+            or await self._configs.workspace_storage_type(principal.workspace_id)
             or DEFAULT_STORAGE_TYPE
         )
         return ReadContext(
             end_user_id=canonical_end_user_id,
             workspace_id=principal.workspace_id,
-            tenant_id=principal.tenant_id,
+            # The config is workspace-scoped, so its tenant is authoritative on
+            # channels that carry no tenant themselves (service callbacks).
+            tenant_id=principal.tenant_id or config.tenant_id,
             config=config,
-            storage_type=StorageType(storage_type),
+            storage_type=StorageType(resolved_storage_type),
             language=language,
             draft=draft,
             conversation_id=conversation_id,
             app_id=app_id,
+            user_rag_memory_id=user_rag_memory_id,
         )
 
 

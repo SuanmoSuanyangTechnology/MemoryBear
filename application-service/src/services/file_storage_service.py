@@ -7,7 +7,6 @@ and error handling.
 """
 
 import logging
-import os
 import time
 import uuid
 from typing import AsyncIterator, Optional
@@ -15,8 +14,8 @@ from typing import AsyncIterator, Optional
 from fastapi import UploadFile
 
 from ..config import current_settings
-from ..db import get_async_db_context
 from ..errors import BizCode, BusinessException
+from ..integrations.file_service import get_file_service_client
 from ..storage import StorageFactory, StorageBackend
 from ..storage.exceptions import (
     StorageError,
@@ -24,13 +23,10 @@ from ..storage.exceptions import (
     StorageDownloadError,
     StorageDeleteError,
 )
-from ..models.file_metadata_model import FileMetadata
 
 # Obtain a dedicated logger for business logic
 logger = logging.getLogger(__name__)
 api_logger = logging.getLogger(__name__)
-
-_UPLOAD_CHUNK_SIZE = 1024 * 1024
 
 
 def generate_file_key(
@@ -374,58 +370,19 @@ def get_file_storage_service() -> FileStorageService:
     return _default_service
 
 
-class _UploadTooLarge(Exception):
-    """Raised inside the upload stream when the configured size limit is exceeded."""
-
-
-class _MeteredUploadStream:
-    """Async chunk iterator that enforces the size limit while streaming."""
-
-    def __init__(self, file: UploadFile, max_size: int):
-        self._file = file
-        self._max_size = max_size
-        self.total = 0
-
-    async def iter_chunks(self) -> AsyncIterator[bytes]:
-        while True:
-            chunk = await self._file.read(_UPLOAD_CHUNK_SIZE)
-            if not chunk:
-                return
-            self.total += len(chunk)
-            if self.total > self._max_size:
-                raise _UploadTooLarge
-            yield chunk
-
-
-async def _remove_partial_upload(
-    file_id: uuid.UUID,
-    storage_service: FileStorageService,
-    file_key: str,
-) -> None:
-    async with get_async_db_context() as adb:
-        record = await adb.get(FileMetadata, file_id)
-        if record is not None:
-            record.status = "failed"
-            await adb.commit()
-    try:
-        await storage_service.delete_file(file_key)
-    except StorageDeleteError as exc:
-        api_logger.warning(f"Failed to remove partial upload {file_key}: {exc}")
-
-
 async def upload_workspace_file(
     *,
     tenant_id: uuid.UUID,
     workspace_id: uuid.UUID | None,
     file: UploadFile,
-    storage_service: FileStorageService,
+    actor_id: uuid.UUID | None = None,
 ) -> dict[str, str]:
     """Upload a chat attachment (the `/v1/app/files` surface).
 
-    The body is streamed in chunks and never held in memory as a whole: the
-    configured size limit aborts the stream as soon as it is exceeded, and a
-    failed or partial upload is removed from storage. Generic platform uploads
-    (`/api/storage`, `/api/upload`) stay on the monolith.
+    The transfer is streamed to the independent file service, which owns the
+    metadata record and the storage backend; this service writes neither.
+    Generic platform uploads (`/api/storage`, `/api/upload`) are served by the
+    file service directly.
     """
     max_file_size = current_settings().max_file_size
     declared_size = getattr(file, "size", None)
@@ -439,69 +396,15 @@ async def upload_workspace_file(
             BizCode.FILE_TOO_LARGE,
         )
 
-    _, file_extension = os.path.splitext(file.filename or "")
-    file_ext = file_extension.lower()
-
-    file_id = uuid.uuid4()
-    file_key = generate_file_key(
+    result = await get_file_service_client().upload_stream(
         tenant_id=tenant_id,
         workspace_id=workspace_id,
-        file_id=file_id,
-        file_ext=file_ext,
+        actor_id=actor_id,
+        file=file,
+    )
+    api_logger.info(
+        f"File uploaded to storage: file_key={result.file_key}, "
+        f"size={result.file_size} bytes"
     )
 
-    file_metadata = FileMetadata(
-        id=file_id,
-        tenant_id=tenant_id,
-        workspace_id=workspace_id,
-        file_key=file_key,
-        file_name=file.filename,
-        file_ext=file_ext,
-        file_size=declared_size or 0,
-        content_type=file.content_type,
-        status="pending",
-    )
-    async with get_async_db_context() as adb:
-        adb.add(file_metadata)
-        await adb.commit()
-
-    stream = _MeteredUploadStream(file, max_file_size)
-    try:
-        total = await storage_service.upload_stream(
-            tenant_id=tenant_id,
-            workspace_id=workspace_id,
-            file_id=file_id,
-            file_ext=file_ext,
-            stream=stream.iter_chunks(),
-            content_type=file.content_type,
-        )
-        if total == 0:
-            raise BusinessException("The file is empty.", BizCode.BAD_REQUEST)
-    except BusinessException:
-        await _remove_partial_upload(file_id, storage_service, file_key)
-        raise
-    except StorageUploadError as e:
-        await _remove_partial_upload(file_id, storage_service, file_key)
-        api_logger.error(f"Storage upload failed: {e}")
-        # A known non-zero size means the failure happened before the first
-        # chunk was read, not that the client sent an empty body.
-        if stream.total == 0 and declared_size is None:
-            raise BusinessException("The file is empty.", BizCode.BAD_REQUEST)
-        if isinstance(e.cause, _UploadTooLarge):
-            raise BusinessException(
-                f"The file size exceeds the {max_file_size} byte limit",
-                BizCode.FILE_TOO_LARGE,
-            )
-        raise BusinessException(
-            f"File storage failed: {str(e)}", BizCode.INTERNAL_ERROR
-        ) from e
-
-    async with get_async_db_context() as adb:
-        record = await adb.get(FileMetadata, file_id)
-        if record is not None:
-            record.file_size = total
-            record.status = "completed"
-            await adb.commit()
-    api_logger.info(f"File uploaded to storage: file_key={file_key}, size={total} bytes")
-
-    return {"file_id": str(file_id), "file_key": file_key}
+    return {"file_id": result.file_id, "file_key": result.file_key}

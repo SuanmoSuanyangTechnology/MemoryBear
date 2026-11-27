@@ -31,6 +31,9 @@ from src.infrastructure.model_service import (
 )
 from src.infrastructure.postgres import PostgresManager
 from src.repositories.model_config import ModelConfigRepository
+from src.schemas.memory_storage import ModelInfo
+from src.services.model_profile_view import normalize_type, profile_of
+from redbear_model.contracts import ModelType
 
 logger = logging.getLogger(__name__)
 
@@ -214,6 +217,67 @@ class ModelConfigService:
             except ValueError:
                 logger.warning("invalid %s model id: %r", label, value)
         return None
+
+
+    @staticmethod
+    async def get_model_by_id_async(
+        postgres: PostgresManager,
+        model_id: UUID,
+        tenant_id: UUID | None = None,
+    ):
+        """根据ID异步获取模型配置"""
+        model = await ModelConfigRepository(postgres).get_runtime_model(model_id, tenant_id=tenant_id)
+        if not model:
+            raise ModelConfigurationError("模型配置不存在")
+        if model.model_base and model.model_base.is_deprecated:
+            raise ModelConfigurationError(
+                f"模型 '{model.name}' 已弃用，请在模型配置中更换为其他模型",
+            )
+        return model
+
+    @staticmethod
+    def _runtime_model_view(
+        model, tenant_id: UUID | None = None
+    ) -> ModelInfo:
+        """非解密视图的公共映射：能力/模态由 profile 派生，凭据与渠道恒空。
+
+        归属租户取**调用租户**（tenant_id 非空时）：公共配置（speedbear 等）挂在系统
+        租户下，服务侧按请求租户加载候选渠道（平台渠道在各调用租户名下）且用量归因落
+        调用租户；无租户上下文（tenant_id=None）退化为配置行租户（运行面兜底语义）。
+        """
+
+        profile = profile_of(model)
+        effective_tenant = tenant_id or model.tenant_id
+        return ModelInfo(
+            model_name=model.name,
+            model_type=ModelType(normalize_type(model.type)),
+            api_key=None,
+            provider=model.provider,
+            input_modalities=[str(item.value) for item in profile.input_modalities],
+            output_modalities=[str(item.value) for item in profile.output_modalities],
+            features=[str(item.value) for item in profile.features],
+            tenant_id=str(effective_tenant) if effective_tenant is not None else None,
+            model_config_id=str(model.id),
+            channel_id=None,
+        )
+
+    @staticmethod
+    async def get_runtime_model_view_async(
+        postgres: PostgresManager,
+        model_id: UUID,
+        tenant_id: UUID | None = None,
+    ) -> ModelInfo:
+        """运行期**非解密**模型视图（G2/G3 invoke 接缝）：`api_key` 恒 None、不带换线计划。
+
+        能力/模态由 profile 派生，可见性（不存在 / 已弃用 / 跨租户）沿用
+        :meth:`get_model_by_id_async` 的报错语义；凭据可用性与选路交给
+        模型服务在调用时判定（渠道禁用等在那里才有完整事实，见 `channel_registry`）。
+        归属租户取调用租户（公共配置挂系统租户，选路与归因须落调用方，见
+        :meth:`_runtime_model_view`）。
+        """
+
+        model = await ModelConfigService.get_model_by_id_async(postgres, model_id, tenant_id=tenant_id)
+        return ModelConfigService._runtime_model_view(model, tenant_id)
 
 
 class WorkspaceModelMemo:

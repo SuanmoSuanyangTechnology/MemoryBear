@@ -2,9 +2,12 @@
 of the monolith ``EndUserService.confirm_identity`` and
 ``UserMemoryService.update_end_user_info_async``).
 
-Memory-side effects are not executed here: an identity-merge hit and an alias
-change both delegate to the monolith ``/v1`` face (cross-domain write forward),
-so this module only performs the PG-only paths.
+An identity-merge hit executes locally: this service decides the merge pair
+under the identity advisory lock and delegates the merge itself (memory write
+locks, graph/RAG reassignment, reflection dispatch) to memory-profile's
+internal merge endpoint. An alias change on info update forwards to
+memory-profile's internal info-update face: it owns the alias graph sync and
+writes the info row itself.
 """
 
 from __future__ import annotations
@@ -16,9 +19,12 @@ from uuid import UUID
 
 from sqlalchemy.orm import Session
 
+from ..errors import BizCode, BusinessException
+from ..integrations.memory_profile import MemoryProfileClient
 from ..models.end_user_model import EndUser
 from ..repositories.end_user_info_repository import EndUserInfoRepository
 from ..repositories.end_user_repository import EndUserRepository
+from ..trace import get_trace_id
 from ..utils.datetime_utils import to_timestamp_ms, utcnow_naive
 
 logger = logging.getLogger(__name__)
@@ -60,12 +66,11 @@ _INFO_ALLOWED_FIELDS = {"other_name", "aliases"}
 
 @dataclass(frozen=True)
 class IdentityOutcome:
-    """Result of a local identity update, or the order to forward the request
-    (merge hit: memory-side effects must run on the monolith)."""
+    """Result of an identity update: a local confirm/clear, or a merge whose
+    memory-side effects ran inside memory-profile."""
 
-    forward: bool
-    final_id: UUID | None = None
-    identity_status: str | None = None
+    final_id: UUID
+    identity_status: str
     merged: bool = False
 
 
@@ -80,8 +85,9 @@ class InfoUpdateOutcome:
 
 
 class EndUserService:
-    def __init__(self, db: Session):
+    def __init__(self, db: Session, *, memory_profile: MemoryProfileClient | None = None):
         self.db = db
+        self.memory_profile = memory_profile
         self.user_repo = EndUserRepository(db)
         self.info_repo = EndUserInfoRepository(db)
 
@@ -89,18 +95,23 @@ class EndUserService:
         self,
         workspace_id: UUID,
         current_end_user: EndUser,
+        *,
+        tenant_id: UUID,
+        actor_id: UUID,
         identity_features: str | None = None,
     ) -> IdentityOutcome:
         """Confirm or clear the cross-channel identity of one end user.
 
         - identifier present -> confirmed (long-lived); absent -> temporary.
         - an active row already holding the identifier means the current user
-          must merge into it: that path carries memory-side effects and is
-          forwarded to the monolith instead of executed here.
+          must merge into it: the merge runs inside memory-profile (it owns
+          the memory write locks and derived state), this service only decides
+          the pair and records the outcome.
 
         The identifier lookup runs under the transaction-scoped advisory lock,
-        so "lookup -> decide -> write" stays serialized; the lock is released
-        by ending the transaction before any forward.
+        so "lookup -> decide" stays serialized; the lock is released before
+        the merge call because HTTP must not run inside a database
+        transaction.
         """
 
         has_id = bool(identity_features and identity_features.strip())
@@ -113,22 +124,97 @@ class EndUserService:
                 workspace_id, clean_features, for_update=False
             )
             if candidate is not None and candidate.id != current_end_user.id:
-                # Merge hit: nothing has been written in this transaction, so
-                # roll back to release the advisory lock before forwarding —
-                # the monolith re-acquires it for the full merge.
-                self.db.rollback()
-                return IdentityOutcome(forward=True)
+                return self._merge_into(
+                    workspace_id=workspace_id,
+                    tenant_id=tenant_id,
+                    actor_id=actor_id,
+                    source=current_end_user,
+                    target=candidate,
+                    identity_features=clean_features,
+                )
 
         current_end_user.identity_features = clean_features
         current_end_user.identity_status = identity_status
         self.db.commit()
         self.db.refresh(current_end_user)
         return IdentityOutcome(
-            forward=False,
             final_id=current_end_user.id,
             identity_status=identity_status,
             merged=False,
         )
+
+    def _merge_into(
+        self,
+        *,
+        workspace_id: UUID,
+        tenant_id: UUID,
+        actor_id: UUID,
+        source: EndUser,
+        target: EndUser,
+        identity_features: str,
+    ) -> IdentityOutcome:
+        """Merge ``source`` into ``target`` through memory-profile.
+
+        The advisory lock is released before the call: the merge service
+        acquires its own memory write locks, and the HTTP hop must not run
+        inside a database transaction. The audit write happens only after the
+        merge succeeded — a failed merge then leaves no committed local state
+        and a retry re-runs cleanly, while after a successful merge the origin
+        row is soft-deleted and later retries resolve to the target.
+        """
+
+        source_id = source.id
+        target_id = target.id
+        self.db.rollback()
+
+        if self.memory_profile is None:
+            raise BusinessException(
+                "memory profile merge client is not configured", BizCode.INTERNAL_ERROR
+            )
+        envelope = self.memory_profile.merge_users(
+            source_end_user_id=source_id,
+            target_end_user_id=target_id,
+            workspace_id=workspace_id,
+            tenant_id=tenant_id,
+            actor_id=actor_id,
+            trace_id=get_trace_id(),
+        )
+        if envelope.get("code") != 0:
+            raise BusinessException(
+                "memory profile merge rejected: "
+                f"code={envelope.get('code')} msg={envelope.get('msg')} "
+                f"error={envelope.get('error')}",
+                BizCode.INTERNAL_ERROR,
+            )
+
+        self._record_identity_merge(source, source_id, identity_features)
+        return IdentityOutcome(
+            final_id=target_id, identity_status="confirmed", merged=True
+        )
+
+    def _record_identity_merge(
+        self, source: EndUser, source_id: UUID, identity_features: str
+    ) -> None:
+        """Best-effort audit: the merged-away row keeps the identifier it was
+        confirmed with (the row state the monolith leaves behind).
+
+        A failure here is logged, never surfaced: the merge already committed
+        in memory-profile, so failing the request would invite a retry that
+        resolves to the target anyway.
+        """
+
+        try:
+            source.identity_features = identity_features
+            source.identity_status = "confirmed"
+            source.updated_at = utcnow_naive()
+            self.db.commit()
+        except Exception:
+            self.db.rollback()
+            logger.warning(
+                "Identity merge audit write failed for end user %s",
+                source_id,
+                exc_info=True,
+            )
 
     def update_end_user_info(
         self, end_user_id: str, raw_update_data: dict[str, Any]
@@ -136,9 +222,9 @@ class EndUserService:
         """Update the end-user info record (PG side only).
 
         Returns the forward order when the (filtered) alias list differs from
-        the stored one: the alias sync into the memory storage happens on the
-        monolith. The caller has already resolved ``end_user_id`` to the merge
-        target.
+        the stored one: the alias sync into the memory storage happens inside
+        memory-profile, which then runs the whole update. The caller has
+        already resolved ``end_user_id`` to the merge target.
         """
 
         try:

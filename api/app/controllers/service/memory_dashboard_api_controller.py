@@ -3,12 +3,7 @@
 Query the end user list and each end user's memory count within the workspace
 bound to a workspace-level API Key.
 
-Note: `/end_users` intentionally reuses the manager-side route function
-(`memory_dashboard_controller.get_workspace_end_users`) instead of the shared
-service layer, and is excluded from the "/api and /v1 as two independent entry
-points over the same service functions" refactoring. The newer endpoints
-(`/total_memory_count`, `/end_user_memory_counts`, `/memory_increment_daily`,
-`/dashboard_data`) call the service layer directly.
+`/end_users` forwards the authenticated workspace to memory-profile.
 """
 
 import uuid
@@ -25,6 +20,7 @@ from app.core.logging_config import get_business_logger
 from app.core.response_utils import fail, success
 from app.db import get_async_db_context, get_db_context
 from app.integrations.profile.contracts import MemoryProfileAuthSource
+from app.integrations.profile.proxy import memory_profile_proxy
 from app.schemas.api_key_schema import ApiKeyAuth
 from app.schemas.memory_dashboard_schema import EndUserMemoryCountsRequest
 from app.schemas.response_schema import ApiResponse
@@ -36,6 +32,12 @@ api_logger = get_business_logger()
 
 @router.get("/end_users", response_model=ApiResponse)
 @require_api_key_self_db(scopes=["memory"])
+@memory_profile_proxy(
+    query_fields=("page", "pagesize", "keyword", "label"),
+    upper_bounds={"pagesize": 100},
+    source=MemoryProfileAuthSource.APIKEY,
+    preserve_status=True,
+)
 async def get_workspace_end_users(
     request: Request,
     background_tasks: BackgroundTasks,
@@ -70,6 +72,7 @@ async def get_workspace_end_users(
     #    (dashboard 内部查询暂未全量异步化，保留同步 session 给业务逻辑)
     with get_db_context() as db:
         return await memory_dashboard_controller.get_workspace_end_users(
+            request=request,
             background_tasks=background_tasks,
             workspace_id=api_key_auth.workspace_id,
             keyword=keyword,
@@ -83,6 +86,7 @@ async def get_workspace_end_users(
 
 @router.get("/total_memory_count", response_model=ApiResponse)
 @require_api_key_self_db(scopes=["memory"])
+@memory_profile_proxy(source=MemoryProfileAuthSource.APIKEY)
 async def get_workspace_total_memory_count(
     request: Request,
     background_tasks: BackgroundTasks,
@@ -117,6 +121,7 @@ async def get_workspace_total_memory_count(
 
 @router.post("/end_user_memory_counts", response_model=ApiResponse)
 @require_api_key_self_db(scopes=["memory"])
+@memory_profile_proxy(body_arg="payload", body_fields=("end_user_ids",), source=MemoryProfileAuthSource.APIKEY)
 async def get_end_user_memory_counts(
     request: Request,
     payload: EndUserMemoryCountsRequest,
@@ -181,6 +186,7 @@ async def get_end_user_memory_counts(
 
 @router.get("/memory_increment_daily", response_model=ApiResponse)
 @require_api_key_self_db(scopes=["memory"])
+@memory_profile_proxy(query_fields=("start_time", "end_time"), source=MemoryProfileAuthSource.APIKEY)
 async def get_memory_increment_daily(
     request: Request,
     background_tasks: BackgroundTasks,
@@ -228,6 +234,7 @@ async def get_memory_increment_daily(
 
 @router.get("/dashboard_data", response_model=ApiResponse)
 @require_api_key_self_db(scopes=["memory"])
+@memory_profile_proxy(source=MemoryProfileAuthSource.APIKEY)
 async def get_dashboard_data(
     request: Request,
     api_key_auth: ApiKeyAuth = None,

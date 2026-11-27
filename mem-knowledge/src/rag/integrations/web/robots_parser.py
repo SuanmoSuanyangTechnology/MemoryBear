@@ -12,7 +12,7 @@ logger = logging.getLogger(__name__)
 class RobotsParser:
     """Parse and check robots.txt compliance for URLs."""
 
-    def __init__(self, user_agent: str, timeout: int = 10):
+    def __init__(self, user_agent: str, timeout: float = 10):
         """
         Initialize robots.txt parser.
 

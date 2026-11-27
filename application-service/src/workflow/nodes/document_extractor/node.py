@@ -9,7 +9,6 @@ from ..base_node import BaseNode
 from .config import DocExtractorNodeConfig
 from ...variable.base_variable import VariableType, FileObject
 from ....db import get_async_db_context
-from ....models.file_metadata_model import FileMetadata
 from ....schemas.app_schema import FileInput, FileType, TransferMethod
 
 logger = logging.getLogger(__name__)
@@ -58,43 +57,27 @@ async def _save_image_to_storage(
     ext: str,
     tenant_id: uuid.UUID,
     workspace_id: uuid.UUID,
-) -> tuple[uuid.UUID, str]:
+) -> tuple[str, str]:
     """
-    Save image bytes to the storage backend, write FileMetadata, return (file_id, url).
+    Save image bytes through the file service, return (file_id, url).
     """
-    from ....services.file_storage_service import FileStorageService, generate_file_key
+    from ....integrations.file_service import get_file_service_client
 
-    file_id = uuid.uuid4()
-    file_ext = f".{ext}" if not ext.startswith(".") else ext
-    content_type = f"image/{ext}"
+    ext_name = ext.lstrip(".").lower()
+    file_ext = f".{ext_name}" if ext_name else ""
+    content_type = f"image/{ext_name}" if ext_name else "application/octet-stream"
 
-    file_key = generate_file_key(
+    result = await get_file_service_client().upload(
         tenant_id=tenant_id,
         workspace_id=workspace_id,
-        file_id=file_id,
-        file_ext=file_ext,
+        actor_id=None,
+        file_name=f"doc_image_{uuid.uuid4()}{file_ext}",
+        content_type=content_type,
+        content=img_bytes,
     )
 
-    storage_svc = FileStorageService()
-    await storage_svc.storage.upload(file_key, img_bytes, content_type)
-
-    async with get_async_db_context() as db:
-        meta = FileMetadata(
-            id=file_id,
-            tenant_id=tenant_id,
-            workspace_id=workspace_id,
-            file_key=file_key,
-            file_name=f"doc_image_{file_id}{file_ext}",
-            file_ext=file_ext,
-            file_size=len(img_bytes),
-            content_type=content_type,
-            status="completed",
-        )
-        db.add(meta)
-        await db.commit()
-
-    url = f"{current_settings().file_local_server_url}/storage/permanent/{file_id}"
-    return file_id, url
+    url = f"{current_settings().file_local_server_url}/storage/permanent/{result.file_id}"
+    return result.file_id, url
 
 
 class DocExtractorNode(BaseNode):
@@ -147,23 +130,45 @@ class DocExtractorNode(BaseNode):
         if not files:
             return {"text": "", "chunks": [], "images": []}
 
-        tenant_id = uuid.UUID(self.get_variable("sys.tenant_id", variable_pool, strict=False) or str(uuid.uuid4()))
+        raw_tenant_id = self.get_variable("sys.tenant_id", variable_pool, strict=False)
+        tenant_id = uuid.UUID(raw_tenant_id or str(uuid.uuid4()))
         workspace_id = uuid.UUID(self.get_variable("sys.workspace_id", variable_pool))
 
         chunks: list[str] = []
         image_file_objects: list[dict] = []
 
         async with get_async_db_context() as db:
+            from ....services.file_content_service import (
+                FileReference,
+                extract_permanent_file_id,
+                read_file_content,
+            )
             from ....services.multimodal_service import MultimodalService
             svc = MultimodalService(db)
             for f in files:
                 label = f.name or f.url or f.file_id
                 try:
                     file_input = _file_object_to_file_input(f)
-                    if not file_input.url:
-                        file_input.url = await svc.get_file_url(file_input)
-                    if f.get_content():
-                        file_input.set_content(f.get_content())
+                    existing_content = f.get_content()
+                    if existing_content is not None:
+                        file_input.set_content(existing_content)
+                    else:
+                        # Local uploads and this service's own permanent URLs are read
+                        # through the internal channel; only genuinely external URLs
+                        # keep the native URL download inside extract_document_text.
+                        reference = FileReference.from_payload(file_input)
+                        if reference is not None and (
+                            reference.is_local
+                            or (reference.file_id and not reference.url)
+                            or extract_permanent_file_id(reference.url, trust_any_host=True)
+                        ):
+                            content = await read_file_content(
+                                reference,
+                                workspace_id=workspace_id,
+                                tenant_id=raw_tenant_id,
+                                db=db,
+                            )
+                            file_input.set_content(content.data)
 
                     text = await svc.extract_document_text(file_input)
 

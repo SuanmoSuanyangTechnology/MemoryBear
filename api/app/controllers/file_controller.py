@@ -89,6 +89,20 @@ def _require_parent_folder(
         )
 
 
+@router.post("/v1/upload-and-parse", include_in_schema=False)
+@cur_workspace_access_guard_async()
+@route_through_knowledge_service(
+    source=KnowledgeRetrievalSource.MANAGER_API,
+    profile=CallProfile.RAW_UPLOAD,
+    require_remote=True,
+)
+async def upload_and_parse_v1(
+    request: Request,
+    current_user: CurrentUserSnapshot = Depends(get_current_user_async),
+) -> Response:
+    raise KnowledgeUnavailableError("Versioned knowledge upload requires the remote service")
+
+
 @router.get("/{kb_id}/{parent_id}/files", response_model=ApiResponse)
 @cur_workspace_access_guard()
 @route_through_knowledge_service(source=KnowledgeRetrievalSource.MANAGER_API)
@@ -479,7 +493,7 @@ async def update_file(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
 
     update_fields = update_data.dict(exclude_unset=True)
-    if "parent_id" in update_fields:
+    if {"parent_id", "file_ext"} & update_fields.keys():
         validate_file_hierarchy(
             db, db_file.kb_id, update_fields, settings.KB_FILE_FOLDER_MAX_DEPTH, db_file.id,
         )

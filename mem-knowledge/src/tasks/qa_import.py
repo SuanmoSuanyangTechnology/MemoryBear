@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from ..bootstrap import get_settings
-from ..runtime import get_worker_runtime
-from ..usage_context import bind_usage
+from ..application.bootstrap import get_settings
+from ..application.runtime import get_worker_runtime
+from ..integrations.model.usage_context import bind_usage
 from .celery_app import celery_app
 from .observability import (
     DocumentProgressSink,

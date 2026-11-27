@@ -9,7 +9,7 @@ from pathlib import Path
 
 from PIL import Image
 
-from ....bootstrap import get_settings
+from ....application.bootstrap import get_settings
 from ..context import (
     ChunkContext,
     ImageVisionScope,

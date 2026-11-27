@@ -9,26 +9,51 @@ description = "Independent MemoryBear profile analytics service"
 readme = "README.md"
 requires-python = ">=3.12,<3.13"
 dependencies = [
+    # Match API Agent orchestration; keep its compatible prebuilt implementation.
+    "langchain==1.2.10",
+    "langgraph-prebuilt==1.0.8",
+    "pandas==2.3.3",
+    "langid==1.1.6",
+    "aiofiles==25.1.0",
+    "boto3==1.42.60",
+    "oss2==2.19.1",
+    "olefile==0.47",
+    "pypdf2==3.0.1",
+    "chardet==5.2.0",
+    "openpyxl==3.1.5",
+    "python-calamine>=0.4.0",
+    "xlrd==2.0.2",
+    "python-docx==1.2.0",
+    "python-magic==0.4.27; sys_platform != 'win32'",
+    "python-magic-bin==0.4.14; sys_platform == 'win32'",
     "alembic==1.20.0",
     "asyncpg==0.32.0",
     "auth-sdk",
-    "certifi==2026.10.23",
+    "chonkie==1.3.1",
+    "numpy==1.26.4",
+    "certifi==2026.11.20",
     "elasticsearch[async]==8.16.0",
     "error-core",
-    "fastapi==0.156.4",
+    "fastapi==0.165.0",
     # Pins are explicit per service: this one runs the migrated generation
     # pipelines on its own FastAPI line and may lead the API host's versions,
     # so do not "align" them with api/pyproject.toml without re-validating the
     # prompt/tool-call behavior they were tested with.
-    "json-repair==0.64.2",
+    "json-repair==0.64.9",
     "langchain-core==1.6.12",
     "langchain-openai==1.7.2",
     "memory-contracts",
+    "mem-storage-core",
+    # Shared Memory labels / Elasticsearch index schema / document
+    # normalization with the API (pure Python, no runtime dependencies).
+    "memory-storage-schema",
+    # Internal JWT + file-service upload client.
+    "httpx==0.28.1",
     "jinja2==3.1.6",
     "neo4j==6.4.0",
     "psutil==7.2.2",
-    "pydantic==2.14.1",
-    "pydantic-settings==2.16.1",
+    "pydantic==2.14.4",
+    "pydantic-settings==2.16.3",
     "python-dotenv==1.2.4",
     "redbear-model[runtime]",
     "redis==8.1.0",
@@ -40,15 +65,17 @@ dependencies = [
     # service only publishes the task by name and waits for its result.
     "task-bridge-sdk[celery,mem-router]",
     "uvicorn[standard]==0.54.0",
-    "xxhash==4.0.2",
+    "xxhash==4.1.0",
     "zttp==0.0.35",
-    "python-multipart>=0.0.20",
+    "python-multipart==0.0.34",
 ]
 
 [tool.uv.sources]
 auth-sdk = { path = "../packages/auth-sdk" }
 error-core = { path = "../packages/error-core" }
 memory-contracts = { path = "../packages/memory-contracts" }
+mem-storage-core = { path = "../packages/storage-core" }
+memory-storage-schema = { path = "../packages/memory-storage-schema" }
 redbear-model = { path = "../packages/redbear-model" }
 task-bridge-sdk = { path = "../packages/task-bridge-sdk" }
 
@@ -90,6 +117,118 @@ ban-relative-imports = "all"
     "B905",
     "F811",
 ]
+
+# Existing Ruff violations, scoped to the affected files and rule codes.
+"src/common/alias_utils.py" = ["E501", "I001", "UP006", "UP035"]
+"src/common/data/ontology.py" = ["E501", "I001", "UP045"]
+"src/common/datetime_utils.py" = ["E501", "UP017"]
+"src/common/exceptions.py" = ["I001", "UP037", "UP042", "UP045"]
+"src/common/language_utils.py" = ["I001", "UP009", "UP045"]
+"src/common/llm_error_utils.py" = ["E501"]
+"src/common/llm_tools/chunker_client.py" = ["B904", "E501", "F401", "I001", "UP035"]
+"src/common/name_similarity_utils.py" = ["UP006", "UP035", "UP045"]
+"src/common/prompt/prompt_utils.py" = ["E501"]
+"src/common/sse_utils.py" = ["I001", "UP006", "UP035"]
+"src/config.py" = ["E501"]
+"src/emotion/emotion_buckets.py" = ["E501", "UP035", "UP045"]
+"src/infrastructure/redis_lock.py" = ["I001"]
+"src/schemas/base_response.py" = ["I001"]
+"src/schemas/config_models.py" = ["E501", "I001", "UP006", "UP035", "UP045"]
+"src/schemas/dedup_models.py" = ["E501", "I001", "UP045"]
+"src/schemas/emotion_models.py" = ["I001", "UP006", "UP035", "UP045"]
+"src/schemas/event_category_models.py" = ["UP006", "UP009", "UP035", "UP045"]
+"src/schemas/graph_models.py" = ["E501", "I001", "UP006", "UP017", "UP035", "UP045"]
+"src/schemas/message_models.py" = ["E501", "I001", "UP006", "UP035", "UP045"]
+"src/schemas/ontology_extraction_models.py" = ["UP006", "UP009", "UP035"]
+"src/models/references/__init__.py" = ["E501", "I001"]
+"src/models/references/file_metadata_model.py" = ["E501", "F401", "I001"]
+"src/models/references/memory_generation_model.py" = ["E501"]
+"src/schemas/triplet_models.py" = ["E501", "UP006", "UP035", "UP045"]
+"src/schemas/variate_config.py" = ["E501", "I001", "UP045"]
+"src/modules/implicit_memory/handler.py" = ["E501"]
+"src/modules/implicit_memory/routes.py" = ["E501"]
+"src/modules/memory_storage/handler.py" = ["E501", "I001"]
+"src/modules/memory_storage/routes.py" = ["E501", "I001"]
+"src/pipelines/pilot_write_pipeline.py" = ["I001"]
+"src/repositories/implicit_memory.py" = ["I001"]
+"src/repositories/memory_storage.py" = ["E501", "I001"]
+"src/repositories/short_memory.py" = ["I001"]
+"src/schemas/implicit_memory.py" = ["UP042"]
+"src/schemas/memory_config.py" = ["B904", "F811", "UP037"]
+"src/schemas/memory_storage.py" = ["UP042"]
+"src/services/extract_pruning_client.py" = ["E501"]
+"src/services/implicit_memory.py" = ["B904", "E501", "I001", "UP006", "UP035", "UP045"]
+"src/services/memory_config/service.py" = ["B904", "E501", "F401", "I001", "UP007", "UP045"]
+"src/services/memory_storage.py" = [
+    "ASYNC230", "ASYNC240", "B904", "B905", "E501", "E711", "F401", "F811", "I001", "UP006", "UP015", "UP035", "UP045",
+]
+"src/services/model_config.py" = ["E501", "I001"]
+"src/services/model_profile_view.py" = ["E501"]
+"src/services/multimodal_service.py" = ["B904", "E501", "E722", "I001"]
+"src/services/ontology_services/ontology_general_models.py" = ["UP006", "UP009", "UP035", "UP045"]
+"src/services/ontology_services/ontology_type_merger.py" = [
+    "E501", "I001", "UP006", "UP009", "UP035", "UP045",
+]
+"src/storage/custom/end_user_delete.py" = ["B023"]
+"src/storage_services/extraction_engine/data_preprocessing/data_preprocessor.py" = [
+    "B904", "E501", "F401", "I001", "UP006", "UP015", "UP035", "UP045",
+]
+"src/storage_services/extraction_engine/data_preprocessing/data_pruning.py" = [
+    "E501", "F401", "I001", "UP006", "UP035", "UP045",
+]
+"src/storage_services/extraction_engine/data_preprocessing/pruning_service.py" = [
+    "B905", "I001", "UP006", "UP035", "UP037", "UP045",
+]
+"src/storage_services/extraction_engine/data_preprocessing/scene_config.py" = [
+    "F401", "I001", "UP006", "UP035",
+]
+"src/storage_services/extraction_engine/deduplication/deduped_and_disamb.py" = ["E501", "I001"]
+"src/storage_services/extraction_engine/deduplication/entity_dedup_llm.py" = [
+    "E501", "F401", "I001", "UP006", "UP035",
+]
+"src/storage_services/extraction_engine/deduplication/second_layer_dedup.py" = [
+    "F401", "F811", "I001", "UP006", "UP035",
+]
+"src/storage_services/extraction_engine/extraction_pipeline_orchestrator.py" = [
+    "E501", "F401", "F841", "I001", "UP006", "UP035", "UP037", "UP045",
+]
+"src/storage_services/extraction_engine/knowledge_extraction/chunk_extraction.py" = [
+    "E501", "F401", "I001", "UP006", "UP024", "UP035", "UP045",
+]
+"src/storage_services/extraction_engine/knowledge_extraction/embedding_generation.py" = [
+    "B010", "B905", "UP006", "UP035",
+]
+"src/storage_services/extraction_engine/knowledge_extraction/memory_summary.py" = [
+    "E501", "F401", "I001", "UP006", "UP035", "UP045",
+]
+"src/storage_services/extraction_engine/knowledge_extraction/triplet_extraction.py" = [
+    "E501", "I001", "UP006", "UP035",
+]
+"src/storage_services/extraction_engine/pipeline_help.py" = ["B009", "E501", "I001", "UP015"]
+"src/storage_services/extraction_engine/sidecar_factory.py" = ["UP006", "UP035", "UP042"]
+"src/storage_services/extraction_engine/steps/base.py" = ["UP046"]
+"src/storage_services/extraction_engine/steps/dedup_step.py" = [
+    "E501", "I001", "UP006", "UP035", "UP045",
+]
+"src/storage_services/extraction_engine/steps/embedding_step.py" = [
+    "B905", "E501", "I001", "UP006", "UP035",
+]
+"src/storage_services/extraction_engine/steps/emotion_step.py" = ["E501", "I001"]
+"src/storage_services/extraction_engine/steps/graph_build_step.py" = [
+    "B905", "E501", "I001", "UP006", "UP035", "UP045",
+]
+"src/storage_services/extraction_engine/steps/schema/extraction_step_schema.py" = [
+    "E501", "I001", "UP006", "UP035", "UP045",
+]
+"src/storage_services/extraction_engine/steps/schema/sidecar_step_schema.py" = ["UP006", "UP035"]
+"src/storage_services/extraction_engine/steps/statement_classification.py" = ["F841"]
+"src/storage_services/extraction_engine/steps/statement_temporal_step.py" = [
+    "B905", "E501", "I001", "UP006", "UP035",
+]
+"src/storage_services/extraction_engine/steps/triplet_step.py" = ["E501", "I001"]
+
+
+
 
 # Resolve through the mirror so re-locks keep every lock URL on it.
 [[tool.uv.index]]

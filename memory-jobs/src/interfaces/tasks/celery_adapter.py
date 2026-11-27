@@ -19,7 +19,7 @@ from celery import shared_task
 
 from src.application.ports.jobs import JobSpec, ResourceClass
 from src.interfaces.tasks.base import JobTask
-from src.interfaces.tasks.registry import JOBS, JobRegistration
+from src.interfaces.tasks.registry import JobRegistration, get_jobs
 from src.interfaces.tasks.serialization import serialize
 
 #: Resource class -> (hard limit, soft limit), in seconds. ``None`` leaves the
@@ -61,7 +61,9 @@ def _job_runner(registration: JobRegistration) -> Callable[..., dict[str, Any]]:
         response = serialize(
             handler.handle(payload, attempt_token=str(self.request.id or ""))
         )
-        response["task_id"] = self.request.id
+        # The admission dispatch report names the *work* task it published;
+        # keep that id instead of overwriting it with this attempt's own.
+        response.setdefault("task_id", self.request.id)
         return response
 
     # The wire name is explicit; a readable function name only helps traces.
@@ -79,5 +81,5 @@ def _register(registration: JobRegistration) -> Any:
 
 #: Every registered job as a Celery task, keyed by its wire name.
 TASKS: dict[str, Any] = {
-    registration.name: _register(registration) for registration in JOBS
+    registration.name: _register(registration) for registration in get_jobs()
 }

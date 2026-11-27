@@ -163,7 +163,9 @@ class KnowledgeHttpTransport:
         trace_id = headers.get("X-Trace-Id", "")
         timeout = (
             self._stream_timeout
-            if profile in {CallProfile.MULTIPART_UPLOAD, CallProfile.STREAM_DOWNLOAD}
+            if profile in {
+                CallProfile.MULTIPART_UPLOAD, CallProfile.RAW_UPLOAD, CallProfile.STREAM_DOWNLOAD,
+            }
             else self._default_timeout
         )
         request = self._client.build_request(

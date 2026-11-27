@@ -49,6 +49,7 @@ async def execute_list_page(
     *,
     orderby: str | None,
     desc: bool,
+    tie_breaker: InstrumentedAttribute | None = None,
 ):
     # Unknown names historically mean no explicit sort.
     attribute = getattr(model, orderby, None) if orderby else None
@@ -60,6 +61,8 @@ async def execute_list_page(
                 "KB_VALIDATION_ERROR", diagnostic="query.orderby: field cannot be sorted"
             )
         stmt = stmt.order_by(attribute.desc() if desc else attribute.asc())
+    if tie_breaker is not None:
+        stmt = stmt.order_by(tie_breaker.desc() if desc else tie_breaker.asc())
 
     try:
         return await db.execute(stmt)

@@ -1,9 +1,3 @@
-/*
- * @Author: ZhaoYing
- * @Date: 2026-02-03 16:27:39
- * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-08-14 13:52:47
- */
 /**
  * Chat debugging component for application testing
  * Supports both single agent and multi-agent cluster modes
@@ -54,6 +48,7 @@ import {
   applyVersionMessages,
 } from './messageReducers'
 import { createCompareStreamHandler, createClusterStreamHandler, createRegenerateStreamHandler } from './streamHandlers'
+import { createCompareTimelineStreamHandler } from './compareTimelineStream'
 
 /**
  * Component props
@@ -167,14 +162,17 @@ const Chat: FC<ChatProps> = ({
         updateChatList(prev => addAssistantMessage(prev))
         updateChatList(prev => prev.map(chat => ({ ...chat, streamLoading: true })))
 
-        const handleStreamMessage = createCompareStreamHandler({
-          updateChatList,
-          setLoading,
-          compareLoadingRef,
-          audioStatusMap,
-          setAudioStatusMap,
-          audioPollingRef,
-        })
+        const handleStreamMessage = createCompareTimelineStreamHandler(
+          createCompareStreamHandler({
+            updateChatList,
+            setLoading,
+            compareLoadingRef,
+            audioStatusMap,
+            setAudioStatusMap,
+            audioPollingRef,
+          }),
+          { updateChatList },
+        )
 
         setTimeout(() => {
           runCompare(id, {
@@ -229,14 +227,17 @@ const Chat: FC<ChatProps> = ({
         updateChatList(prev => addAssistantMessage(prev))
         updateChatList(prev => prev.map(chat => ({ ...chat, streamLoading: true })))
 
-        const handleStreamMessage = createClusterStreamHandler({
-          updateChatList,
-          setLoading,
-          compareLoadingRef,
-          conversationId,
-          setConversationId,
-          audioPollingRef,
-        })
+        const handleStreamMessage = createCompareTimelineStreamHandler(
+          createClusterStreamHandler({
+            updateChatList,
+            setLoading,
+            compareLoadingRef,
+            conversationId,
+            setConversationId,
+            audioPollingRef,
+          }),
+          { updateChatList, defaultModelId: chatList[0]?.model_config_id },
+        )
 
         setTimeout(() => {
           draftRun(id,
@@ -303,23 +304,29 @@ const Chat: FC<ChatProps> = ({
     })))
 
     const handleStreamMessage = isCluster
-      ? createClusterStreamHandler({
-        updateChatList,
-        setLoading,
-        compareLoadingRef,
-        conversationId,
-        setConversationId,
-        audioPollingRef,
-      })
-      : createRegenerateStreamHandler({
-        modelConfigId: column.model_config_id,
-        updateChatList,
-        setLoading,
-        compareLoadingRef,
-        audioStatusMap,
-        setAudioStatusMap,
-        audioPollingRef,
-      })
+      ? createCompareTimelineStreamHandler(
+        createClusterStreamHandler({
+          updateChatList,
+          setLoading,
+          compareLoadingRef,
+          conversationId,
+          setConversationId,
+          audioPollingRef,
+        }),
+        { updateChatList, defaultModelId: column.model_config_id },
+      )
+      : createCompareTimelineStreamHandler(
+        createRegenerateStreamHandler({
+          modelConfigId: column.model_config_id,
+          updateChatList,
+          setLoading,
+          compareLoadingRef,
+          audioStatusMap,
+          setAudioStatusMap,
+          audioPollingRef,
+        }),
+        { updateChatList, defaultModelId: column.model_config_id },
+      )
 
     setTimeout(() => {
       draftRunRegenerate(id, vo.id as string, handleStreamMessage, (abort) => { abortRef.current = abort })
@@ -426,6 +433,7 @@ const Chat: FC<ChatProps> = ({
                 <ChatContent
                   classNames={clsx('rb:flex-1! rb:min-h-0!',{
                     'rb:mt-3': isHasLabel && (chat && chat.list && chat?.list?.length > 0),
+                    'rb:pl-3!': isHasLabel && index > 0,
                   })}
                   contentClassNames={{
                     'rb:max-w-100!': chatList.length === 1,
@@ -442,6 +450,7 @@ const Chat: FC<ChatProps> = ({
                   />}
                   onSend={isCluster ? handleClusterSend : handleSend}
                   data={chat.list || []}
+                  source={source}
                   streamLoading={chat.streamLoading || compareLoadingRef.current}
                   labelPosition="top"
                   labelFormat={(item) => item.role === 'user' ? t('application.you') : chat.label || t(`application.ai`)}

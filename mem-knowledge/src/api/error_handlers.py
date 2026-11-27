@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from typing import Any
 
 from error_core.codes import BizCode
 from error_core.diagnostics import format_diagnostics
 from error_core.knowledge import knowledge_message, validation_diagnostic
-from error_core.knowledge_upload import is_versioned_upload, upload_error_response
+from error_core.knowledge_upload import upload_error_response
+from error_core.messages import user_message
 from fastapi import FastAPI, Request
 from fastapi.exception_handlers import request_validation_exception_handler
 from fastapi.exceptions import RequestValidationError
@@ -16,14 +18,16 @@ from mem_storage import StorageError
 from sqlalchemy.exc import OperationalError
 from starlette.exceptions import HTTPException
 
-from ..error_mapping import map_storage_error
 from ..errors import KnowledgeError
-from ..i18n import normalize_locale, resolve_locale, translate_legacy
+from ..errors.i18n import normalize_locale, resolve_locale, translate_legacy
+from ..errors.mapping import map_storage_error
 from ..integrations.model.errors import ModelInvokeProtocolError
-from ..request_logging import log_request_failure
+from ..observability.request_logging import log_request_failure
+from ..observability.trace import TRACE_ID_HEADER, get_trace_id, normalize_trace_id
 from ..services.upload_deduplication import DuplicateUploadError
-from ..trace import TRACE_ID_HEADER, get_trace_id, normalize_trace_id
+from .knowledge_capacity import WorkspaceCapacityExceeded
 from .schemas.common import fail
+from .upload_contract import is_knowledge_upload
 
 _HTTP_ERRORS = {
     400: "KB_REQUEST_MALFORMED",
@@ -100,7 +104,16 @@ def _business_http_status(request: Request, error: KnowledgeError) -> int:
         return 500
     if error.status_code == 400:
         module = getattr(endpoint, "__module__", "")
-        if module in {"src.api.routes.knowledge", "src.api.routes.document", "src.api.routes.file"}:
+        if module == "src.api.routes.file_v1":
+            return {
+                "KB_UPLOAD_FILE_EMPTY": 422,
+                "KB_UPLOAD_FILE_SIZE_LIMIT": 413,
+                "KB_PARENT_FOLDER_NOT_FOUND": 404,
+            }.get(error.code, error.status_code)
+        if module in {
+            "src.api.routes.knowledge", "src.api.routes.document", "src.api.routes.file",
+            "src.api.routes.document_v1",
+        }:
             if error.code == _RESOURCE_NOT_FOUND.get(operation):
                 return 404
             if error.code in _KNOWLEDGE_CONFLICTS.get(operation, ()):
@@ -128,11 +141,12 @@ def _response(
     message: str,
     headers: Mapping[str, str] | None = None,
     diagnostic: str = "",
+    data: dict[str, Any] | None = None,
 ) -> JSONResponse:
     response = JSONResponse(
         status_code=status_code,
         headers=dict(headers or {}),
-        content=fail(code=response_code, msg=message, error=diagnostic),
+        content=fail(code=response_code, msg=message, error=diagnostic, data=data),
     )
     response.headers[TRACE_ID_HEADER] = getattr(request.state, "trace_id", get_trace_id())
     response.headers["Content-Language"] = request_locale(request)
@@ -171,6 +185,7 @@ def render_error(
     exception: BaseException | None = None,
     validation_errors: list[dict] | None = None,
     headers: Mapping[str, str] | None = None,
+    data: dict[str, Any] | None = None,
 ) -> JSONResponse:
     """Log every business failure, including direct HTTP-200 failure responses."""
     if error.code in {
@@ -185,6 +200,9 @@ def render_error(
     else:
         message = knowledge_message(response_code, request_locale(request))
         log_message = knowledge_message(response_code, "en")
+    if error.code == "KB_KNOWLEDGE_FIELD_IMMUTABLE":
+        message = message.format(field=error.params["field"])
+        log_message = log_message.format(field=error.params["field"])
     log_request_failure(
         request,
         status_code=status_code,
@@ -202,6 +220,7 @@ def render_error(
         response_code=response_code,
         message=message,
         headers=headers,
+        data=data,
         diagnostic=format_diagnostics(
             trace_id=getattr(request.state, "trace_id", get_trace_id()),
             detail=(
@@ -258,6 +277,34 @@ def render_upload_error(
 
 
 def register_error_handlers(application: FastAPI) -> None:
+    @application.exception_handler(WorkspaceCapacityExceeded)
+    async def capacity_error_handler(request: Request, exc: WorkspaceCapacityExceeded):
+        if is_knowledge_upload(request):
+            return render_upload_error(
+                request, exc, status=402, cause="QUOTA_EXCEEDED", code=BizCode.QUOTA_EXCEEDED,
+            )
+        language = request_locale(request)
+        message = user_message(BizCode.QUOTA_EXCEEDED, language) or "Quota exceeded"
+        body = fail(
+            code=BizCode.QUOTA_EXCEEDED, msg=message, error=message,
+            data={
+                "resource": "知识库容量" if language == "zh" else "knowledge base capacity",
+                "current_usage": float(exc.used_gb),
+                "quota_limit": float(exc.limit_gb),
+            },
+        )
+        module = getattr(request.scope.get("endpoint"), "__module__", "")
+        if module not in {"src.api.routes.knowledge_v1", "src.api.routes.file_v1"}:
+            body = {"success": False, "message": message, "error_code": "QUOTA_EXCEEDED", **body}
+        return JSONResponse(
+            status_code=402,
+            content=body,
+            headers={
+                TRACE_ID_HEADER: getattr(request.state, "trace_id", get_trace_id()),
+                "Content-Language": language,
+            },
+        )
+
     @application.exception_handler(DuplicateUploadError)
     async def duplicate_upload_handler(request: Request, exc: DuplicateUploadError):
         return render_upload_error(
@@ -268,7 +315,7 @@ def register_error_handlers(application: FastAPI) -> None:
     @application.exception_handler(StorageError)
     async def storage_error_handler(request: Request, exc: StorageError):
         mapped = map_storage_error(exc)
-        if is_versioned_upload(request, internal=True):
+        if is_knowledge_upload(request):
             return render_upload_error(
                 request, exc, status=_UPLOAD_ERROR_STATUSES.get(mapped.code, 500),
                 cause=mapped.code,
@@ -277,12 +324,26 @@ def register_error_handlers(application: FastAPI) -> None:
 
     @application.exception_handler(RequestValidationError)
     async def validation_error_handler(request: Request, exc: RequestValidationError):
-        if is_versioned_upload(request, internal=True):
+        if is_knowledge_upload(request):
             return render_upload_error(
                 request, exc, status=422, cause="VALIDATION_FAILED", validation_errors=exc.errors(),
             )
         endpoint = request.scope.get("endpoint")
         identity = (getattr(endpoint, "__module__", ""), getattr(endpoint, "__name__", ""))
+        if identity[0] in {
+            "src.api.routes.knowledge_v1", "src.api.routes.document_v1",
+            "src.api.routes.file_v1",
+        }:
+            errors = [
+                {"loc": error["loc"][:-1] + ("<extra>",)
+                 if error["type"] == "extra_forbidden" else error["loc"],
+                 "type": error["type"], "msg": "Invalid field"}
+                for error in exc.errors()
+            ]
+            return render_error(
+                request, KnowledgeError.from_code("KB_VALIDATION_ERROR", status_code=422),
+                validation_errors=errors,
+            )
         code = _VALIDATION_CONTRACTS.get(identity)
         if code is None:
             log_request_failure(
@@ -313,14 +374,14 @@ def register_error_handlers(application: FastAPI) -> None:
 
     @application.exception_handler(KnowledgeError)
     async def knowledge_error_handler(request: Request, exc: KnowledgeError):
-        if is_versioned_upload(request, internal=True):
+        if is_knowledge_upload(request):
             status = _UPLOAD_ERROR_STATUSES.get(exc.code, exc.status_code)
             return render_upload_error(request, exc, status=status, cause=exc.code)
         return render_error(request, exc)
 
     @application.exception_handler(HTTPException)
     async def http_error_handler(request: Request, exc: HTTPException):
-        if is_versioned_upload(request, internal=True):
+        if is_knowledge_upload(request):
             return render_upload_error(
                 request, exc, status=exc.status_code,
                 cause=_HTTP_ERRORS.get(exc.status_code, "KB_UPLOAD_HTTP_ERROR"),
@@ -333,7 +394,7 @@ def register_error_handlers(application: FastAPI) -> None:
 
     @application.exception_handler(Exception)
     async def unhandled_error_handler(request: Request, exc: Exception):
-        if is_versioned_upload(request, internal=True):
+        if is_knowledge_upload(request):
             if isinstance(exc, OperationalError):
                 return render_upload_error(
                     request, exc, status=503, cause="KB_DATABASE_UNAVAILABLE",

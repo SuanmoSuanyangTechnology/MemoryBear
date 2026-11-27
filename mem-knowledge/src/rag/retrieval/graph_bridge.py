@@ -6,11 +6,11 @@ import logging
 import time
 from typing import Any
 
+from ...application.runtime import ProcessRuntime
 from ...integrations.model.chat import RedBearChatModel
 from ...integrations.model.embedding import RedBearEmbeddings
 from ...integrations.model.invoke_backend import ref_from_view
 from ...integrations.model.views import is_qwen3_vl_embedding_view
-from ...runtime import ProcessRuntime
 from ..knowledge_graph.config import GraphPipeline
 from ..knowledge_graph.elasticsearch_store import GraphElasticsearchStore
 from ..knowledge_graph.models import GraphIndexRuntime, GraphRetrievalRequest

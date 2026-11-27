@@ -24,10 +24,15 @@ def _count(value: object) -> int | None:
 
 
 class RedisManager:
-    """Lazily own one Redis client for one process and event loop."""
+    """Lazily own one Redis client for one process and event loop.
 
-    def __init__(self, settings: ProfileSettings) -> None:
+    ``url`` overrides the configured cache URL (e.g. the Celery result backend
+    lives on its own logical database); every other caller keeps the default.
+    """
+
+    def __init__(self, settings: ProfileSettings, url: str | None = None) -> None:
         self._settings = settings
+        self._url = url
         self._client: Redis | None = None
         self._loop: asyncio.AbstractEventLoop | None = None
         self._lock = asyncio.Lock()
@@ -43,10 +48,12 @@ class RedisManager:
         async with self._lock:
             if self._client is None:
                 self._client = Redis.from_url(
-                    self._settings.resolved_redis_url,
+                    self._url or self._settings.resolved_redis_url,
                     decode_responses=True,
                     max_connections=self._settings.redis_pool_size,
                     health_check_interval=30,
+                    socket_connect_timeout=5,
+                    socket_timeout=10,
                 )
                 self._loop = current_loop
             return self._client

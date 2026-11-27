@@ -31,7 +31,6 @@ from dataclasses import dataclass
 from typing import Any
 from urllib.parse import urlparse
 
-import httpx
 from PIL import Image
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -41,6 +40,7 @@ from ..config import current_settings
 from ..errors import BizCode
 from ..errors import BusinessException
 from ..db import get_async_db_context
+from ..integrations.file_service import get_file_service_client
 from ..models.file_metadata_model import FileMetadata
 from .file_storage_service import FileStorageService
 
@@ -373,8 +373,23 @@ async def _read_by_file_id(
     )
 
 
-async def _read_by_permanent_url(reference: FileReference, *, limit: int) -> FileContent:
-    """Legacy-data fallback: only permanent URLs minted by this service; restored to file_id and read locally."""
+async def _read_by_permanent_url(
+    reference: FileReference,
+    *,
+    workspace_id: Any,
+    tenant_id: Any,
+    db: AsyncSession | Session | None,
+    limit: int,
+) -> FileContent:
+    """Permanent URL minted by this service: restore the file_id and read it via the
+    file-service internal API instead of re-entering the public ingress (hairpin).
+
+    The internal channel is tenant-scoped; when it is unavailable (client not
+    configured or transport failure) the shared storage read is used as the
+    fallback while an ownership scope exists. With no tenant the internal API
+    cannot be called, and with no scope at all the storage read is refused --
+    failing closed beats fetching the minted URL over the public network.
+    """
     file_id = extract_permanent_file_id(reference.url, trust_any_host=True)
     if file_id is None:
         raise BusinessException(
@@ -382,24 +397,42 @@ async def _read_by_permanent_url(reference: FileReference, *, limit: int) -> Fil
             BizCode.FILE_READ_ERROR,
         )
 
-    # Rebuild the request against this service's own address from the restored file_id, so an
-    # external URL's host is never trusted (SSRF)
-    try:
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            response = await client.get(build_permanent_file_url(file_id), follow_redirects=True)
-            response.raise_for_status()
-            content = response.content
-    except Exception as exc:
-        logger.error(f"读取本服务附件 URL 失败: {exc}", exc_info=True)
-        raise BusinessException("文件读取失败", BizCode.FILE_READ_ERROR)
+    scoped_tenant_id = _as_uuid(tenant_id)
+    if scoped_tenant_id is not None:
+        try:
+            payload = await get_file_service_client().get_content(
+                tenant_id=scoped_tenant_id,
+                workspace_id=_as_uuid(workspace_id),
+                actor_id=None,
+                file_id=file_id,
+                max_bytes=limit,
+            )
+        except BusinessException as exc:
+            if exc.code != BizCode.SERVICE_UNAVAILABLE:
+                raise
+            logger.warning(
+                "file-service 内网读取不可用，回落共享存储直读 file_id=%s error=%s",
+                file_id,
+                exc,
+            )
+        else:
+            return FileContent(
+                data=payload.data,
+                file_id=file_id,
+                content_type=payload.content_type,
+            )
 
-    if len(content) > limit:
-        raise BusinessException("文件大小不在允许范围内", BizCode.FILE_READ_ERROR)
-
-    return FileContent(
-        data=content,
-        file_id=file_id,
-        content_type=response.headers.get("content-type"),
+    return await _read_by_file_id(
+        FileReference(
+            file_type=reference.file_type,
+            file_id=file_id,
+            name=reference.name,
+            transfer_method="local_file",
+        ),
+        workspace_id=workspace_id,
+        tenant_id=tenant_id,
+        db=db,
+        limit=limit,
     )
 
 
@@ -447,7 +480,13 @@ async def read_file_content(
             limit=limit,
         )
     if reference.url:
-        return await _read_by_permanent_url(reference, limit=limit)
+        return await _read_by_permanent_url(
+            reference,
+            workspace_id=workspace_id,
+            tenant_id=tenant_id,
+            db=db,
+            limit=limit,
+        )
     if reference.file_id:
         return await _read_by_file_id(
             reference,
@@ -569,6 +608,14 @@ async def resolve_image_retrieval_query(
         # below as a fallback
 
     if reference.url:
+        if extract_permanent_file_id(reference.url, trust_any_host=True):
+            # This service's own permanent URL read failed locally; fetching it back over the
+            # public ingress would just hairpin through the gateway to ourselves
+            logger.warning(
+                "图片检索 query 本地读取失败，不回落公网拉取 locator=%s",
+                reference.locator,
+            )
+            return None
         return await build_image_retrieval_query(reference.url)
 
     return None

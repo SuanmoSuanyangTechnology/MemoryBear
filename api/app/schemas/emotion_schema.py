@@ -1,10 +1,19 @@
 """情绪分析相关的请求和响应模型"""
 
-from datetime import date
+from datetime import date, datetime
 from typing import Literal, Optional
 from uuid import UUID
+
 from pydantic import BaseModel, Field
 
+
+
+class EmotionSyncRequest(BaseModel):
+    """同步最多 7 天的情绪明细，无时区时间按 UTC 解释。"""
+
+    end_user_id: UUID = Field(description="终端用户 ID")
+    start_time: datetime = Field(description="窗口起始时间（含）")
+    end_time: datetime = Field(description="窗口结束时间（不含）")
 
 class EmotionDailyOverviewRequest(BaseModel):
     """获取情绪数据概览请求（最近2个活跃日）"""

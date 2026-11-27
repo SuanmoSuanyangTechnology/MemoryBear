@@ -9,8 +9,8 @@ from collections.abc import AsyncIterator
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.exc import TimeoutError as PoolTimeoutError
 
-from ..error_mapping import map_wiki_error
 from ..errors import KnowledgeError
+from ..errors.mapping import map_wiki_error
 from ..rag.faq.contracts import FAQ_GENERATE_TASK, FAQ_QUEUE
 from ..rag.wiki.config import WikiError
 from ..rag.wiki.diagnostics import diagnostic_json, exception_details

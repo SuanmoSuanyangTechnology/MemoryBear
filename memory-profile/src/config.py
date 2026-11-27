@@ -2,12 +2,27 @@
 
 from __future__ import annotations
 
+import logging
+from pathlib import Path
 from typing import Literal
 from urllib.parse import quote_plus, urlparse
 
-from pydantic import AliasChoices, ConfigDict, Field, field_validator, model_validator
+from pydantic import (
+    AliasChoices,
+    ConfigDict,
+    Field,
+    SecretStr,
+    field_validator,
+    model_validator,
+)
 from pydantic_settings import BaseSettings
 from sqlalchemy.engine import make_url
+
+
+def _redis_url_with_db(url: str, db: int) -> str:
+    """Return ``url`` pointed at logical Redis database ``db``."""
+
+    return urlparse(url)._replace(path=f"/{db}").geturl()
 
 
 def _as_asyncpg_url(value: str) -> str:
@@ -23,6 +38,10 @@ class ProfileSettings(BaseSettings):
     metadata_migration_enabled: bool = Field(
         False, validation_alias="JOBS_METADATA_MIGRATION_ENABLED"
     )
+    #: Wall-clock budget of one in-merge metadata migration (API parity).
+    metadata_migration_timeout_seconds: int = Field(
+        60, ge=1, validation_alias="METADATA_MIGRATION_TIMEOUT_SECONDS"
+    )
 
     service_name: str = Field("memory-profile", validation_alias="PROFILE_SERVICE_NAME")
     host: str = Field("0.0.0.0", validation_alias="PROFILE_HOST")
@@ -34,6 +53,18 @@ class ProfileSettings(BaseSettings):
     access_log_enabled: bool = Field(True, validation_alias="PROFILE_ACCESS_LOG_ENABLED")
     health_probe_timeout_seconds: float = Field(
         2.0, validation_alias="PROFILE_HEALTH_PROBE_TIMEOUT_SECONDS"
+    )
+    preference_recall_max_context_messages: int = Field(
+        3, validation_alias="PREFERENCE_RECALL_MAX_CONTEXT_MESSAGES"
+    )
+    preference_recall_max_preferences: int = Field(
+        10, validation_alias="PREFERENCE_RECALL_MAX_PREFERENCES"
+    )
+    preference_recall_timeout_ms: int = Field(
+        3000, validation_alias="PREFERENCE_RECALL_TIMEOUT_MS"
+    )
+    memory_message_max_content_chars: int = Field(
+        12000, validation_alias="MEMORY_MESSAGE_MAX_CONTENT_CHARS"
     )
 
     # Runtime monitoring: tracemalloc is intentionally opt-in because allocation
@@ -74,22 +105,115 @@ class ProfileSettings(BaseSettings):
         validation_alias="ACL_RULES_CHANGED_CHANNEL",
     )
 
+    # Migrated extraction and attachment settings use the same keys and defaults as API.
+    oss_endpoint: str = Field("", validation_alias="OSS_ENDPOINT")
+    oss_access_key_id: str = Field("", validation_alias="OSS_ACCESS_KEY_ID")
+    oss_access_key_secret: str = Field("", validation_alias="OSS_ACCESS_KEY_SECRET")
+    oss_bucket_name: str = Field("", validation_alias="OSS_BUCKET_NAME")
+    s3_region: str = Field("", validation_alias="S3_REGION")
+    s3_access_key_id: str = Field("", validation_alias="S3_ACCESS_KEY_ID")
+    s3_secret_access_key: str = Field("", validation_alias="S3_SECRET_ACCESS_KEY")
+    s3_bucket_name: str = Field("", validation_alias="S3_BUCKET_NAME")
+    s3_endpoint_url: str = Field("", validation_alias="S3_ENDPOINT_URL")
+    minio_endpoint_url: str = Field("", validation_alias="MINIO_ENDPOINT_URL")
+    minio_access_key_id: str = Field("", validation_alias="MINIO_ACCESS_KEY_ID")
+    minio_secret_access_key: str = Field("", validation_alias="MINIO_SECRET_ACCESS_KEY")
+    minio_bucket_name: str = Field("", validation_alias="MINIO_BUCKET_NAME")
+    minio_region: str = Field("", validation_alias="MINIO_REGION")
+    storage_type: str = Field("local", validation_alias="STORAGE_TYPE")
+    file_path: str = Field("/files", validation_alias="FILE_PATH")
+    file_local_server_url: str = Field(
+        "http://localhost:8000/api", validation_alias="FILE_LOCAL_SERVER_URL"
+    )
+    bert_url: str = Field("", validation_alias="BERT_URL")
+    statement_classifier_timeout_seconds: float = Field(
+        10, validation_alias="STATEMENT_CLASSIFIER_TIMEOUT_SECONDS"
+    )
+    statement_type_classifier_model: str = Field(
+        "", validation_alias="STATEMENT_TYPE_CLASSIFIER_MODEL"
+    )
+    statement_type_classifier_api_key: str = Field(
+        "", validation_alias="STATEMENT_TYPE_CLASSIFIER_API_KEY"
+    )
+    temporal_type_classifier_model: str = Field(
+        "", validation_alias="TEMPORAL_TYPE_CLASSIFIER_MODEL"
+    )
+    temporal_type_classifier_api_key: str = Field(
+        "", validation_alias="TEMPORAL_TYPE_CLASSIFIER_API_KEY"
+    )
+    unsolved_reference_classifier_model: str = Field(
+        "", validation_alias="UNSOLVED_REFERENCE_CLASSIFIER_MODEL"
+    )
+    unsolved_reference_classifier_api_key: str = Field(
+        "", validation_alias="UNSOLVED_REFERENCE_CLASSIFIER_API_KEY"
+    )
+    extract_pruning_enabled: bool = Field(True, validation_alias="EXTRACT_PRUNING_ENABLED")
+    extract_pruning_url: str = Field("", validation_alias="EXTRACT_PRUNING_URL")
+    extract_pruning_api_key: str = Field("", validation_alias="EXTRACT_PRUNING_API_KEY")
+    extract_pruning_model: str = Field("extract-pruning", validation_alias="EXTRACT_PRUNING_MODEL")
+    extract_pruning_request_timeout_seconds: float = Field(
+        60, validation_alias="EXTRACT_PRUNING_REQUEST_TIMEOUT_SECONDS"
+    )
+    trial_run_chat_history_rounds: int = Field(20, validation_alias="TRIAL_RUN_CHAT_HISTORY_ROUNDS")
+    memory_output_dir: str = Field("logs/memory-output", validation_alias="MEMORY_OUTPUT_DIR")
+
+    @field_validator(
+        "extract_pruning_url", "extract_pruning_api_key", "extract_pruning_model", mode="before"
+    )
+    @classmethod
+    def normalize_extract_pruning_text(cls, value: object) -> object:
+        return value.strip() if isinstance(value, str) else value
+
+    @field_validator("extract_pruning_enabled", mode="before")
+    @classmethod
+    def normalize_extract_pruning_enabled(cls, value: object) -> object:
+        if isinstance(value, str):
+            return value.strip().lower() == "true"
+        return value
+
+    @field_validator(
+        "extract_pruning_request_timeout_seconds",
+        "statement_classifier_timeout_seconds",
+        mode="before",
+    )
+    @classmethod
+    def normalize_extraction_timeout(cls, value: object) -> float:
+        return max(0.1, float(value))
+
+    @field_validator("trial_run_chat_history_rounds", mode="before")
+    @classmethod
+    def normalize_trial_history_rounds(cls, value: object) -> int:
+        try:
+            return max(0, int(value))
+        except (TypeError, ValueError):
+            logging.getLogger(__name__).warning(
+                "Invalid TRIAL_RUN_CHAT_HISTORY_ROUNDS=%r; falling back to 20", value
+            )
+            return 20
+
     # 生成类用例（memory insight / user summary / interest distribution）走模型服务
     # invoke 接缝；凭据、渠道选路与 failover 都在模型服务侧（与 api 同口径）。
     model_service_base_url: str = Field(
         "http://127.0.0.1:8080", validation_alias="MODEL_SERVICE_BASE_URL"
     )
     # Scene continuity BERT probe used only by the scene/split-demo endpoint.
-    # This is the single model credential this process holds; see README.
+    # Its credential is separate from the extraction classifier/pruning clients.
     scene_continuity_url: str = Field("", validation_alias="SCENE_CONTINUITY_URL")
-    scene_continuity_api_key: str = Field(
-        "", validation_alias="SCENE_CONTINUITY_API_KEY"
-    )
+    scene_continuity_api_key: str = Field("", validation_alias="SCENE_CONTINUITY_API_KEY")
     scene_continuity_model: str = Field(
         "topic-shift-detector", validation_alias="SCENE_CONTINUITY_MODEL"
     )
     scene_continuity_timeout_seconds: float = Field(
         2.0, ge=0.1, validation_alias="SCENE_CONTINUITY_TIMEOUT_SECONDS"
+    )
+    emotion_url: str = Field("", validation_alias="BERT_URL")
+    emotion_api_key: SecretStr = Field(SecretStr(""), validation_alias="FAST_WRITE_EMOTION_API_KEY")
+    emotion_model: str = Field("", validation_alias="FAST_WRITE_EMOTION_MODEL")
+    emotion_http_timeout_seconds: float = Field(
+        5.0, validation_alias="FAST_WRITE_EMOTION_HTTP_TIMEOUT_SECONDS"
+    )
+    emotion_total_timeout_seconds: float = Field(
+        3.0, validation_alias="FAST_WRITE_EMOTION_TOTAL_TIMEOUT_SECONDS"
     )
     model_service_connect_timeout_seconds: float = Field(
         5.0, validation_alias="MODEL_SERVICE_INVOKE_CONNECT_TIMEOUT_SECONDS"
@@ -110,13 +234,17 @@ class ProfileSettings(BaseSettings):
         20, validation_alias="MODEL_SERVICE_MAX_KEEPALIVE_CONNECTIONS"
     )
 
-    # 企业版配额由闭源 memory-enterprise 服务持有（套餐/资源包表），本服务只查询
-    # 生效额度。留空 base URL 视为社区版；查询失败同样回落免费版。
+    # 企业版配额和默认情绪策略由 memory-enterprise 持有。
+    # 未配置服务或配额查询失败时，配额回落到社区免费版。
     memory_enterprise_base_url: str = Field("", validation_alias="MEMORY_ENTERPRISE_BASE_URL")
     memory_enterprise_timeout_seconds: float = Field(
         3.0, gt=0, validation_alias="MEMORY_ENTERPRISE_TIMEOUT_SECONDS"
     )
-    memory_enterprise_token: str = Field("", validation_alias="MEMORY_ENTERPRISE_TOKEN")
+    #: Shared service credential sent as ``X-Internal-Token``. The same value is
+    #: configured on memory-enterprise and memory-jobs; empty disables the call.
+    memory_internal_token: SecretStr = Field(
+        SecretStr(""), validation_alias="MEMORY_INTERNAL_TOKEN"
+    )
 
     # 免费版额度：memory-profile 自己维护，变量名与 api 的 QUOTA_* 保持一致，
     # 一个部署值即可覆盖三个服务。企业版订阅值由 memory-enterprise 返回，
@@ -145,32 +273,6 @@ class ProfileSettings(BaseSettings):
     interest_cache_expire_seconds: int = Field(
         24 * 60 * 60, validation_alias="PROFILE_INTEREST_CACHE_EXPIRE_SECONDS"
     )
-    # Option A（写入下沉过渡期）：写网关任务由 api worker 执行，profile 只投递并等待。
-    # : 留空时沿用 CELERY_* 派生值；生产需指向 api 的 broker / result backend。
-    write_gateway_broker_url: str | None = Field(
-        None,
-        validation_alias=AliasChoices("WRITE_GATEWAY_BROKER_URL", "CELERY_BROKER_URL"),
-    )
-    write_gateway_result_backend: str | None = Field(
-        None,
-        validation_alias=AliasChoices(
-            "WRITE_GATEWAY_RESULT_BACKEND", "CELERY_RESULT_BACKEND"
-        ),
-    )
-    write_gateway_queue: str = Field(
-        "memory_tasks", validation_alias="WRITE_GATEWAY_QUEUE"
-    )
-    write_gateway_wait_seconds: float = Field(
-        120.0, validation_alias="WRITE_GATEWAY_WAIT_SECONDS"
-    )
-    # Option A（A2 分片）：写批次的“消息落库/seq”步骤执行位置。
-    # - api（默认）：保持 A1 行为，全部写流程在 api worker；
-    # - memory_jobs：仅落库步骤投递到 memory-jobs admission，其余仍在 api。
-    # 默认 api 即为回滚开关：改成 api 立即恢复 A1 路径。
-    # A2 S4b：图写入（WritePipeline）等待执行的派发位置；默认 api，可回滚。
-    # A2 S5d：RAG（ES 直写）执行位置；默认 api，可回滚。
-    # 留空时沿用 resolved_redis_url（业务 Redis，与 memory-jobs 的 admission
-    # keyspace 同库）；跨集群部署时显式指向 memory-jobs 使用的业务 Redis。
     migration_database_url: str | None = Field(
         None,
         validation_alias="PROFILE_MIGRATION_DATABASE_URL",
@@ -225,6 +327,9 @@ class ProfileSettings(BaseSettings):
     redis_port: int = Field(6379, validation_alias="REDIS_PORT")
     redis_password: str | None = Field(None, validation_alias="REDIS_PASSWORD")
     redis_db: int = Field(1, validation_alias="REDIS_DB")
+    #: The API's Celery-result-backend DB; shared locks and dashboard throttling
+    #: use this logical database.
+    redis_db_celery_backend: int = Field(4, validation_alias="REDIS_DB_CELERY_BACKEND")
     redis_pool_size: int = Field(100, validation_alias="PROFILE_REDIS_POOL_SIZE")
 
     elasticsearch_host: str = Field("https://127.0.0.1", validation_alias="ELASTICSEARCH_HOST")
@@ -245,7 +350,39 @@ class ProfileSettings(BaseSettings):
     )
     #: Which backend serves graph reads (``ELASTIC`` / ``NEO4J``); the ported
     #: storage ``BackendFactory`` matches this value directly, like the host.
-    memory_read_backend: str = Field("ELASTIC", validation_alias="MEMORY_READ_BACKEND")
+    memory_read_backend: Literal["ELASTIC", "NEO4J"] = Field(
+        "ELASTIC", validation_alias="MEMORY_READ_BACKEND"
+    )
+
+    # ── File upload (host ``POST /v1/memory/files/upload``) ──────────────────
+    #: 上传大小上限；与 api 的 ``MAX_FILE_SIZE`` 同值、同环境变量。
+    max_file_size: int = Field(52428800, ge=1, validation_alias="MAX_FILE_SIZE")
+    #: 上传由独立 file-service 处理；试运行和聊天的附件读取仍使用公共存储包。
+    file_service_base_url: str = Field("", validation_alias="FILE_SERVICE_BASE_URL")
+    #: Shared service credential sent as ``X-File-Service-Token``; file-service
+    #: compares it against its own ``FILE_SERVICE_INTERNAL_TOKEN``.
+    file_service_internal_token: SecretStr = Field(
+        SecretStr(""), validation_alias="FILE_SERVICE_INTERNAL_TOKEN"
+    )
+    file_service_read_timeout_seconds: float = Field(
+        30.0, gt=0, validation_alias="FILE_SERVICE_READ_TIMEOUT_SECONDS"
+    )
+    #: 上传写预算；大文件传输必须留足时间。
+    file_service_write_timeout_seconds: float = Field(
+        300.0, gt=0, validation_alias="FILE_SERVICE_WRITE_TIMEOUT_SECONDS"
+    )
+
+    # ── Service-to-service ───────────────────────────────────────────────────
+    # memory-enterprise / file-service calls authenticate with the static shared
+    # tokens above (``MEMORY_INTERNAL_TOKEN`` and ``FILE_SERVICE_INTERNAL_TOKEN``),
+    # not with a signed internal JWT.
+
+    @field_validator("memory_read_backend", mode="before")
+    @classmethod
+    def normalize_read_backend(cls, value: str) -> str:
+        normalized = value.strip().upper()
+        return "ELASTIC" if normalized == "ELASTICSEARCH" else normalized
+
     #: Allow the Elasticsearch index ensure step to rebuild a *newer* index from an
     #: older definition (host ``ES_ALLOW_DOWNGRADE``); off by default.
     es_allow_downgrade: bool = Field(False, validation_alias="ES_ALLOW_DOWNGRADE")
@@ -266,6 +403,11 @@ class ProfileSettings(BaseSettings):
             raise ValueError("MODEL_SERVICE_BASE_URL must not contain query or fragment")
         return value
 
+    @field_validator("emotion_http_timeout_seconds", "emotion_total_timeout_seconds")
+    @classmethod
+    def normalize_emotion_timeout(cls, value: float) -> float:
+        return max(0.1, value)
+
     @field_validator("memory_enterprise_base_url")
     @classmethod
     def validate_memory_enterprise_base_url(cls, value: str) -> str:
@@ -276,6 +418,18 @@ class ProfileSettings(BaseSettings):
             raise ValueError("MEMORY_ENTERPRISE_BASE_URL must be an absolute HTTP(S) URL")
         if parsed.query or parsed.fragment:
             raise ValueError("MEMORY_ENTERPRISE_BASE_URL must not contain query or fragment")
+        return value
+
+    @field_validator("file_service_base_url")
+    @classmethod
+    def validate_file_service_base_url(cls, value: str) -> str:
+        if not value:
+            return value
+        parsed = urlparse(value)
+        if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+            raise ValueError("FILE_SERVICE_BASE_URL must be an absolute HTTP(S) URL")
+        if parsed.query or parsed.fragment:
+            raise ValueError("FILE_SERVICE_BASE_URL must not contain query or fragment")
         return value
 
     @field_validator("log_level", mode="before")
@@ -332,14 +486,16 @@ class ProfileSettings(BaseSettings):
         return f"redis://{password}{self.redis_host}:{self.redis_port}/{self.redis_db}"
 
     @property
-    def resolved_write_ingest_admission_redis_url(self) -> str:
-        """Redis URL backing the memory-jobs admission keyspace.
+    def memory_write_redis_url(self) -> str:
+        """Redis URL of the Celery-backend DB that holds the merge write lock."""
 
-        Falls back to the business Redis URL because the admission keyspace lives
-        in the same logical database as the business data by default.
-        """
-
-        return self.write_ingest_admission_redis_url or self.resolved_redis_url
+        if self.redis_url:
+            return _redis_url_with_db(self.redis_url, self.redis_db_celery_backend)
+        password = f":{quote_plus(self.redis_password)}@" if self.redis_password else ""
+        return (
+            f"redis://{password}{self.redis_host}:{self.redis_port}/"
+            f"{self.redis_db_celery_backend}"
+        )
 
     def _deployment_scoped_name(self, explicit: str, base: str, env_name: str) -> str:
         """Resolve a deployment-scoped Redis name from an override or DB_NAME."""
@@ -380,3 +536,25 @@ class ProfileSettings(BaseSettings):
             return [host]
         return [f"{host}:{self.elasticsearch_port}"]
 
+    def get_memory_output_path(self, filename: str = "") -> str:
+        """
+        Get the full path for memory module output files.
+
+        Args:
+            filename: Optional filename to append to the output directory
+
+        Returns:
+            Full path to the output file or directory
+        """
+        base_path = Path(self.memory_output_dir)
+        if filename:
+            return str(base_path / filename)
+        return str(base_path)
+
+    def ensure_memory_output_dir(self) -> None:
+        """
+        Ensure the memory output directory exists.
+        Creates the directory if it doesn't exist.
+        """
+        output_dir = Path(self.memory_output_dir)
+        output_dir.mkdir(parents=True, exist_ok=True)

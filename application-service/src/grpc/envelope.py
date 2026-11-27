@@ -24,13 +24,15 @@ def json_bytes(value: Any) -> bytes:
     ).encode("utf-8")
 
 
-async def abort_with(context, http_status: int, content: dict[str, Any]) -> NoReturn:
+async def abort_with(
+    context, http_status: int, content: dict[str, Any], *, headers: tuple[tuple[str, str], ...] = ()
+) -> NoReturn:
     """Terminate the RPC with the HTTP status and envelope in trailers."""
 
     await context.abort(
         grpc_status_for_http(http_status),
         str(content.get("msg") or content.get("message") or "chat failed"),
-        trailing_metadata=error_trailers(http_status, json_bytes(content)),
+        trailing_metadata=error_trailers(http_status, json_bytes(content)) + headers,
     )
     raise AssertionError("grpc abort returned")
 

@@ -285,6 +285,34 @@ class MinerUTool(BuiltinTool):
                         "falling back to URL download", resolved_file_id, e,
                     )
 
+            # A URL minted by this service (sys.files permanent URLs, LLM-passed
+            # file_url values) is read through the internal channel; downloading it
+            # back over the public ingress would hairpin through the gateway.
+            if not file_content and isinstance(file_url, str):
+                from ...services.file_content_service import (
+                    FileReference,
+                    extract_permanent_file_id,
+                    read_file_content,
+                )
+
+                permanent_file_id = extract_permanent_file_id(
+                    file_url, trust_any_host=True
+                )
+                if permanent_file_id:
+                    content = await read_file_content(
+                        FileReference(url=file_url, name=file_name),
+                        workspace_id=self.get_runtime_context("workspace_id"),
+                        tenant_id=self._resolve_tenant_id(),
+                        max_bytes=_MAX_DOWNLOAD_BYTES,
+                    )
+                    file_content = content.data
+                    if not file_name:
+                        file_name = content.file_name or f"file_{permanent_file_id}"
+                    logger.info(
+                        "[MinerUTool] read %d bytes via the file-service internal "
+                        "API for url=%s", len(file_content), file_url,
+                    )
+
             # Require at least one of file_name / file_url / file_content / resolved_file_id
             if not (file_name or file_url or file_content or resolved_file_id):
                 raise ValueError(
@@ -475,7 +503,7 @@ class MinerUTool(BuiltinTool):
     async def _store_images_and_rewrite_markdown(
         self, markdown: str, images: Dict[str, MinerUV3Image]
     ) -> tuple[str, List[str]]:
-        """Upload the images extracted by MinerU to the existing storage backend,
+        """Upload the images extracted by MinerU through the file service,
         rewrite the image references in the markdown to the uploaded URLs, and
         return the deduplicated URL list.
 
@@ -493,14 +521,11 @@ class MinerUTool(BuiltinTool):
             )
             return markdown, []
 
-        from ...services.file_storage_service import FileStorageService
-
-        storage_service = FileStorageService()
         url_by_src: Dict[str, str] = {}
         for src_name, mineru_image in images.items():
             try:
                 url = await self._upload_single_image(
-                    storage_service, tenant_id, workspace_id, mineru_image
+                    tenant_id, workspace_id, mineru_image
                 )
                 url_by_src[src_name] = url
             except Exception as e:
@@ -525,13 +550,12 @@ class MinerUTool(BuiltinTool):
 
     @staticmethod
     async def _upload_single_image(
-        storage_service: Any,
         tenant_id: uuid.UUID,
         workspace_id: Any,
         mineru_image: MinerUV3Image,
     ) -> str:
         from ...config import current_settings
-        from ...services.file_storage_service import generate_file_key
+        from ...integrations.file_service import get_file_service_client
 
         workspace_uuid: Optional[uuid.UUID] = None
         if workspace_id:
@@ -540,37 +564,22 @@ class MinerUTool(BuiltinTool):
             except (TypeError, ValueError):
                 workspace_uuid = None
 
-        file_id = uuid.uuid4()
         file_ext = mineru_image.file_ext or ".png"
-        await storage_service.upload_file(
+        file_name = mineru_image.name or f"{uuid.uuid4()}{file_ext}"
+        if not Path(file_name).suffix:
+            # The file service derives the stored extension from the name.
+            file_name = f"{file_name}{file_ext}"
+        result = await get_file_service_client().upload(
             tenant_id=tenant_id,
             workspace_id=workspace_uuid,
-            file_id=file_id,
-            file_ext=file_ext,
-            content=mineru_image.binary,
+            actor_id=None,
+            file_name=file_name,
             content_type=mineru_image.content_type,
+            content=mineru_image.binary,
         )
 
-        from ...db import get_db_context
-        from ...models.file_metadata_model import FileMetadata
-
-        file_key = generate_file_key(tenant_id, workspace_uuid, file_id, file_ext)
-        with get_db_context() as db:
-            db.add(FileMetadata(
-                id=file_id,
-                tenant_id=tenant_id,
-                workspace_id=workspace_uuid,
-                file_key=file_key,
-                file_name=mineru_image.name or f"{file_id}{file_ext}",
-                file_ext=file_ext,
-                file_size=len(mineru_image.binary),
-                content_type=mineru_image.content_type,
-                status="completed",
-            ))
-            db.commit()
-
         server_url = (current_settings().file_local_server_url or "").rstrip("/")
-        return f"{server_url}/storage/permanent/{file_id}"
+        return f"{server_url}/storage/permanent/{result.file_id}"
 
     # === File download helper (turn a file_url into bytes in agent scenarios) ===
 

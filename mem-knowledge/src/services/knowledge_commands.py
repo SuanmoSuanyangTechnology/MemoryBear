@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..models.owned import Document, File
 from ..rag.knowledge_graph.config import is_graph_enabled
+from ..repositories.parser_configuration import document_configuration
 from .document import PARSE_TASK_KEY, PARSE_TASK_TTL, _release_parse_claim
 
 
@@ -44,7 +45,7 @@ async def load_reparse_snapshots(
                 document_id=document.id,
                 file_key=file.file_key,
                 file_name=file.file_name or document.file_name,
-                is_qa=(document.parser_config or {}).get("doc_type") == "qa",
+                is_qa=document_configuration(document).doc_type == "qa",
             )
         )
     return snapshots, skipped

@@ -82,6 +82,17 @@ class Settings:
     APPLICATION_SERVICE_OPERATOR_TIMEOUT: float = float(
         os.getenv("APPLICATION_SERVICE_OPERATOR_TIMEOUT", "120")
     )
+
+    # identity-service 内部管理面（P2-W3 租户管理员读写；仅内网可达）
+    IDENTITY_SERVICE_BASE_URL: str = os.getenv(
+        "IDENTITY_SERVICE_BASE_URL", "http://identity-service:8001"
+    )
+    IDENTITY_SERVICE_CONNECT_TIMEOUT: float = float(
+        os.getenv("IDENTITY_SERVICE_CONNECT_TIMEOUT", "5")
+    )
+    IDENTITY_SERVICE_READ_TIMEOUT: float = float(
+        os.getenv("IDENTITY_SERVICE_READ_TIMEOUT", "10")
+    )
     # SSO 新租户绑定 SpeedBear 失败时的策略（轮询重试后仍失败时生效）：
     #   true  = 严格模式：物理回滚本次新建的租户及其临时数据，本次登录失败
     #   false = 宽松模式：保留租户，返回「未绑定成功，请联系管理员」提示
@@ -581,6 +592,13 @@ class Settings:
     # 如需使用 RabbitMQ，在 .env 中设置 CELERY_BROKER_URL=amqp://user:pass@host:5672/vhost
     REDIS_DB_CELERY_BROKER: int = int(os.getenv("REDIS_DB_CELERY_BROKER", "3"))
     REDIS_DB_CELERY_BACKEND: int = int(os.getenv("REDIS_DB_CELERY_BACKEND", "4"))
+
+    # P1-W7 handover: application-service owns the workflow schedule scan once its
+    # worker/beat are deployed. Set false to drop the monolith beat entry (the
+    # task itself stays registered so an in-flight monolith worker can drain).
+    ENABLE_MONOLITH_WORKFLOW_SCAN: bool = (
+        os.getenv("ENABLE_MONOLITH_WORKFLOW_SCAN", "true").lower() == "true"
+    )
 
     # 通知中心配置
     NOTIFICATION_REDIS_DB: int = int(os.getenv("NOTIFICATION_REDIS_DB", "8"))

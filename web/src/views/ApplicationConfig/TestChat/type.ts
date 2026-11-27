@@ -13,6 +13,7 @@ export interface NodeData {
   execution_id?: string;
   message_id?: string;
   user_message_id?: string;
+  message?: string;
   content: string;
   conversation_id: string | null;
   cycle_id: string;

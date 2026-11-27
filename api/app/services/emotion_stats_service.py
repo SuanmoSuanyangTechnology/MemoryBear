@@ -15,6 +15,7 @@ display_name 语言由请求头 X-Language-Type 决定（zh/en），
 conclusion 文案固定为中文（与接口文档一致）。
 """
 
+import asyncio
 import logging
 from datetime import date, datetime, time, timedelta, timezone as dt_timezone
 from typing import Any, Dict, List, Optional, Tuple
@@ -387,33 +388,29 @@ class EmotionStatsService:
         try:
             neo4j_repo = DialogueEmotionRepository(connector)
             rows = await neo4j_repo.get_raw_dialogues(end_user_id, start_dt, end_dt)
-            payload = [
-                {
-                    "id": r["id"],
-                    "end_user_id": end_user_id,
-                    "created_at": r["created_at"],
-                    "emotion": r["emotion"],
-                }
-                for r in rows
-            ]
-
-            # 短 session：Upsert 后立即提交关闭
-            with get_db_context() as db:
-                DialogueEmotionRawRepository(db).upsert_raw_batch(payload)
-                db.commit()
-
-            result = {
-                "total_dialogues": len(payload),
-                "window": [start_dt.isoformat(), end_dt.isoformat()],
-            }
-            logger.info(
-                f"情绪明细同步完成: end_user_id={end_user_id}, "
-                f"window=[{start_dt}, {end_dt}), rows={result['total_dialogues']}"
-            )
-            return result
         finally:
             if close_connector or own_connector:
                 await connector.close()
+
+        payload = [dict(row, end_user_id=end_user_id) for row in rows]
+        total_dialogues = await asyncio.to_thread(cls._upsert_raw_rows, payload)
+
+        logger.info(
+            "情绪明细同步完成: end_user_id=%s, window=[%s, %s), rows=%s",
+            end_user_id, start_dt, end_dt, total_dialogues,
+        )
+        return {
+            "total_dialogues": total_dialogues,
+            "window": [start_dt.isoformat(), end_dt.isoformat()],
+        }
+
+    @staticmethod
+    def _upsert_raw_rows(rows: List[Dict[str, Any]]) -> int:
+        """Keep the synchronous session and all write chunks in one worker thread."""
+        with get_db_context() as db:
+            count = DialogueEmotionRawRepository(db).upsert_raw_batch(rows)
+            db.commit()
+            return count
 
     @classmethod
     def get_yesterday_beijing_window(

@@ -1023,6 +1023,7 @@ class AppChatService:
         except Exception as e:
             # Agent 执行失败，更新记录为 failed
             elapsed_time = time.time() - start_time
+            display_error, error_detail = self._build_failure_display(e)
             await self._update_agent_execution(
                 agent_exec_repo,
                 execution_id=agent_execution_id,
@@ -1031,6 +1032,23 @@ class AppChatService:
                 elapsed_time=elapsed_time,
                 error_message=str(e)[:2000],
             )
+            if not skip_save:
+                try:
+                    from app.services.batch_persist_queue import BatchPersistQueue, PersistTask
+                    await BatchPersistQueue.enqueue(PersistTask(
+                        task_type="save_failed_message",
+                        args={
+                            "conversation_id": str(conversation_id),
+                            "user_message_id": str(user_message_id),
+                            "message_id": str(message_id),
+                            "user_message_content": message,
+                            "files_meta": [],
+                            "error_message": display_error,
+                            "error_detail": error_detail,
+                        },
+                    ))
+                except Exception:
+                    pass
             raise
 
         await self._record_api_key_usage(api_key_obj.id)
@@ -1879,7 +1897,14 @@ class AppChatService:
                 model_failure = model_failure_fields(e)
                 display_error = model_failure["msg"]
             else:
-                display_error = str(e)
+                from app.i18n.exceptions import get_current_locale
+                from error_core.messages import user_message
+
+                # 未知异常不得把 str(e) 写进用户可见内容；诊断保留在
+                # meta_data.error 与服务端日志。
+                display_error = user_message(
+                    BizCode.INTERNAL_ERROR.value, get_current_locale()
+                ) or "服务内部错误，请稍后重试"
 
             if public_error is not None:
                 logger.error(
@@ -1959,6 +1984,48 @@ class AppChatService:
         """Format a dict chunk as an SSE event string."""
         event_type = str(chunk.get("type") or "unknown")
         return f"event: {event_type}\ndata: {json.dumps(chunk, ensure_ascii=False)}\n\n"
+
+    def _build_failure_display(self, e: Exception) -> tuple[str, str]:
+        """User-facing message for content plus the truncated diagnostic."""
+        from app.core.llm_error_handler import classify_multimodal_exception
+        from app.i18n.exceptions import get_current_locale
+        from error_core.messages import user_message
+
+        public_error = classify_multimodal_exception(
+            e, debug_id=self.agent_service._build_debug_id()
+        )
+        if public_error is not None:
+            display = public_error["message"]
+        elif isinstance(e, BusinessException):
+            display = e.message
+        else:
+            # Unknown failures must not leak str(e) into user-facing content;
+            # the diagnostic stays in meta_data.error and the server logs.
+            display = user_message(
+                BizCode.INTERNAL_ERROR.value, get_current_locale()
+            ) or "服务内部错误，请稍后重试"
+        return display, str(e)[:2000]
+
+    def _unified_error_frame(
+            self,
+            exc: Exception,
+            *,
+            msg: Optional[str] = None,
+            detail: Optional[str] = None,
+    ) -> str:
+        """Build a unified SSE error frame: msg for users, error for diagnosis."""
+        from app.core.workflow.error_info import workflow_error_info
+
+        info = workflow_error_info(exc)
+        frame = {
+            "code": info["code"],
+            "msg": msg or info["msg"],
+            "error": detail or info["error"],
+            "message": detail or info["error"],
+            "retryable": info["retryable"],
+            "time": int(time.time() * 1000),
+        }
+        return f"event: error\ndata: {json.dumps(frame, ensure_ascii=False)}\n\n"
 
     @bind_usage("app", "config.app_id")
     async def multi_agent_chat(
@@ -2157,7 +2224,9 @@ class AppChatService:
         """
         gate = get_multi_agent_stream_gate()
         if not await gate.acquire():
-            yield f"event: error\ndata: {json.dumps({'error': BUSY_MESSAGE}, ensure_ascii=False)}\n\n"
+            yield self._unified_error_frame(
+                BusinessException(BUSY_MESSAGE, BizCode.SERVICE_UNAVAILABLE)
+            )
             return
         try:
             async with aclosing(self._multi_agent_chat_stream_impl(
@@ -2211,6 +2280,11 @@ class AppChatService:
 
             full_content = ""
             total_tokens = 0
+            # 编排器内部捕获异常后只发 error 帧不抛出：记下统一错误帧，本轮按
+            # failed 落库（content=用户可读 msg，meta.error=诊断），否则日志 content 为空。
+            _stream_failure: Optional[Dict[str, Any]] = None
+            # 带 Agent 归属的 error 帧先记下；若整轮没有任何主气泡正文再升级为失败。
+            _last_error_frame: Optional[Dict[str, Any]] = None
             # end 事件携带的对话能力附加字段（建议问题/引用/语音）；features 未开启时为空
             end_extras: Dict[str, Any] = {}
             # end 事件先扣住，等落库入队完成后再下发：客户端收到 end 即断开会取消本生成器，
@@ -2269,6 +2343,12 @@ class AppChatService:
                 if event.startswith("event:"):
                     _event_name = event[6:].split("\n", 1)[0].strip()
 
+                # 本层已发统一 start（含 conversation_id/message_id/
+                # user_message_id，标注命中分支也只有这一个 start）；
+                # 编排器的 start 仅多带 mode，透传会让客户端收到两个 start。
+                if _event_name == "start":
+                    continue
+
                 if _event_name == "end" and "data:" in event:
                     try:
                         data_line = event.split("data: ", 1)[1].strip()
@@ -2280,6 +2360,26 @@ class AppChatService:
                                 end_extras[_k] = data[_k]
                     except:
                         pass
+
+                if _event_name == "error" and "data:" in event:
+                    try:
+                        _error_payload = json.loads(event.split("data: ", 1)[1].strip())
+                    except Exception:
+                        _error_payload = None
+                    # 带 Agent 归属的 error 帧只标记子 Agent 区块失败（与前端
+                    # hasAgentOwner 同口径），轮末仍可能正常收尾；只有集群级 error
+                    #（无归属字段）才把本轮按 failed 落库。
+                    if _error_payload is not None:
+                        if any(
+                            _k in _error_payload
+                            for _k in (
+                                "execution_id", "parent_execution_id",
+                                "orchestration_mode", "agent_id", "agent_name",
+                            )
+                        ):
+                            _last_error_frame = _error_payload
+                        else:
+                            _stream_failure = _error_payload
 
                 if _event_name == "end":
                     held_end_event = event
@@ -2326,6 +2426,24 @@ class AppChatService:
 
             elapsed_time = time.time() - start_time
 
+            # 子 Agent 失败且本轮没有任何主气泡正文（如协作模式首个 Agent 即失败）：
+            # 空正文按 failed 落库，content 用该错误帧的 msg。
+            if (
+                _stream_failure is None
+                and _last_error_frame is not None
+                and not full_content.strip()
+            ):
+                _stream_failure = _last_error_frame
+
+            if _stream_failure is not None:
+                from app.i18n.exceptions import get_current_locale
+                from error_core.messages import user_message
+                full_content = (
+                    _stream_failure.get("msg")
+                    or user_message(BizCode.INTERNAL_ERROR.value, get_current_locale())
+                    or "服务内部错误，请稍后重试"
+                )
+
             # Enqueue async batch persist
             # S3 落库收口：本入口（应用编排侧）是唯一的落库层——落库内容为
             # full_content（orchestrator message 事件序列 = 前端主气泡的最终
@@ -2355,6 +2473,10 @@ class AppChatService:
                 "user_parent_message_id": await self._get_last_current_assistant_id(conversation_id),
                 "should_memorize": orchestrator.cluster_memory_enabled(),
             }
+            if _stream_failure is not None:
+                # content=msg、meta.error=诊断，与 Agent/工作流失败轮口径一致
+                _result.assistant_meta["error"] = _stream_failure.get("error") or ""
+                _persist_args["assistant_status"] = "failed"
             # 本轮变量值随 user 消息落库，重新生成时回读（无变量不加键，老集群落库不变）
             if variables:
                 _persist_args["variables_meta"] = variables
@@ -2431,6 +2553,7 @@ class AppChatService:
             raise
         except Exception as e:
             logger.error(f"多 Agent 流式聊天失败: {str(e)}", exc_info=True)
+            display_error, error_detail = self._build_failure_display(e)
             # 如果 save_messages 已经入队，不要再入队 save_failed_message，
             # 否则会因为相同的 message_id 导致 messages 表主键冲突。
             if not save_messages_enqueued:
@@ -2444,13 +2567,13 @@ class AppChatService:
                             "message_id": str(message_id) if 'message_id' in locals() else str(uuid.uuid4()),
                             "user_message_content": message if 'message' in locals() else "",
                             "files_meta": [],
-                            "error_message": "An error occurred during generation.",
-                            "error_detail": str(e)[:2000],
+                            "error_message": display_error,
+                            "error_detail": error_detail,
                         },
                     ))
                 except Exception:
                     pass
-            # 发送错误事件：模型失败按统一错误帧，其余异常保留原有字符串契约。
+            # 模型失败帧还包含尝试次数和通道信息。
             if isinstance(e, ModelInvokeFailedError):
                 failure = model_failure_fields(e)
                 yield "event: error\ndata: " + json.dumps(
@@ -2465,7 +2588,7 @@ class AppChatService:
                     ensure_ascii=False,
                 ) + "\n\n"
             else:
-                yield f"event: error\ndata: {json.dumps({'error': str(e)}, ensure_ascii=False)}\n\n"
+                yield self._unified_error_frame(e, msg=display_error, detail=error_detail)
 
     async def workflow_chat(
             self,

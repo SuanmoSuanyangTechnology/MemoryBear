@@ -7,16 +7,15 @@ from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, File, Query, Request, UploadFile
 
-from ...error_mapping import map_storage_error
+from ...application.runtime import ProcessRuntime
 from ...errors import KnowledgeError
-from ...runtime import ProcessRuntime
+from ...errors.mapping import map_storage_error
 from ...services import chunk as chunk_service
 from ...services import file as file_service
 from ...services.knowledge_file_storage import KnowledgeFileStorage
 from ...services.knowledge_retrieval import KnowledgeRetrievalService
 from ...services.knowledge_retrieval_preparation import KnowledgeRetrievalPreparation
 from ...services.qa_import import (
-    create_qa_import_resources,
     dispatch_qa_import,
     prepare_qa_import_resources,
     validate_qa_upload,
@@ -69,21 +68,14 @@ async def get_preview_chunks(
             principal,
             include_file=True,
         )
-        vision_config = await chunk_service.resolve_vision_config(
-            db,
-            snapshot,
-            principal,
-        )
     try:
         binary = await KnowledgeFileStorage(runtime.storage).download(snapshot.file_key or "")
     except Exception as exc:
         raise map_storage_error(exc) from exc
-    parsed = await chunk_service.preview_with_vision(
+    parsed = await chunk_service.preview_document(
         runtime,
         snapshot,
         binary,
-        vision_config,
-        tenant_id=principal.tenant_id,
     )
     chunks = chunk_service.materialize_preview_chunks(snapshot, parsed)
     if keywords:
@@ -477,16 +469,9 @@ async def import_qa_new_doc(
             content_type=file.content_type,
             principal=principal,
         )
-    await storage.upload(plan.file_key, content, file.content_type)
-    persistence_succeeded = False
-    try:
-        async with runtime.database.async_session() as db:
-            resources = await create_qa_import_resources(db, plan, principal)
-            persistence_succeeded = True
-    except Exception:
-        if not persistence_succeeded:
-            await file_service.compensate_storage_upload(storage, plan.file_key)
-        raise
+    resources = await file_service.save_upload(
+        runtime, storage, plan, principal, content, file.content_type
+    )
     task_id = await dispatch_qa_import(
         runtime,
         TaskDispatcher(runtime=runtime),

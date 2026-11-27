@@ -8,6 +8,8 @@ from sqlalchemy import select
 
 from ...models.owned import Knowledge
 from ...models.references import Workspace
+from ...parser_configuration import to_runtime
+from ...repositories.parser_configuration import knowledge_configuration
 from ..retrieval.models import ModelRuntimeSnapshot
 from ..vdb.vector_store import collection_name_for_knowledge
 from .config import GraphPipelineConfigError, is_graph_enabled, require_graph_mapping
@@ -31,7 +33,8 @@ def snapshot_graph_runtime(runtime: object, knowledge_id: str) -> GraphIndexRunt
         knowledge = session.get(Knowledge, knowledge_uuid)
         if knowledge is None:
             raise GraphPipelineConfigError("knowledge does not exist")
-        if not is_graph_enabled(knowledge.parser_config):
+        parser_config = to_runtime(knowledge_configuration(knowledge))
+        if not is_graph_enabled(parser_config):
             raise GraphRuntimeDisabled("knowledge graph is disabled")
         workspace = (
             session.execute(select(Workspace).where(Workspace.id == knowledge.workspace_id))
@@ -42,7 +45,7 @@ def snapshot_graph_runtime(runtime: object, knowledge_id: str) -> GraphIndexRunt
             raise GraphPipelineConfigError("workspace does not exist")
         if knowledge.llm_id is None or knowledge.embedding_id is None:
             raise GraphPipelineConfigError("graph runtime requires both LLM and embedding models")
-        graph_config = require_graph_mapping(knowledge.parser_config)
+        graph_config = require_graph_mapping(parser_config)
         raw_entity_types = graph_config.get("entity_types") or ()
         if not isinstance(raw_entity_types, (list, tuple)):
             raise GraphPipelineConfigError("graphrag.entity_types must be a list")

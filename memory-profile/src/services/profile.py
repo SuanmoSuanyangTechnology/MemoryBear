@@ -2,8 +2,7 @@
 
 The constants are shared by the statistics service and the presentation layer
 so API-contract drift stays visible in one place. ``ProfileQueryService``
-orchestrates insight, summary, node statistics, workspace hot tags and the
-legacy end-user profile.
+orchestrates insight, summary, node statistics and the legacy end-user profile.
 """
 
 from __future__ import annotations
@@ -14,7 +13,6 @@ from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
 
-from src.common.errors import BizCode, LocalizedProfileError
 from src.common.normalization import parse_uuid
 from src.common.vocabulary import COUNT_KEYS
 from src.repositories.graph import MemoryGraphRepository
@@ -22,7 +20,6 @@ from src.repositories.profile import (
     EndUserProfileRepository,
     MemoryStatisticsRepository,
     UserProfileRepository,
-    WorkspaceProfileRepository,
 )
 from src.repositories.search import MemorySearchRepository
 from src.runtime import ProfileRuntime
@@ -39,9 +36,6 @@ logger = logging.getLogger(__name__)
 
 #: 兴趣分布接口返回的标签数量上限（与 api 的展示上限一致）。
 INTEREST_DISPLAY_LIMIT = 5
-
-#: 用户名片 Tag 的字符长度上限（api ``user_card_tags.USER_CARD_TAG_MAX_LENGTH`` 同值）。
-USER_CARD_TAG_MAX_LENGTH = 12
 
 #: ``node_statistics`` 的固定返回顺序。
 MEMORY_TYPES: tuple[str, ...] = (
@@ -69,7 +63,6 @@ class ProfileQueryService:
         self.memory_statistics = MemoryStatisticsRepository(runtime.postgres)
         self.memory_graph = MemoryGraphRepository(runtime.neo4j)
         self.memory_search = MemorySearchRepository(runtime.elasticsearch)
-        self.workspace_profile = WorkspaceProfileRepository(runtime.postgres)
         self.user_profile_graph = UserProfileRepository(runtime.neo4j)
 
     async def memory_insight(self, end_user_id: str, workspace_id: UUID) -> MemoryInsight:
@@ -242,35 +235,7 @@ class ProfileQueryService:
             return counts[end_user_id]
         return await self.memory_graph.scene_community_count([end_user_id])
 
-    # ── 工作空间热门标签 / legacy 终端用户画像 ──────────────────────────
-
-    async def workspace_hot_memory_tags(
-        self, workspace_id: UUID, limit: int
-    ) -> list[dict[str, Any]]:
-        """工作空间热门记忆标签：``end_users.memory_tags`` 跨用户精确匹配合并。
-
-        ``limit <= 0`` 时按 api 语义回落 10（api 的请求参数没有上下界校验）。
-        """
-
-        effective_limit = limit if limit > 0 else 10
-        try:
-            tags = await self.workspace_profile.hot_memory_tags(
-                workspace_id, effective_limit, USER_CARD_TAG_MAX_LENGTH
-            )
-        except Exception as exc:
-            logger.error(
-                "hot memory tags failed: workspace_id=%s error=%s",
-                workspace_id,
-                type(exc).__name__,
-                exc_info=True,
-            )
-            raise LocalizedProfileError(
-                BizCode.INTERNAL_ERROR,
-                "analytics.error.hot_memory_tags_failed",
-                detail=str(exc),
-                status_code=500,
-            ) from exc
-        return [{"name": name, "frequency": frequency} for name, frequency in tags]
+    # ── legacy 终端用户画像 ────────────────────────────────────────────
 
     async def user_profile(
         self, end_user_id: str | None, workspace_id: UUID

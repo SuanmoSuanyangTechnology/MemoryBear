@@ -17,7 +17,7 @@ from sqlalchemy import (
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import declared_attr
 
-from ...db import KnowledgeBase
+from ...infrastructure.database.manager import KnowledgeBase
 from .wiki import SCOPE, WikiScope, scope_fk
 
 

@@ -22,7 +22,6 @@ from ...memory.retrieval_trace.tool_steps import hydrate_message_meta
 from ...models.app_model import AppType
 from ...models.file_metadata_model import FileMetadata
 from ...schemas.app_log_schema import (
-    AppLogConversation,
     AppLogConversationDetail,
     AppLogMessage,
     LogFileInfo,
@@ -85,7 +84,7 @@ def list_app_logs(
         end_date=end_date,
     )
 
-    items = [AppLogConversation.model_validate(c) for c in conversations]
+    items = log_service.build_conversation_summaries(conversations, app.type)
 
     # Multi-agent clusters: the list page's "sub-agent count" column. Single
     # agent / workflow apps stay at 0 (no query issued, to avoid noise cost).
@@ -203,7 +202,7 @@ def get_app_log_detail(
     )
 
     # Base conversation info (built without ORM relationships)
-    base = AppLogConversation.model_validate(conversation)
+    base = log_service.build_conversation_summaries([conversation], app.type)[0]
 
     # Workflow pages carry their business execution ids in page_meta for the
     # intervention query; agent pages have none.
@@ -216,6 +215,7 @@ def get_app_log_detail(
     else:
         # Agent: convert ORM Message objects one by one, extracting files
         msg_list = []
+        message_times = log_service.get_agent_message_times(conversation_id, messages)
 
         # Collect local file ids and resolve them to accessible URLs in one
         # batch (locally persisted files only store upload_file_id).
@@ -272,7 +272,7 @@ def get_app_log_detail(
                 status=m.status,
                 meta_data=response_meta,
                 files=files,
-                created_at=m.created_at,
+                created_at=message_times.get(m.id, m.created_at),
             ))
 
     # Log detail is the read face of the timeline, so it does the slicing itself:

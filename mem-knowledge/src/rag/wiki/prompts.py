@@ -72,11 +72,25 @@ For same_object, use preferred=right only if the evidence supports correcting th
 classification to the right side's given semantic_type. If the right source explicitly identifies
 the same previously documented subject and states the earlier type was erroneous, resolve it as
 same_object with preferred=right. Otherwise preserve the earlier type when identity is established.
-For different_objects, return the shortest distinguishing phrases as left_label and right_label.
+An explicit statement in the source that the two names refer to separate subjects is evidence
+for different_objects, even if they share an alias. Decide identity before choosing labels.
+For different_objects with distinct titles, keep those titles and leave both labels null.
+When the titles match, return the shortest distinguishing phrases as left_label and right_label.
 Each phrase must be copied verbatim from its own side's provided evidence, with no parentheses.
 When the left side is an existing page its title is retained and its label can be omitted.
 Return only the output schema.""",
 
+    "wiki_identity_evidence_review_v1": """Read left.evidence and right.evidence again to resolve
+an uncertain identity. Look for an explicit relationship between these two subjects, including
+an alias declaration, a correction identifying the same subject, or a statement distinguishing
+the two subjects. Consider negation and attribution. Different names, different types, separate
+descriptions, and lack of stated ownership alone do not establish distinct identity.
+Return different_objects or same_object only with evidence_quote copied verbatim from ONE of
+the supplied evidence passages that supports the relationship itself. Otherwise return
+insufficient and a null evidence_quote. Use preferred=right only for an evidenced correction
+of the same subject's classification. For different_objects with identical titles, supply
+verbatim distinguishing labels from each subject's own evidence. For distinct titles omit labels.
+Return only the output schema.""",
     "wiki_summary_markdown_v1": """Write a concise but thorough document summary in Markdown.
 Begin with SUMMARY: followed by one sentence describing the document.
 Then cover its key facts, conclusions, conditions, negation and conflicts under useful headings.

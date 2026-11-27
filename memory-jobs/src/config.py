@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Literal
 from urllib.parse import quote_plus, urlparse, urlsplit, urlunsplit
 
-from pydantic import AliasChoices, ConfigDict, Field, field_validator
+from pydantic import AliasChoices, ConfigDict, Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings
 from sqlalchemy.engine import make_url
 from task_bridge.mem_router import MAX_PRIORITY, QueueName
@@ -147,6 +147,11 @@ class JobsSettings(BaseSettings):
     task_default_queue: str = Field(
         QueueName.MEMORY_JOBS.value, validation_alias="JOBS_TASK_DEFAULT_QUEUE"
     )
+    #: Comma-separated modules that contribute edition-specific jobs, domain
+    #: wirings, routes, beat entries and result serializers (for example
+    #: ``enterprise_ext.memory_jobs`` in the enterprise build). Empty is the
+    #: open build. A configured module must import.
+    jobs_extension_modules: str = Field("", validation_alias="JOBS_EXTENSION_MODULES")
     task_time_limit_seconds: int = Field(3600, ge=1, validation_alias="JOBS_TASK_TIME_LIMIT")
     task_soft_time_limit_seconds: int = Field(
         3000, ge=1, validation_alias="JOBS_TASK_SOFT_TIME_LIMIT"
@@ -244,6 +249,83 @@ class JobsSettings(BaseSettings):
         20, validation_alias="MODEL_SERVICE_MAX_KEEPALIVE_CONNECTIONS"
     )
 
+    # ------------------------------------------------------ dispatch admission
+    #: Periodic sweep of the dispatch-admission layer: expire attempts whose
+    #: result is unknown, re-arm units with queued-but-idle work and wake them.
+    #: Producers admit submissions through the same ``task_bridge.mem_admission``
+    #: contract; these knobs only tune the worker.
+    admission_recover_enabled: bool = Field(
+        True, validation_alias="JOBS_ADMISSION_RECOVER_ENABLED"
+    )
+    admission_recover_interval_seconds: int = Field(
+        15, ge=1, validation_alias="JOBS_ADMISSION_RECOVER_INTERVAL_SECONDS"
+    )
+    #: An attempt older than this is expired even when the Celery result backend
+    #: still reports nothing about it. Keep it above the task budget so a
+    #: legitimate long unit is not expired while it is still running.
+    admission_attempt_timeout_seconds: int = Field(
+        7800, ge=1, validation_alias="JOBS_ADMISSION_ATTEMPT_TIMEOUT_SECONDS"
+    )
+    #: Running attempts examined per recovery sweep.
+    admission_pending_batch: int = Field(
+        500, ge=1, validation_alias="JOBS_ADMISSION_PENDING_BATCH"
+    )
+    #: Ready units woken per recovery sweep.
+    admission_ready_batch: int = Field(
+        200, ge=1, validation_alias="JOBS_ADMISSION_READY_BATCH"
+    )
+    #: Active units examined per recovery sweep (the re-arm rescan).
+    admission_scan_units: int = Field(
+        1000, ge=1, validation_alias="JOBS_ADMISSION_SCAN_UNITS"
+    )
+    #: TTL of the recovery heartbeat key; producers read it to decide whether
+    #: the worker side of the admission layer is alive.
+    admission_heartbeat_ttl_seconds: int = Field(
+        60, ge=1, validation_alias="JOBS_ADMISSION_HEARTBEAT_TTL_SECONDS"
+    )
+
+    # --------------------------------------------------------- storage outbox
+    #: Take over the API's storage-outbox projection loop (the ``scan-outbox-
+    #: projection`` and ``cleanup-outbox`` beat entries). The consumer side runs
+    #: here, so it is on by default; the remaining knobs reuse the API's exact
+    #: env names so the existing deployment config needs no rename.
+    outbox_projection_enabled: bool = Field(
+        True, validation_alias="JOBS_OUTBOX_PROJECTION_ENABLED"
+    )
+    #: Beat interval of one projection batch, in seconds. Also the entry's
+    #: expiry: a backlog message is superseded by the next run.
+    outbox_scan_interval_seconds: int = Field(
+        5, ge=1, le=3600, validation_alias="OUTBOX_SCAN_INTERVAL_SECONDS"
+    )
+    #: Events claimed (and cleanup rows deleted) per batch/statement.
+    outbox_batch_size: int = Field(
+        100, ge=1, le=1000, validation_alias="OUTBOX_BATCH_SIZE"
+    )
+    #: Lease lifetime: a row whose heartbeat is older than this is reclaimable.
+    #: The heartbeat renewal cadence is derived from it (``min(10, timeout/3)``).
+    outbox_processing_timeout_seconds: int = Field(
+        300, ge=30, le=3600, validation_alias="OUTBOX_PROCESSING_TIMEOUT_SECONDS"
+    )
+    #: Days a ``processed`` row is kept; mirrors the API's history window.
+    outbox_retention_days: int = Field(
+        30, ge=1, le=3650, validation_alias="OUTBOX_RETENTION_DAYS"
+    )
+    #: Days a ``failed`` row is kept: longer, because it is the only trace of a
+    #: projection that never landed.
+    outbox_failed_retention_days: int = Field(
+        60, ge=1, le=3650, validation_alias="OUTBOX_FAILED_RETENTION_DAYS"
+    )
+    #: UTC hour of the daily retention cleanup (18 UTC matches the API, i.e.
+    #: 02:00 Beijing time).
+    outbox_cleanup_hour: int = Field(
+        18, ge=0, le=23, validation_alias="OUTBOX_CLEANUP_HOUR"
+    )
+    #: Longest error text persisted on a failed row; kept bounded so a driver
+    #: message cannot bloat the event row or the logs.
+    outbox_error_max_length: int = Field(
+        4096, ge=64, le=16384, validation_alias="OUTBOX_ERROR_MAX_LENGTH"
+    )
+
     # ------------------------------------------------------------ Elasticsearch
     elasticsearch_host: str = Field(
         "https://127.0.0.1", validation_alias="ELASTICSEARCH_HOST"
@@ -281,9 +363,16 @@ class JobsSettings(BaseSettings):
     memory_enterprise_timeout_seconds: float = Field(
         3.0, gt=0, validation_alias="MEMORY_ENTERPRISE_TIMEOUT_SECONDS"
     )
-    memory_enterprise_token: str = Field(
-        "", validation_alias="MEMORY_ENTERPRISE_TOKEN"
+    #: Shared service credential memory-enterprise checks as ``X-Internal-Token``.
+    #: The same value is configured on memory-enterprise and memory-profile;
+    #: missing leaves enterprise calls degraded as unavailable.
+    memory_internal_token: SecretStr = Field(
+        SecretStr(""), validation_alias="MEMORY_INTERNAL_TOKEN"
     )
+
+    # ------------------------------------------------------- service-to-service
+    # memory-enterprise calls authenticate with the static shared token above.
+    # File-service URL lookups use its public read, so no token is sent.
 
     # --------------------------------------------------------------------- Neo4j
     neo4j_uri: str = Field("bolt://localhost:7687", validation_alias="NEO4J_URI")
@@ -370,6 +459,17 @@ class JobsSettings(BaseSettings):
         if self.celery_result_backend:
             return self.celery_result_backend
         return _redis_url_with_db(self.resolved_redis_url, self.redis_db_celery_backend)
+
+    @property
+    def jobs_extension_module_names(self) -> tuple[str, ...]:
+        """The configured extension modules, trimmed and de-duplicated."""
+
+        names: list[str] = []
+        for part in self.jobs_extension_modules.split(","):
+            name = part.strip()
+            if name and name not in names:
+                names.append(name)
+        return tuple(names)
 
     @property
     def elasticsearch_hosts(self) -> list[str]:

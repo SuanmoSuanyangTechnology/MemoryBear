@@ -18,6 +18,7 @@ from memorybear_grpc.client import ChannelPool
 
 from src import config
 from src import redis as gredis
+from src.enterprise_middlewares import install_enterprise_middlewares
 from src.forward import Forwarder, StaticTargetResolver
 from src.grpc_forward import GrpcForwarder
 from src.identity_backfill import IdentityApiKeyBackfill
@@ -120,3 +121,6 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="gateway-service", lifespan=lifespan)
 app.include_router(router)
 app.add_middleware(GatewayMiddleware, deps_getter=get_deps)
+# Enterprise build: CORS (outermost) -> License -> GatewayMiddleware.
+# Community build: enterprise_ext is absent and this is a no-op.
+install_enterprise_middlewares(app)

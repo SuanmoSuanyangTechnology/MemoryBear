@@ -1,5 +1,10 @@
 {
   "codes": {
+    "KB_UPLOAD_SAVE_UNKNOWN": "File persistence is unconfirmed. Check the document record before retrying.",
+    "KB_TASK_DISPATCH_UNKNOWN": "Task delivery is unconfirmed. Check the document status before retrying.",
+    "KB_RETRIEVAL_RAG_NOT_ENABLED": "Original-text retrieval is not enabled for the selected knowledge bases. Select a knowledge base with RAG enabled.",
+    "KB_KNOWLEDGE_FIELD_IMMUTABLE": "The knowledge base field {field} cannot be changed after creation.",
+    "KB_PARSER_CONFIG_PARENT_CHILD_QA_CONFLICT": "Parent-child chunking cannot be combined with QA question generation. Set questions per chunk to 0.",
     "KB_SHARE_SOURCE_NOT_FOUND": "The source knowledge base does not exist.",
     "KB_SHARE_TARGET_NOT_FOUND": "The target workspace does not exist.",
     "KB_SHARE_CROSS_TENANT": "Knowledge can only be shared within the caller's tenant.",
@@ -236,6 +241,9 @@
     "KB_CONNECTOR_SOURCE_INVALID": "The external content source does not exist or cannot be accessed. Check its address and access permissions."
   },
   "knowledge_codes": {
+    "KB_RETRIEVAL_RAG_NOT_ENABLED": "Original-text retrieval is not enabled for the selected knowledge bases. Select a knowledge base with RAG enabled.",
+    "KB_KNOWLEDGE_FIELD_IMMUTABLE": "The knowledge base field {field} cannot be changed after creation.",
+    "KB_PARSER_CONFIG_PARENT_CHILD_QA_CONFLICT": "Parent-child chunking cannot be combined with QA question generation. Set questions per chunk to 0.",
     "VALIDATION_FAILED": "Some fields in this submission have an invalid format, missing value, or unsupported range. Correct them and try again.",
     "FILE_TOO_LARGE": "The submitted content is too large. Compress it or use a different file.",
     "UNAUTHORIZED": "Your sign-in has expired. Please sign in again.",

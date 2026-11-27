@@ -25,9 +25,9 @@ from celery.signals import (
 )
 from celery.worker.state import active_requests
 
-from ..bootstrap import get_settings
-from ..logging import setup_logging as setup_knowledge_logging
-from ..runtime import reset_worker_runtime_after_fork, shutdown_worker_runtime_sync
+from ..application.bootstrap import get_settings
+from ..application.runtime import reset_worker_runtime_after_fork, shutdown_worker_runtime_sync
+from ..observability.logging import setup_logging as setup_knowledge_logging
 from . import document, evidence_graph, legacy_compat, qa_import, wiki, wiki_faq, wiki_faq_import
 from .celery_app import celery_app
 from .observability import record_task_prerun, reset_observability_after_fork
@@ -43,6 +43,8 @@ logger = logging.getLogger(__name__)
 
 ROLE_QUEUE = {
     "wiki_worker": "wiki_tasks",
+    "wiki_map_worker": "wiki_map_tasks",
+    "wiki_reduce_worker": "wiki_reduce_tasks",
     "faq_worker": "faq_tasks",
     "document_worker": "document_tasks",
     "graphrag_worker": "graphrag_tasks",
