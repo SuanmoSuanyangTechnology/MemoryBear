@@ -18,7 +18,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PATH=/app/.venv/bin:$PATH \
     PROFILE_HOST=0.0.0.0 \
-    PROFILE_PORT=8082
+    PROFILE_PORT=8080
 RUN apt-get update && apt-get install -y --no-install-recommends libmagic1 \
     && rm -rf /var/lib/apt/lists/* \
     && groupadd --gid 10001 profile && useradd --uid 10001 --gid 10001 --no-create-home profile
@@ -28,7 +28,7 @@ COPY --from=builder --chown=10001:10001 /build/memory-profile/alembic.ini ./alem
 COPY --from=builder --chown=10001:10001 /build/memory-profile/migrations ./migrations
 COPY --from=builder --chown=10001:10001 /build/memory-profile/src ./src
 USER 10001:10001
-EXPOSE 8082
+EXPOSE 8080
 HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 \
-  CMD ["python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8082/internal/v1/health/live', timeout=2)"]
-CMD ["uvicorn", "src.entry:app", "--host", "0.0.0.0", "--port", "8082", "--http", "zttp", "--http2", "--no-access-log"]
+  CMD ["python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/internal/v1/health/live', timeout=2)"]
+CMD ["uvicorn", "src.entry:app", "--host", "0.0.0.0", "--port", "8080", "--http", "zttp", "--http2", "--no-access-log"]

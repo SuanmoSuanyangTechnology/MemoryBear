@@ -393,7 +393,7 @@ as well.
 The monolith keeps distinct public JWT (`/api`) and API-key (`/v1`) adapters. Their authentication, workspace selection, end-user validation/merge behavior, and request-body semantics are intentionally not collapsed. Migrated endpoints use the API-side `@memory_profile_proxy(...)` decorator and always forward to memory-profile. Configure its address in the API process:
 
 ```dotenv
-MEMORY_PROFILE_BASE_URL=http://memory-profile:8082
+MEMORY_PROFILE_BASE_URL=http://memory-profile:8080
 ```
 
 Every endpoint carrying `@memory_profile_proxy(...)` uses the remote service; endpoints without it keep their local implementation. The API marks API-key calls `x-source: ex_api` and everything else `in_api`, the same labelling the Gateway applies on the face it terminated credentials on, and it identifies the API-key face by the key itself (`x-api-key-id`) exactly as the Gateway does. The mode is derived from the caller's own path, so it cannot drift from the forwarded path. Transport/protocol failures return `SERVICE_UNAVAILABLE`; there is no switch or local fallback. API readiness also requires memory-profile to be ready.
@@ -490,7 +490,7 @@ Every record receives the current `trace_id` and the emitting process hostname a
 
 Middleware execution order is `RequestLogging -> TraceId -> Language -> Metrics -> MemoryAuth -> routing`. Uvicorn access logging is disabled to avoid duplicate request lines; the service middleware owns access completion logs.
 
-Uvicorn runs with `--http zttp --http2`. Port `8082` accepts HTTP/1.1 and cleartext HTTP/2 prior knowledge (h2c); HTTP/1.1 Upgrade-based h2c and HTTP/2 WebSockets are not supported. Production TLS and ALPN negotiation should be terminated by the Gateway or reverse proxy.
+Uvicorn runs with `--http zttp --http2`. Port `8080` accepts HTTP/1.1 and cleartext HTTP/2 prior knowledge (h2c); HTTP/1.1 Upgrade-based h2c and HTTP/2 WebSockets are not supported. Production TLS and ALPN negotiation should be terminated by the Gateway or reverse proxy.
 
 ## Runtime monitoring
 
@@ -539,7 +539,7 @@ counters, but never configuration, connection strings, SQL, or business data.
 ```bash
 cd memory-profile
 uv sync --frozen
-uv run uvicorn src.entry:app --host 0.0.0.0 --port 8082 --http zttp --http2 --no-access-log
+uv run uvicorn src.entry:app --host 0.0.0.0 --port 8080 --http zttp --http2 --no-access-log
 uv run ruff check .
 uv run python -m compileall -q src scripts migrations
 uv run python scripts/check_import_boundaries.py
@@ -560,7 +560,7 @@ Build from the repository root so Docker can use the service-specific ignore fil
 docker build -f memory-profile/Dockerfile -t memory-profile:local .
 ```
 
-The image runs as UID/GID 10001 and exposes port 8082.
+The image runs as UID/GID 10001 and exposes port 8080.
 
 The migrated single-source `locales/en/errors.json` and `locales/zh/errors.json`
 match the complete API files; existing memory locale extensions are retained.

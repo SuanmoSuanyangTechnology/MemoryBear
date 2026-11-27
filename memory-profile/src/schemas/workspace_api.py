@@ -21,6 +21,7 @@ shared ``PageMeta`` shape rather than flat ``page``/``pagesize``/``total`` keys.
 from __future__ import annotations
 
 from typing import Any
+from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -111,35 +112,47 @@ class MemoryReembedJobData(BaseModel):
 class WorkspaceReembedJobCreate(BaseModel):
     """Body of ``POST /workspaces/workspace_reembed/jobs``.
 
-    Service-to-service: the workspace service switches the model first, then
-    calls this endpoint with the new config so the durable job row is registered
-    and the driver is dispatched. ``new_embedding_config_id`` must already be the
-    workspace's current ``embedding`` value, otherwise registration is refused
-    (the driver would self-abort on a job that targets a stale model).
+    Service-to-service: the workspace service only writes the workspace's model
+    columns, then calls this endpoint so the rest of the switch runs here — the
+    underlying model names are resolved server-side from ``model_configs.name``
+    (the host's ``model_name``), exactly like the API's own switch flow.
+
+    ``old_embedding_config_id`` is the slot value the caller read *before* its
+    write (``null`` when the workspace had no embedding). It decides whether the
+    embedding slot actually changed; ``new_embedding_config_id`` must already be
+    the workspace's current ``embedding`` value, otherwise registration is
+    refused (the driver would self-abort on a job that targets a stale model).
     """
 
     model_config = ConfigDict(extra="forbid")
 
-    old_embedding_config_id: str | None = Field(
-        None, description="变更前的 embedding 配置 id（可空）"
-    )
-    new_embedding_config_id: str = Field(
+    old_embedding_config_id: UUID | None = Field(
         ...,
-        min_length=1,
+        description="变更前的 embedding 配置 id；工作空间原本无 embedding 时传 null",
+    )
+    new_embedding_config_id: UUID = Field(
+        ...,
         description="新的 embedding 配置 id；必须已是工作空间当前模型",
     )
-    old_model_name: str | None = Field(None, description="变更前的底层模型名")
-    new_model_name: str | None = Field(None, description="变更后的底层模型名")
 
 
 class WorkspaceReembedJobCreatedData(BaseModel):
-    """``data`` of the job-creation endpoint."""
+    """``data`` of the job-creation endpoint.
+
+    ``job_id`` is "the job in flight after this request", the same value the API
+    back-fills into ``reembed_job_id``: a newly registered job, the job already
+    running when the switch needed no rebuild, or ``null`` when nothing is in
+    flight. ``created`` says whether this call inserted the row.
+    """
 
     model_config = ConfigDict(extra="forbid")
 
-    job_id: str
-    #: ``None`` when the broker rejected the publish; the reconciler re-dispatches.
+    job_id: str | None = Field(
+        None, description="本次请求之后在途的任务 id；无在途任务时为 null"
+    )
+    #: ``None`` when no task was published (no-op, or the broker rejected it).
     task_id: str | None = None
+    created: bool = Field(..., description="本次调用是否新建了重算任务")
 
 
 class WorkspaceRetentionPolicyUpdate(BaseModel):

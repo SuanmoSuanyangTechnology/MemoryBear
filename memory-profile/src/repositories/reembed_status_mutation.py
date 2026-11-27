@@ -87,6 +87,25 @@ class ReembedRetryMutationRepository:
     def __init__(self, postgres: PostgresManager) -> None:
         self.postgres = postgres
 
+    async def active_job_id(self, workspace_id: UUID) -> str | None:
+        """The workspace's in-flight job id, if any (``reembed_job_id`` parity).
+
+        The API back-fills ``reembed_job_id`` with "the job in flight after this
+        request", not with "the job this request created": switching only the
+        llm slot while a rebuild still runs must return that rebuild's id.
+        """
+
+        async with self.postgres.session() as session:
+            job_id = await session.scalar(
+                select(MemoryReembedJobRow.id)
+                .where(
+                    MemoryReembedJobRow.workspace_id == workspace_id,
+                    MemoryReembedJobRow.status.in_(ACTIVE_JOB_STATUSES),
+                )
+                .limit(1)
+            )
+        return None if job_id is None else str(job_id)
+
     async def create_job(
         self,
         *,
