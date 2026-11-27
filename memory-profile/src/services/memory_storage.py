@@ -2306,7 +2306,7 @@ class MemoryStorageService:
             
             # 如果created_at是字符串格式，尝试格式化
             if isinstance(created_at, str):
-                formatted_created_at = self._format_datetime(created_at)
+                formatted_created_at = self._format_interaction_datetime(created_at)
             emotion_type = record.get('emotion_type')
             emotion_intensity = record.get('emotion_intensity')
             if emotion_type !=None:
