@@ -4,14 +4,12 @@ from __future__ import annotations
 
 import logging
 import uuid
-from copy import deepcopy
 from dataclasses import dataclass, replace
 from typing import Any
 
 from redbear_model import ModelProfile
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm.attributes import flag_modified
 
 from ..api.dependencies import Principal
 from ..api.query_validation import parse_uuid_filter
@@ -22,22 +20,27 @@ from ..api.schemas.knowledge import (
     UserSummary,
 )
 from ..errors import KnowledgeError, public_text
+from ..errors.model_errors import MODEL_FIELD_ROLES, ModelFailure, model_error
 from ..models.owned import Knowledge, KnowledgeType, PermissionType
 from ..models.references import ModelBase, ModelConfig, ModelProvider, ModelType, User
-from ..rag.knowledge_graph.config import GraphPipeline, is_graph_enabled
-from ..rag.parser_config import (
-    normalize_knowledge_parser_config_update,
-    set_graph_pipeline_for_migration,
-)
+from ..parser_configuration import KnowledgeConfiguration, to_legacy, to_runtime
+from ..parser_configuration.api import patch_configuration
+from ..parser_configuration.legacy import update_knowledge_configuration
+from ..rag.knowledge_graph.config import GraphPipeline
 from ..repositories import knowledge as knowledge_repository
 from ..repositories.knowledge_share import (
     get_knowledgeshare_by_id_async,
     get_knowledgeshare_by_target_kb_id_in_source_workspace_async,
 )
+from ..repositories.parser_configuration import (
+    AsyncParserConfigurationRepository,
+    knowledge_configuration,
+)
 from ..repositories.reference import ReferenceRepository
 from ..utils.datetime_utils import to_timestamp_ms, utcnow_naive
 from .folder_hierarchy import validate_knowledge_hierarchy
 from .knowledge_model_validation import validate_requested_knowledge_models
+from .legacy_projection import project_knowledge
 from .write_validation import validate_write_fields
 
 logger = logging.getLogger(__name__)
@@ -70,7 +73,7 @@ def knowledge_snapshot(knowledge: Knowledge) -> KnowledgeSnapshot:
     return KnowledgeSnapshot(
         id=knowledge.id,
         workspace_id=knowledge.workspace_id,
-        parser_config=deepcopy(knowledge.parser_config or {}),
+        parser_config=to_runtime(knowledge_configuration(knowledge)),
     )
 
 
@@ -302,24 +305,19 @@ async def knowledge_to_data(
     model_bases = await ReferenceRepository.get_model_bases(db, base_ids)
     bases_by_id = {model_base.id: model_base for model_base in model_bases}
 
-    data = {
-        column.name: getattr(knowledge, column.name)
-        for column in Knowledge.__table__.columns
-    }
-    data["created_user"] = _user_summary(
+    created_user = _user_summary(
         user,
         current_workspace.name if current_workspace else None,
     )
+    summaries = {}
     for id_field, model_field in _SHARE_MIRRORED_MODEL_FIELDS:
-        model_id = data[id_field]
+        model_id = getattr(knowledge, id_field)
         model = models_by_id.get(model_id)
-        data[model_field] = (
+        summaries[model_field] = (
             _model_summary(model, bases_by_id.get(model.model_id)) if model else None
         )
 
-    from ..api.schemas.knowledge import Knowledge as KnowledgeSchema
-
-    return KnowledgeSchema.model_validate(data).model_dump(mode="json")
+    return project_knowledge(knowledge, created_user, summaries).model_dump(mode="json")
 
 
 async def build_knowledge_detail_data(
@@ -526,6 +524,7 @@ async def _prepare_knowledge_create(
     *,
     workspace_id: uuid.UUID,
     check_name: bool,
+    configuration: KnowledgeConfiguration | None = None,
 ) -> KnowledgeCreate:
     knowledge = create_data.model_copy(deep=True)
     knowledge.workspace_id = workspace_id
@@ -551,6 +550,19 @@ async def _prepare_knowledge_create(
     workspace = await ReferenceRepository.get_workspace(db, workspace_id)
     if workspace is None:
         raise _reference_not_found("KB_WORKSPACE_NOT_FOUND")
+    if configuration is not None and configuration.knowledge_type == "Folder":
+        return knowledge
+    if (
+        configuration is not None and configuration.index_strategy == "wiki"
+        and knowledge.permission_id == PermissionType.Share
+    ):
+        # A shared Wiki uses the source bindings, never the target workspace defaults.
+        source_models = {field: getattr(knowledge, field) for field in ("embedding_id", "llm_id")}
+        for field, model_id in source_models.items():
+            if model_id is None:
+                raise model_error(MODEL_FIELD_ROLES[field], ModelFailure.CONFIG_INVALID)
+        await validate_requested_knowledge_models(db, source_models, principal.tenant_id)
+        return knowledge
     if knowledge.embedding_id is None:
         if not workspace.embedding:
             raise _reference_not_found("KB_WORKSPACE_EMBEDDING_MODEL_NOT_CONFIGURED")
@@ -563,7 +575,8 @@ async def _prepare_knowledge_create(
         if not workspace.llm:
             raise _reference_not_found("KB_WORKSPACE_LLM_MODEL_NOT_CONFIGURED")
         knowledge.llm_id = _as_uuid(workspace.llm)
-    await _inherit_workspace_media_models(db, create_data, knowledge, workspace)
+    if configuration is None:
+        await _inherit_workspace_media_models(db, create_data, knowledge, workspace)
     return knowledge
 
 
@@ -611,6 +624,7 @@ async def create_shared_knowledge(
     create_data: KnowledgeCreate,
     principal: Principal,
     target_workspace_id: uuid.UUID,
+    configuration: KnowledgeConfiguration,
 ) -> Knowledge:
     knowledge = await _prepare_knowledge_create(
         db,
@@ -618,11 +632,12 @@ async def create_shared_knowledge(
         principal,
         workspace_id=target_workspace_id,
         check_name=False,
+        configuration=configuration if configuration.index_strategy == "wiki" else None,
     )
     return await knowledge_repository.create_knowledge_async(
         db,
         knowledge,
-        preserve_source_parser_config=True,
+        configuration=configuration,
     )
 
 
@@ -645,11 +660,10 @@ async def update_knowledge(
 class KnowledgeUpdatePlan:
     knowledge_id: uuid.UUID
     update_fields: dict[str, Any]
-    embedding_changed: bool
     delete_vector_index: bool
-    graph_enabled_before: bool | None
     parser_config_update: dict[str, Any] | None = None
     write_input_error: KnowledgeError | None = None
+    processing_configuration: dict[str, Any] | None = None
 
 
 @dataclass(frozen=True)
@@ -661,6 +675,8 @@ class KnowledgeMutationOutcome:
     wiki_backfill_required: bool = False
     wiki_backfill_task_id: str | None = None
     wiki_backfill_upper_at_ms: int | None = None
+    reparse_required: bool = False
+    graph_enabled_before: bool | None = None
 
 
 async def prepare_knowledge_update(
@@ -670,6 +686,7 @@ async def prepare_knowledge_update(
     principal: Principal,
     *,
     max_folder_depth: int | None = None,
+    processing_configuration: dict[str, Any] | None = None,
 ) -> KnowledgeUpdatePlan:
     update_dict = update_data.model_dump(exclude_unset=True)
     knowledge = await _resolve_knowledge_update_target(
@@ -680,8 +697,12 @@ async def prepare_knowledge_update(
     )
     if knowledge is None:
         raise _not_found()
+    current_config = knowledge_configuration(knowledge)
+    next_config = update_knowledge_configuration(current_config, update_dict)
+    if processing_configuration is not None:
+        next_config = patch_configuration(next_config, processing_configuration)
     if {"parent_id", "status", "type"} & update_dict.keys():
-        from ..bootstrap import get_settings
+        from ..application.bootstrap import get_settings
 
         await db.run_sync(
             validate_knowledge_hierarchy, knowledge.workspace_id, update_dict,
@@ -697,18 +718,8 @@ async def prepare_knowledge_update(
             principal.workspace_id,
         ):
             raise _conflict(update_dict["name"])
-    graph_enabled_before = None
     if "parser_config" in update_dict:
-        try:
-            graph_enabled_before = is_graph_enabled(knowledge.parser_config)
-            update_dict["parser_config"] = normalize_knowledge_parser_config_update(
-                knowledge.parser_config,
-                update_dict["parser_config"],
-            )
-        except ValueError as exc:
-            raise KnowledgeError.from_code(
-                "KB_KNOWLEDGE_PARSER_CONFIG_INVALID",
-            ) from exc
+        update_dict["parser_config"] = to_legacy(next_config)
     await validate_requested_knowledge_models(db, update_dict, principal.tenant_id)
     embedding_changed = (
         "embedding_id" in update_dict and update_dict["embedding_id"] != knowledge.embedding_id
@@ -726,15 +737,15 @@ async def prepare_knowledge_update(
     return KnowledgeUpdatePlan(
         knowledge_id=knowledge.id,
         update_fields=update_dict,
-        embedding_changed=embedding_changed,
         delete_vector_index=bool(
-            embedding_changed and knowledge.embedding_id and knowledge.reranker_id
+            embedding_changed and current_config.index_strategy in {"rag", "rag_wiki"}
+            and knowledge.embedding_id and knowledge.reranker_id
         ),
-        graph_enabled_before=graph_enabled_before,
         write_input_error=write_input_error,
         parser_config_update=(
             update_data.parser_config if "parser_config" in update_data.model_fields_set else None
         ),
+        processing_configuration=processing_configuration,
     )
 
 
@@ -755,7 +766,7 @@ async def apply_knowledge_update(
     if knowledge is None:
         raise _not_found()
     if {"parent_id", "status", "type"} & plan.update_fields.keys():
-        from ..bootstrap import get_settings
+        from ..application.bootstrap import get_settings
 
         await db.run_sync(
             validate_knowledge_hierarchy, knowledge.workspace_id, plan.update_fields,
@@ -764,22 +775,20 @@ async def apply_knowledge_update(
             knowledge.id,
         )
         await db.refresh(knowledge)
-    from ..rag.wiki.config import read_wiki_config
 
-    if (plan.parser_config_update is not None or "llm_id" in plan.update_fields
-            or read_wiki_config(knowledge.parser_config).enabled):
-        knowledge = (await db.execute(
-            select(Knowledge).where(Knowledge.id == knowledge.id)
-            .with_for_update().execution_options(populate_existing=True)
-        )).scalar_one()
+    knowledge = (await db.execute(
+        select(Knowledge).where(Knowledge.id == knowledge.id)
+        .with_for_update().execution_options(populate_existing=True)
+    )).scalar_one()
+    current_config = knowledge_configuration(knowledge)
     update_fields = dict(plan.update_fields)
-    wiki_enabled_before = read_wiki_config(knowledge.parser_config).enabled
-    if plan.parser_config_update is not None:
-        update_fields["parser_config"] = normalize_knowledge_parser_config_update(
-            knowledge.parser_config, plan.parser_config_update
-        )
-    next_config = update_fields.get("parser_config", knowledge.parser_config)
-    wiki_enabled_after = read_wiki_config(next_config).enabled
+    if "parser_config" in update_fields:
+        update_fields["parser_config"] = plan.parser_config_update
+    next_config = update_knowledge_configuration(current_config, update_fields)
+    if plan.processing_configuration is not None:
+        next_config = patch_configuration(next_config, plan.processing_configuration)
+    wiki_enabled_before = current_config.index_strategy in {"wiki", "rag_wiki"}
+    wiki_enabled_after = next_config.index_strategy in {"wiki", "rag_wiki"}
     if wiki_enabled_after and (not wiki_enabled_before or "llm_id" in update_fields):
         llm_id = update_fields.get("llm_id", knowledge.llm_id)
         if llm_id is None:
@@ -787,29 +796,40 @@ async def apply_knowledge_update(
         await validate_requested_knowledge_models(db, {"llm_id": llm_id}, principal.tenant_id)
     if plan.write_input_error is not None:
         raise plan.write_input_error
-    if plan.embedding_changed:
+    if not current_config.graph_enabled and next_config.graph_enabled:
+        next_config = next_config.model_copy(
+            update={"graph_pipeline": GraphPipeline.EVIDENCE.value}
+        )
+    await AsyncParserConfigurationRepository(db).write_knowledge(knowledge, lambda _: next_config)
+    reparse_required = bool(
+        "embedding_id" in update_fields and update_fields["embedding_id"] != knowledge.embedding_id
+        and current_config.index_strategy in {"rag", "rag_wiki"}
+    )
+    if reparse_required:
         from ..repositories.document import stage_reset_documents_progress_by_kb_id_async
 
         await stage_reset_documents_progress_by_kb_id_async(db, knowledge.id)
         knowledge.chunk_num = 0
     for field, value in update_fields.items():
-        if hasattr(knowledge, field):
+        if field != "parser_config" and hasattr(knowledge, field):
             setattr(knowledge, field, value)
-    if plan.graph_enabled_before is False and is_graph_enabled(knowledge.parser_config):
-        knowledge.parser_config = set_graph_pipeline_for_migration(
-            knowledge.parser_config,
-            GraphPipeline.EVIDENCE,
-        )
-        flag_modified(knowledge, "parser_config")
     knowledge.updated_at = utcnow_naive()
     await db.flush()
     await db.refresh(knowledge)
-    outcome = await build_knowledge_mutation_outcome(db, knowledge)
+    outcome = replace(
+        await build_knowledge_mutation_outcome(db, knowledge),
+        reparse_required=reparse_required,
+        graph_enabled_before=(
+            current_config.graph_enabled
+            if "parser_config" in update_fields or plan.processing_configuration is not None
+            else None
+        ),
+    )
     wiki_enable_transition = not wiki_enabled_before and wiki_enabled_after
     registered = 0
     try:
         if wiki_enable_transition:
-            from ..bootstrap import get_settings
+            from ..application.bootstrap import get_settings
             from .wiki.backfill import register_backfill
 
             task_id = str(uuid.uuid4())
@@ -850,7 +870,7 @@ async def build_knowledge_mutation_outcome(
     return KnowledgeMutationOutcome(
         response_data=await knowledge_to_data(db, knowledge),
         knowledge_id=knowledge.id,
-        parser_config=deepcopy(knowledge.parser_config or {}),
+        parser_config=to_runtime(knowledge_configuration(knowledge)),
         invalidate_workspace_id=workspace_id,
     )
 
@@ -885,7 +905,7 @@ async def soft_delete_knowledge(
     outcome = KnowledgeMutationOutcome(
         response_data=None,
         knowledge_id=knowledge.id,
-        parser_config=deepcopy(knowledge.parser_config or {}),
+        parser_config=to_runtime(knowledge_configuration(knowledge)),
         invalidate_workspace_id=(
             knowledge.workspace_id if knowledge.name == "USER_RAG_MERORY" else None
         ),

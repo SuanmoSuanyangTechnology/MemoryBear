@@ -13,9 +13,9 @@ from types import MappingProxyType
 
 from error_core.knowledge import knowledge_message
 
-from .errors import ERROR_DEFINITIONS, PublicScalar
+from .definitions import ERROR_DEFINITIONS, PublicScalar
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("src.i18n")
 SUPPORTED_LOCALES = frozenset({"zh", "en"})
 _LANGUAGE_TAG = re.compile(r"^(zh|en)(?:-[a-z0-9]{1,8})*$", re.IGNORECASE)
 

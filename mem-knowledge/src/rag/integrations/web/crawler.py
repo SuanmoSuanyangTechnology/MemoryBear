@@ -25,7 +25,7 @@ class WebCrawler:
         entry_url: str,
         max_pages: int = 200,
         delay_seconds: float = 1.0,
-        timeout_seconds: int = 10,
+        timeout_seconds: float = 10,
         user_agent: str = "KnowledgeBaseCrawler/1.0",
         include_patterns: list[str] | None = None,
         exclude_patterns: list[str] | None = None,

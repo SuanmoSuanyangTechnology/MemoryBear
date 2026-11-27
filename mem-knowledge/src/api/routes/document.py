@@ -6,16 +6,16 @@ import asyncio
 import logging
 import mimetypes
 import uuid
-from typing import Annotated, Any
+from typing import Annotated, Any, cast
 from urllib.parse import quote
 
 from fastapi import APIRouter, Body, Depends, Query, Request
 from fastapi.responses import StreamingResponse
 from pydantic import WrapValidator
 
+from ...application.runtime import ProcessRuntime
 from ...errors import KnowledgeError
 from ...infrastructure.streaming import ClosingStreamingResponse
-from ...runtime import ProcessRuntime
 from ...services import document as document_service
 from ...services import file as file_service
 from ...services.knowledge_file_storage import KnowledgeFileStorage
@@ -179,8 +179,8 @@ async def update_document(
             plan.update_fields["status"],
         )
     async with runtime.database.async_session() as db:
-        document, wiki_pages, wiki_delivery = await document_service.apply_document_update(
-            db, plan, principal
+        document, wiki_pages, wiki_delivery, graph_config = (
+            await document_service.apply_document_update(db, plan, principal)
         )
         data = document_service.document_to_data(document)
     from ...services.wiki.execution import publish_map, publish_pages
@@ -192,7 +192,7 @@ async def update_document(
             TaskDispatcher(runtime=runtime),
             plan.knowledge_id,
             plan.document_id,
-            plan.graph_parser_config,
+            graph_config,
             dispatch_legacy=False,
         )
     return _success(
@@ -281,6 +281,10 @@ async def parse_documents(
             document_id=document.id,
             file_key=file.file_key,
             file_name=file.file_name,
+            qa_knowledge_id=(
+                cast(uuid.UUID, document.kb_id)
+                if document_service.document_configuration(document).doc_type == "qa" else None
+            ),
         )
     result = await document_service.claim_and_dispatch_parse(
         runtime,
@@ -289,7 +293,7 @@ async def parse_documents(
     )
     return _success(
         request,
-        {"task_id": result.task_id},
+        {"task_id": result.legacy_task_id},
         (
             "Task accepted. The document is being processed in the background."
             if result.dispatched

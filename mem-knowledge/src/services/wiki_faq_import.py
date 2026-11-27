@@ -251,7 +251,7 @@ async def prepare_one(runtime, target, task_id, index, item, semaphore):
         ):
             reason = "向量模型或索引服务超时，本条问答未导入。"
         elif isinstance(exc, KnowledgeError):
-            from ..i18n import translate
+            from ..errors.i18n import translate
 
             reason = translate(exc.code, "zh", exc.params)
         return None, jobs.entry_failure(index, item, "indexing", reason)

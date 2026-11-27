@@ -1,7 +1,7 @@
 import datetime
 import uuid
 import enum
-from sqlalchemy import Column, Integer, String, JSON, DateTime, ForeignKey
+from sqlalchemy import Column, Integer, String, JSON, DateTime, ForeignKey, CheckConstraint
 from sqlalchemy.dialects.postgresql import UUID
 from app.db import Base
 from app.core.utils.datetime_utils import utcnow_naive
@@ -41,6 +41,21 @@ class PermissionType(enum.StrEnum):
 
 class Knowledge(Base):
     __tablename__ = "knowledges"
+    __table_args__ = (
+        CheckConstraint(
+            "type IS NOT NULL AND ((type = 'Folder' AND source IS NULL) OR "
+            "(source IS NOT NULL AND ((type = 'General' AND source = 'space') OR "
+            "(type = 'Web' AND source = 'website') OR "
+            "(type = 'Third-party' AND source = 'third_party'))))",
+            name="ck_knowledges_source_type",
+        ),
+        CheckConstraint(
+            "type IS NOT NULL AND ((type = 'Folder' AND index_strategy IS NULL) OR "
+            "(type <> 'Folder' AND index_strategy IS NOT NULL "
+            "AND index_strategy IN ('rag', 'wiki', 'rag_wiki')))",
+            name="ck_knowledges_index_strategy",
+        ),
+    )
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
     external_id = Column(String(36), nullable=True, index=True, unique=False,
@@ -52,6 +67,8 @@ class Knowledge(Base):
     description = Column(String, comment="KB description")
     avatar = Column(String, comment="avatar url")
     type = Column(String, default="General", comment="Type:General|Web|Third-party|Folder")
+    source = Column(String(16), nullable=True, comment="来源；Folder 为空，存储 type 保持不变")
+    index_strategy = Column(String(16), nullable=True, comment="索引策略；Folder 为空")
     permission_id = Column(String, default="Private", comment="permission ID:Private|Share|Memory")
     embedding_id = Column(UUID(as_uuid=True), ForeignKey('model_configs.id', ondelete="SET NULL"), nullable=True,
                           comment="default embedding model ID")

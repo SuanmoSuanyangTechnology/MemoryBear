@@ -26,7 +26,7 @@ def make_model(runtime, snapshot):
     try:
         view = TaskModelFactory(runtime).resolve_chat(model_id, tenant_id)
     except Exception as exc:
-        from ...error_mapping import map_model_error
+        from ...errors.mapping import map_model_error
 
         mapped = map_model_error(exc)
         raise WikiError(mapped.code, retryable=mapped.retryable, diagnostics={

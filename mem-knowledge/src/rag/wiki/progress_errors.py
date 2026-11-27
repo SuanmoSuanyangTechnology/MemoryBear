@@ -1,10 +1,13 @@
 """Wiki 失败进度的用户文案；原始异常与模型输出仅保留在诊断日志。"""
 
-from ...i18n import legacy_catalogs as load_catalogs
-from ...i18n import translate_legacy as translate
+from ...errors.i18n import legacy_catalogs as load_catalogs
+from ...errors.i18n import translate_legacy as translate
 from .config import WikiError
 
 _REASONS = {
+    "WIKI_CAS_BUDGET_EXHAUSTED": "页面素材在生成期间持续变化，本轮重试次数已用完",
+    "WIKI_PAGE_TIME_EXHAUSTED": "本轮页面生成已达到时限",
+    "WIKI_PAGE_BUDGET_EXHAUSTED": "本轮页面的证据压缩预算已用完",
     "WIKI_MODEL_REQUIRED": "未配置 Wiki 生成所需的语言模型",
     "WIKI_MODEL_OUTPUT_INVALID": "模型生成的内容不符合 Wiki 格式要求",
     "WIKI_MODEL_OUTPUT_TRUNCATED": "模型输出达到长度上限，生成内容不完整",

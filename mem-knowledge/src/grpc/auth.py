@@ -2,7 +2,7 @@
 
 direct mode: the gateway terminates credentials upstream and injects the
 ``X-KB-*`` identity metadata; metadata is the identity and the boundary is the
-NetworkPolicy, mirroring :mod:`src.auth`.
+NetworkPolicy, mirroring :mod:`src.api.auth`.
 gateway mode: channel-1 internal tokens are verified by the enterprise handler
 and its claims are authoritative; channel 2 (no credential) trusts the
 ``X-KB-*`` metadata, exactly like the HTTP middleware.
@@ -18,11 +18,11 @@ from memorybear_grpc.interceptors import Authenticator
 from memorybear_grpc.request import MetadataRequest
 from pydantic import ValidationError
 
+from ..api.auth import KbAuthConfig, _load_gateway_auth
 from ..api.dependencies import Principal, _principal_from_headers
-from ..auth import KbAuthConfig, _load_gateway_auth
 from ..errors import KnowledgeError
-from ..i18n import resolve_locale
-from ..trace import get_trace_id, normalize_trace_id
+from ..errors.i18n import resolve_locale
+from ..observability.trace import get_trace_id, normalize_trace_id
 from .envelope import abort_with_status
 
 RETRIEVAL_ACL_PATH = "/internal/v1/chunks/retrieval"

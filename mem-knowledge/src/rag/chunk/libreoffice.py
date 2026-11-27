@@ -5,7 +5,7 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 
-from ...bootstrap import get_settings
+from ...application.bootstrap import get_settings
 
 
 def convert_to_pdf(src_path: str | Path) -> str:

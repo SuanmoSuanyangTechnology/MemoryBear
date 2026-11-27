@@ -8,12 +8,12 @@ from collections.abc import AsyncIterator, Sequence
 from contextlib import asynccontextmanager
 from typing import Any
 
+from ..application.runtime import ProcessRuntime
 from ..errors import KnowledgeError
 from ..models.owned import Document, WikiDocumentState
 from ..rag.chunk.mutation import ChunkWriteResult
 from ..rag.vdb.field import Field
 from ..rag.vdb.vector_store import collection_name_for_knowledge
-from ..runtime import ProcessRuntime
 from ..tasks.state import PARSE_CANCEL_KEY
 from .document_mutation_guard import (
     DocumentMutationLeaseLost,
@@ -71,12 +71,8 @@ async def guard_chunk_mutation(
     """Revalidate an authorized chunk request after its embedding has finished."""
 
     redis = await runtime.redis.client()
-    from .wiki.source import publish_chunk_change, register_chunk_change
-
     mutation_completed = False
     mutation = ChunkWriteResult()
-    registered = False
-    delivery = None
     try:
         async with async_document_mutation_guard(redis, document_id) as guard:
             async with runtime.database.async_session() as session:
@@ -91,11 +87,6 @@ async def guard_chunk_mutation(
                 mutation_completed = True
             finally:
                 await guard.ensure_owned()
-                if mutation.changed:
-                    delivery = await register_chunk_change(
-                        runtime, knowledge_id, document_id, incomplete=not mutation_completed
-                    )
-                    registered = True
     except DocumentMutationLeaseLost as exc:
         try:
             document_survives = await _reconcile_chunk_write(
@@ -118,23 +109,6 @@ async def guard_chunk_mutation(
         raise KnowledgeError.from_code("KB_SEARCH_UNAVAILABLE", http_status_override=503) from exc
     except TimeoutError as exc:
         raise KnowledgeError.from_code("KB_SEARCH_UNAVAILABLE", http_status_override=503) from exc
-    finally:
-        if mutation.changed and not registered:
-            # 租约丢失后的写入仅在重新取得同一文档锁后登记，不覆盖删除操作。
-            try:
-                async with async_document_mutation_guard(redis, document_id) as guard:
-                    await guard.ensure_owned()
-                    delivery = await register_chunk_change(
-                        runtime, knowledge_id, document_id, incomplete=not mutation_completed
-                    )
-            except Exception as exc:
-                logger.exception(
-                    "分块变更后 Wiki 恢复登记失败 stage=chunk_wiki_recovery kb_id=%s "
-                    "document_id=%s error_type=%s reason=%s",
-                    knowledge_id, document_id, type(exc).__name__, exc,
-                )
-        # 释放文档写入锁和数据库事务后投递；与图谱派发和分块计数更新解耦。
-        await publish_chunk_change(runtime, delivery)
 
 
 async def _reconcile_chunk_write(

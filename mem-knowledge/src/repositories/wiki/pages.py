@@ -14,6 +14,7 @@ from ...models.owned import (
     WikiPageSource,
 )
 from ...models.owned.wiki_faq import WikiPageVersion
+from ...parser_configuration import to_runtime
 from ...rag.wiki.config import (
     TERMINAL_TASK_STATUSES,
     TYPE_GROUP_NAMES,
@@ -34,6 +35,7 @@ from ...rag.wiki.identity import (
 )
 from ...rag.wiki.ontology import ONTOLOGY_VERSION
 from ...rag.wiki.resolution import planned_ontology
+from ..parser_configuration import document_configuration, knowledge_configuration
 from .common import (
     append_log,
     as_uuid,
@@ -60,6 +62,7 @@ def _can_reuse_plan(state):
 
 def load_map(session, delivery, *, failure_limit=None):
     knowledge, scope = lock_knowledge(session, delivery["kb_id"])
+    parser_config = to_runtime(knowledge_configuration(knowledge))
     document, state = lock_document(session, delivery["kb_id"], delivery["document_id"])
     require_round(
         document,
@@ -67,7 +70,8 @@ def load_map(session, delivery, *, failure_limit=None):
         delivery["requested_version"],
         allow_inactive=delivery["operation"] == "retract",
     )
-    if state.task_id != delivery["task_id"]:
+    if (state.task_id != delivery["task_id"] or
+            (delivery.get("batch_id") and str(state.batch_id) != delivery["batch_id"])):
         raise WikiSuperseded("WIKI_TASK_SUPERSEDED", retryable=False)
     if state.operation != delivery["operation"]:
         raise WikiSuperseded("WIKI_OPERATION_SUPERSEDED", retryable=False)
@@ -81,7 +85,7 @@ def load_map(session, delivery, *, failure_limit=None):
             raise WikiError("WIKI_WORKER_LOSS_EXHAUSTED", retryable=False)
     if not state.source_ready and state.operation != "retract":
         raise WikiDeferred("WIKI_SOURCE_NOT_READY")
-    config_hash = generation_config_hash(knowledge.llm_id, knowledge.parser_config)
+    config_hash = generation_config_hash(knowledge.llm_id, parser_config)
     if state.operation != "retract" and state.config_hash and state.config_hash != config_hash:
         raise WikiError("WIKI_CONFIG_CHANGED", retryable=False)
     state.config_hash = config_hash
@@ -89,14 +93,14 @@ def load_map(session, delivery, *, failure_limit=None):
     state.publish_confirmed = True
     document.run = 1
     document.progress = max(0.0, state.last_progress)
-    config = read_wiki_config(knowledge.parser_config)
+    config = read_wiki_config(parser_config)
     return {
         **{k: str(v) for k, v in scope.items()},
         "document_id": str(document.id),
         "chunk_count": document.chunk_num,
         "title": document.file_name,
         "llm_id": str(knowledge.llm_id),
-        "parser_config": dict(document.parser_config or {}),
+        "parser_config": to_runtime(document_configuration(document)),
         "language": config.language,
         "extract_prompt": config.extract_prompt,
         "config_hash": config_hash,
@@ -107,6 +111,7 @@ def load_map(session, delivery, *, failure_limit=None):
             state.input_hash and not state.plan_ready
             and (state.map_progress or {}).get("identity_version") == TOPIC_MAP_VERSION
         ),
+        "explicit_page_rerun": bool((state.map_progress or {}).get("explicit_page_rerun")),
         "mapped": state.mapped_version == state.requested_version,
         "requested_version": state.requested_version,
     }
@@ -246,6 +251,7 @@ def fix_plan(
     planning_revision=None,
 ):
     knowledge, scope = lock_knowledge(session, delivery["kb_id"])
+    parser_config = to_runtime(knowledge_configuration(knowledge))
     document, state = lock_document(session, delivery["kb_id"], delivery["document_id"])
     require_round(document, state, delivery["requested_version"])
     if state.plan_ready and state.input_hash != input_hash:
@@ -286,12 +292,12 @@ def fix_plan(
         return {**plan, "topic_pages": mapping}
     if document.file_name != document_title:
         raise WikiDeferred("WIKI_SOURCE_CHANGED")
-    if state.config_hash != generation_config_hash(knowledge.llm_id, knowledge.parser_config):
+    if state.config_hash != generation_config_hash(knowledge.llm_id, parser_config):
         raise WikiDeferred("WIKI_CONFIG_CHANGED")
     if state.mapped_version == state.requested_version:
         raise WikiSuperseded("WIKI_MAP_ALREADY_COMMITTED", retryable=False)
     if planning_revision is not None:
-        current_revision = _planning_context(session, knowledge.id)["revision"]
+        current_revision = planning_context(session, knowledge.id)["revision"]
         if current_revision != planning_revision:
             raise WikiDeferred("WIKI_TAXONOMY_CHANGED", diagnostics={
                 "stage": "taxonomy_register", "knowledge_id": str(knowledge.id),
@@ -364,8 +370,11 @@ def fix_plan(
                 planned_ontology=ontology_by_page.get(page_id),
             )
         )
-    state.map_progress = {"candidate_count": len(topics), "planned_pages": len(targets),
-                          "identity_version": TOPIC_MAP_VERSION}
+    progress = {"candidate_count": len(topics), "planned_pages": len(targets),
+                "identity_version": TOPIC_MAP_VERSION}
+    if (state.map_progress or {}).get("explicit_page_rerun"):
+        progress["explicit_page_rerun"] = True
+    state.map_progress = progress
     state.plan_ready, state.input_hash = True, input_hash
     state.stage = "materials"
     append_log(document, f"Wiki page plan ready: pages={len(targets)}.")
@@ -377,10 +386,17 @@ def load_planning_context(session, delivery):
     knowledge, _ = lock_knowledge(session, delivery["kb_id"])
     document, state = lock_document(session, delivery["kb_id"], delivery["document_id"])
     require_round(document, state, delivery["requested_version"])
-    return _planning_context(session, knowledge.id)
+    return planning_context(session, knowledge.id)
 
 
-def _planning_context(session, kb_id):
+def load_batch_context(session, kb_id):
+    knowledge, _ = lock_knowledge(session, kb_id)
+    parser_config = to_runtime(knowledge_configuration(knowledge))
+    return {**planning_context(session, knowledge.id),
+            "config_hash": generation_config_hash(knowledge.llm_id, parser_config)}
+
+
+def planning_context(session, kb_id):
     pages = [{"page_id": str(row.id), "name": row.title, "kind": row.page_type,
               "canonical_key": row.canonical_key,
               "scope": row.topic_scope, "aliases": row.aliases,
@@ -425,6 +441,7 @@ def commit_map(
     session, delivery, *, config_hash, input_hash, materials, document_title, source_catalog=None,
 ):
     knowledge, scope = lock_knowledge(session, delivery["kb_id"])
+    parser_config = to_runtime(knowledge_configuration(knowledge))
     document, state = lock_document(session, delivery["kb_id"], delivery["document_id"])
     require_round(document, state, delivery["requested_version"])
     if state.mapped_version == state.requested_version:
@@ -436,7 +453,7 @@ def commit_map(
         or not state.source_ready
         or state.input_hash != input_hash
         or state.config_hash != config_hash
-        or config_hash != generation_config_hash(knowledge.llm_id, knowledge.parser_config)
+        or config_hash != generation_config_hash(knowledge.llm_id, parser_config)
     ):
         raise WikiDeferred("WIKI_INPUT_CHANGED")
     tasks = current_tasks(session, state)
@@ -585,6 +602,7 @@ def pending_page_ids(session, state):
 
 def confirm_reused_map(session, delivery, input_hash, config_hash, *, document_title):
     knowledge, _ = lock_knowledge(session, delivery["kb_id"])
+    parser_config = to_runtime(knowledge_configuration(knowledge))
     document, state = lock_document(session, delivery["kb_id"], delivery["document_id"])
     require_round(document, state, delivery["requested_version"])
     if state.mapped_version == state.requested_version:
@@ -594,7 +612,7 @@ def confirm_reused_map(session, delivery, input_hash, config_hash, *, document_t
     if (
         state.input_hash != input_hash
         or state.config_hash != config_hash
-        or config_hash != generation_config_hash(knowledge.llm_id, knowledge.parser_config)
+        or config_hash != generation_config_hash(knowledge.llm_id, parser_config)
     ):
         raise WikiDeferred("WIKI_INPUT_CHANGED")
     state.plan_ready = True
@@ -646,6 +664,7 @@ def _publication_type(session, page, sources, participants):
 
 def load_reduce(session, kb_id, page_id, *, redelivered=False, failure_limit=None):
     knowledge, scope = lock_knowledge(session, kb_id)
+    parser_config = to_runtime(knowledge_configuration(knowledge))
     page_id = as_uuid(page_id)
     sources = list(
         session.scalars(
@@ -677,7 +696,7 @@ def load_reduce(session, kb_id, page_id, *, redelivered=False, failure_limit=Non
     )
     if page is None or (not tasks and page.status != "cleanup_pending"):
         return None
-    config_hash = generation_config_hash(knowledge.llm_id, knowledge.parser_config)
+    config_hash = generation_config_hash(knowledge.llm_id, parser_config)
     participants = []
     for task in tasks:
         state = states[task.document_id]
@@ -803,7 +822,7 @@ def load_reduce(session, kb_id, page_id, *, redelivered=False, failure_limit=Non
             .order_by(WikiPage.id)
         )
     ]
-    config = read_wiki_config(knowledge.parser_config)
+    config = read_wiki_config(parser_config)
     return {
         **{k: str(v) for k, v in scope.items()},
         "page_id": str(page.id),
@@ -815,7 +834,7 @@ def load_reduce(session, kb_id, page_id, *, redelivered=False, failure_limit=Non
         "content": page.content if published_materials <= current_materials else "",
         "llm_id": str(knowledge.llm_id),
         "language": config.language,
-        "config_hash": generation_config_hash(knowledge.llm_id, knowledge.parser_config),
+        "config_hash": generation_config_hash(knowledge.llm_id, parser_config),
         "sources": valid_sources,
         # 包含未参与生成的来源：其素材在生成期间增删或替换，也必须触发 CAS 冲突。
         "source_stamps": [
@@ -831,6 +850,7 @@ def load_reduce(session, kb_id, page_id, *, redelivered=False, failure_limit=Non
 def commit_reduce(session, snapshot, result):
     kb_id, page_id = snapshot["kb_id"], as_uuid(snapshot["page_id"])
     knowledge, scope = lock_knowledge(session, kb_id)
+    parser_config = to_runtime(knowledge_configuration(knowledge))
     ids = {p["document_id"] for p in snapshot["participants"]}
     source_stamps = snapshot.get("source_stamps", snapshot["sources"])
     ids.update(s["document_id"] for s in snapshot["sources"])
@@ -845,7 +865,7 @@ def commit_reduce(session, snapshot, result):
     if (
         page is None
         or page.row_version != snapshot["row_version"]
-        or generation_config_hash(knowledge.llm_id, knowledge.parser_config)
+        or generation_config_hash(knowledge.llm_id, parser_config)
         != snapshot["config_hash"]
     ):
         raise WikiDeferred("WIKI_CAS_CONFLICT")

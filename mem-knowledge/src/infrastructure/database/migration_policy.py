@@ -9,6 +9,7 @@ WIKI_TABLE_NAMES = frozenset(
         "wiki_pages",
         "wiki_page_sources",
         "wiki_page_links",
+        "wiki_reduce_deliveries",
         "wiki_document_states",
         "wiki_document_page_tasks",
     }
@@ -26,8 +27,12 @@ LEGACY_KNOWLEDGE_TABLE_NAMES = frozenset(
 KNOWLEDGE_TABLE_NAMES = (
     WIKI_TABLE_NAMES
     | LEGACY_KNOWLEDGE_TABLE_NAMES
-    | {"knowledge_upload_fingerprints", "wiki_faq_import_jobs"}
+    | {
+        "knowledge_upload_fingerprints", "wiki_faq_import_jobs",
+        "knowledge_parser_configs", "document_parser_configs",
+    }
 )
+
 VERSION_TABLE = "alembic_version_knowledge"
 
 

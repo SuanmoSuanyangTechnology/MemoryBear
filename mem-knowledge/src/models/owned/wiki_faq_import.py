@@ -3,7 +3,7 @@
 from sqlalchemy import BigInteger, CheckConstraint, Column, DateTime, Index, String, Text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 
-from ...db import KnowledgeBase
+from ...infrastructure.database.manager import KnowledgeBase
 from .wiki import WikiScope
 
 

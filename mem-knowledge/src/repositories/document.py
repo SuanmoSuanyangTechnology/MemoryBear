@@ -11,7 +11,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..api.query_validation import execute_list_page
 from ..api.schemas.document import DocumentCreate
 from ..models.owned import Document, Knowledge
+from ..parser_configuration import DocumentConfiguration
 from ..utils.datetime_utils import to_iso_z, utcnow, utcnow_naive
+from .parser_configuration import AsyncParserConfigurationRepository
 
 logger = logging.getLogger(__name__)
 
@@ -55,12 +57,19 @@ async def create_document_async(db: AsyncSession, document: DocumentCreate) -> D
 async def add_document_async(
     db: AsyncSession,
     document: DocumentCreate,
+    *,
+    configuration: DocumentConfiguration | None = None,
 ) -> Document:
     """Add a document row without taking ownership of the transaction."""
 
-    db_document = Document(**document.model_dump())
-    db.add(db_document)
-    await db.flush()
+    values = document.model_dump()
+    data = values.pop("parser_config")
+    db_document = Document(**values)
+    repository = AsyncParserConfigurationRepository(db)
+    if configuration is None:
+        await repository.write_legacy_document(document.kb_id, db_document, data)
+    else:
+        await repository.write_document(document.kb_id, db_document, lambda _: configuration)
     return db_document
 
 

@@ -7,7 +7,7 @@ from datetime import timedelta
 from sqlalchemy import func, or_, select, update
 from sqlalchemy.exc import DataError, IntegrityError
 
-from ...config import DEFAULT_FAQ_IMPORT_PENDING_TIMEOUT_SECONDS
+from ...application.config import DEFAULT_FAQ_IMPORT_PENDING_TIMEOUT_SECONDS
 from ...errors import KnowledgeError
 from ...models.owned import WikiFAQ
 from ...models.owned.wiki_faq_import import WikiFAQImportJob as Job

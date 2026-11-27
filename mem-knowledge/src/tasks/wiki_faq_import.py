@@ -3,7 +3,7 @@
 from sqlalchemy.exc import InterfaceError, OperationalError
 from sqlalchemy.exc import TimeoutError as DatabaseTimeoutError
 
-from ..runtime import get_worker_runtime
+from ..application.runtime import get_worker_runtime
 from .celery_app import celery_app
 from .observability import (
     BusinessOutcome,

@@ -7,7 +7,7 @@ import re
 import threading
 from typing import Any
 
-from .config import KnowledgeSettings
+from ..application.config import KnowledgeSettings
 from .trace import get_trace_id
 
 _URL_CREDENTIAL = re.compile(r"(://[^:/\s]+:)[^@\s]+(@)")

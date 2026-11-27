@@ -7,7 +7,7 @@ import json
 import logging
 import uuid
 from dataclasses import dataclass, replace
-from typing import Any
+from typing import Any, cast
 
 from redbear_model import (
     ModelConfigDeprecatedError,
@@ -29,14 +29,15 @@ from ..api.schemas.chunk import (
 from ..api.schemas.knowledge_metadata import MetadataFilterMode
 from ..api.schemas.knowledge_retrieval import KnowledgeRetrievalRequest
 from ..api.schemas.rerank import RerankMode, RerankWeights
-from ..error_mapping import map_model_error
 from ..errors import KnowledgeError
+from ..errors.mapping import map_model_error
+from ..errors.model_errors import ModelRole
 from ..integrations.model.views import (
     is_qwen3_vl_embedding_view,
     is_qwen3_vl_rerank_view,
 )
-from ..model_errors import ModelRole
 from ..models.owned import Knowledge, KnowledgeShare, PermissionType
+from ..parser_configuration import to_runtime
 from ..rag.knowledge_graph.config import (
     GraphPipeline,
     GraphPipelineConfigError,
@@ -55,6 +56,7 @@ from ..rag.retrieval.models import (
     RetrievalTarget,
 )
 from ..repositories.model_registry import AsyncSQLModelRegistry
+from ..repositories.parser_configuration import knowledge_configuration
 from .knowledge_metadata import KnowledgeMetadataService
 
 logger = logging.getLogger(__name__)
@@ -143,6 +145,7 @@ class KnowledgeRetrievalPreparation:
         from ..repositories.wiki_faq.retrieval import has_eligible, scope_for_target
 
         refs = await cls._resolve_retrievable_refs(db, request, principal, require_chunks=False)
+        refs = cls._filter_rag_capable_refs(request, refs)
         targets = []
         for ref in refs:
             if cls._resolve_retrieve_type(request, ref.config) is not RetrieveType.WIKI_FAQ:
@@ -203,6 +206,7 @@ class KnowledgeRetrievalPreparation:
         principal: Principal,
     ) -> RetrievalPolicy:
         refs = await cls._resolve_policy_refs(db, request, principal)
+        refs = cls._filter_rag_capable_refs(request, refs)
         if not refs:
             raise KnowledgeError.from_code(
                 "KB_RETRIEVAL_KNOWLEDGE_NOT_FOUND",
@@ -378,6 +382,32 @@ class KnowledgeRetrievalPreparation:
         )
 
     @classmethod
+    def _filter_rag_capable_refs(
+        cls,
+        request: KnowledgeRetrievalRequest | RetrievalPolicyRequest,
+        refs: list[_KnowledgeRef],
+    ) -> list[_KnowledgeRef]:
+        allowed = []
+        for ref in refs:
+            # Policy describes original-text modes and has no per-target retrieve_type.
+            retrieve_type = (
+                RetrieveType.HYBRID if isinstance(request, RetrievalPolicyRequest)
+                else cls._resolve_retrieve_type(request, ref.config)
+            )
+            if retrieve_type in {
+                RetrieveType.PARTICIPLE, RetrieveType.SEMANTIC, RetrieveType.HYBRID,
+            } and ref.knowledge.index_strategy not in {"rag", "rag_wiki"}:
+                logger.info(
+                    "[Retrieval] skip knowledge_id=%s reason=rag_not_enabled",
+                    ref.knowledge.id,
+                )
+                continue
+            allowed.append(ref)
+        if refs and not allowed:
+            raise KnowledgeError.from_code("KB_RETRIEVAL_RAG_NOT_ENABLED")
+        return allowed
+
+    @classmethod
     async def _resolve_prepared_refs(
         cls,
         db: AsyncSession,
@@ -387,6 +417,7 @@ class KnowledgeRetrievalPreparation:
         from ..repositories.wiki_faq.retrieval import has_eligible, scope_for_target
 
         refs = await cls._resolve_retrievable_refs(db, request, principal, require_chunks=False)
+        refs = cls._filter_rag_capable_refs(request, refs)
         prepared = []
         for ref in refs:
             if cls._resolve_retrieve_type(request, ref.config) is RetrieveType.WIKI_FAQ:
@@ -468,49 +499,21 @@ class KnowledgeRetrievalPreparation:
                 )
             )
             knowledge = result.scalars().first()
-            if knowledge is None:
+            if knowledge is None or knowledge.permission_id not in {
+                PermissionType.Private, PermissionType.Share,
+            }:
                 continue
-            config = explicit.get(knowledge_id)
-            if knowledge.permission_id == PermissionType.Private:
-                append(
-                    await cls._expand_folder(
-                        db,
-                        knowledge,
-                        config,
-                        explicit,
-                        set(),
-                        require_chunks=require_chunks,
-                        require_active=require_active,
-                    )
-                )
-                continue
-            if knowledge.permission_id != PermissionType.Share:
-                continue
-            share_result = await db.execute(
-                select(KnowledgeShare.source_kb_id).where(
-                    KnowledgeShare.target_kb_id == knowledge.id,
-                    KnowledgeShare.target_workspace_id == principal.workspace_id,
+            append(
+                await cls._expand_folder(
+                    db,
+                    knowledge,
+                    explicit.get(knowledge_id),
+                    explicit,
+                    set(),
+                    require_chunks=require_chunks,
+                    require_active=require_active,
                 )
             )
-            for source_id in share_result.scalars().all():
-                source_result = await db.execute(
-                    select(Knowledge).where(
-                        Knowledge.id == source_id, Knowledge.status.in_(allowed_statuses)
-                    )
-                )
-                source = source_result.scalars().first()
-                if source is not None:
-                    append(
-                        await cls._expand_folder(
-                            db,
-                            source,
-                            config,
-                            explicit,
-                            set(),
-                            require_chunks=require_chunks,
-                            require_active=require_active,
-                        )
-                    )
         return refs
 
     @classmethod
@@ -526,13 +529,41 @@ class KnowledgeRetrievalPreparation:
         require_active: bool = True,
     ) -> list[_KnowledgeRef]:
         allowed_statuses = (1,) if require_active else (0, 1)
-        if knowledge.status not in allowed_statuses:
+        if knowledge.status not in allowed_statuses or knowledge.id in visited:
             return []
         config = explicit.get(knowledge.id) or inherited_config
+        if knowledge.permission_id == PermissionType.Share:
+            share_result = await db.execute(
+                select(KnowledgeShare.source_kb_id).where(
+                    KnowledgeShare.target_kb_id == knowledge.id,
+                    KnowledgeShare.target_workspace_id == knowledge.workspace_id,
+                )
+            )
+            refs = []
+            for source_id in share_result.scalars().all():
+                source_result = await db.execute(
+                    select(Knowledge).where(
+                        Knowledge.id == source_id, Knowledge.status.in_(allowed_statuses)
+                    )
+                )
+                source = source_result.scalars().first()
+                if source is not None:
+                    refs.extend(
+                        await cls._expand_folder(
+                            db,
+                            source,
+                            config,
+                            explicit,
+                            visited | {cast(uuid.UUID, knowledge.id)},
+                            require_chunks=require_chunks,
+                            require_active=require_active,
+                        )
+                    )
+            return refs
         # Model capabilities are independent of whether documents have produced chunks.
         if not knowledge.is_folder and (not require_chunks or knowledge.is_retrievable_leaf):
             return [_KnowledgeRef(knowledge, config)]
-        if not knowledge.is_folder or knowledge.id in visited:
+        if not knowledge.is_folder:
             return []
         visited = {*visited, knowledge.id}
         result = await db.execute(
@@ -655,14 +686,15 @@ class KnowledgeRetrievalPreparation:
             ):
                 continue
             knowledge = knowledge_by_id[target.knowledge_id]
-            if not is_graph_enabled(knowledge.parser_config):
+            parser_config = to_runtime(knowledge_configuration(knowledge))
+            if not is_graph_enabled(parser_config):
                 if target.params.retrieve_type is RetrieveType.Graph:
                     raise KnowledgeError.from_code(
                         "KB_GRAPH_DISABLED",
                     )
                 continue
             try:
-                pipeline = resolve_graph_pipeline(knowledge.parser_config)
+                pipeline = resolve_graph_pipeline(parser_config)
             except GraphPipelineConfigError as exc:
                 raise KnowledgeError.from_code(
                     "KB_GRAPH_CONFIG_INVALID",

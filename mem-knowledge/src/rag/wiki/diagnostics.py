@@ -10,7 +10,7 @@ from typing import Any
 from pydantic import ValidationError
 from sqlalchemy.exc import StatementError
 
-from ...logging import redact_for_log
+from ...observability.logging import redact_for_log
 from .config import WikiError
 
 _FRAME_LIMIT = 24

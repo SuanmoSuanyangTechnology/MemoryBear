@@ -13,10 +13,10 @@ from memorybear_grpc.server import GrpcServer, create_grpc_server
 
 import grpc
 
-from ..auth import KbAuthConfig
-from ..config import KnowledgeSettings
-from ..runtime import ProcessRuntime
-from ..trace import reset_trace_id, set_trace_id
+from ..api.auth import KbAuthConfig
+from ..application.config import KnowledgeSettings
+from ..application.runtime import ProcessRuntime
+from ..observability.trace import reset_trace_id, set_trace_id
 from .auth import build_authenticator
 from .retrieval_servicer import KnowledgeRetrievalServicer
 

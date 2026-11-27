@@ -13,7 +13,8 @@ from redbear_model import (
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..api.dependencies import Principal
-from ..error_mapping import map_model_error
+from ..errors.mapping import map_model_error
+from ..errors.model_errors import MODEL_FIELD_ROLES, ModelFailure, model_error
 from ..integrations.model.errors import (
     ModelInvokeClientError,
     ModelInvokeFailedError,
@@ -21,7 +22,6 @@ from ..integrations.model.errors import (
 )
 from ..integrations.model.invoke import ModelCallContext
 from ..integrations.model.runtime import ModelInvokeRuntime
-from ..model_errors import MODEL_FIELD_ROLES, ModelFailure, model_error
 from ..repositories.model_registry import AsyncSQLModelRegistry
 
 _MODEL_FIELD_TYPES = {
@@ -71,7 +71,7 @@ async def validate_requested_knowledge_model_availability(
         checked.add(model_id)
 
 
-def _matches_knowledge_model_field(field_name: str, model: ModelConfigSnapshot) -> bool:
+def matches_knowledge_model_field(field_name: str, model: ModelConfigSnapshot) -> bool:
     """Match the same media capabilities and providers used by knowledge processing."""
     if model.profile.type != _MODEL_FIELD_TYPES[field_name]:
         return False
@@ -109,5 +109,5 @@ async def validate_requested_knowledge_models(
                 raise model_error(MODEL_FIELD_ROLES[field_name], ModelFailure.CONFIG_INVALID)
             configs[model_id] = config
         model = configs[model_id]
-        if not _matches_knowledge_model_field(field_name, model):
+        if not matches_knowledge_model_field(field_name, model):
             raise model_error(MODEL_FIELD_ROLES[field_name], ModelFailure.CAPABILITY_MISMATCH)

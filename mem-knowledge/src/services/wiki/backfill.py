@@ -2,10 +2,12 @@
 
 from datetime import UTC, datetime
 
-from sqlalchemy import and_, or_, select
+from sqlalchemy import and_, or_, select, update
 
 from ...models.owned import Document, Knowledge, WikiDocumentState
+from ...parser_configuration import to_runtime
 from ...rag.wiki.config import ACTIVE_STATUSES, read_wiki_config
+from ...repositories.parser_configuration import knowledge_configuration
 from ...repositories.wiki.common import as_uuid, lock_knowledge, state_delivery
 from ...repositories.wiki.state import admit, record_publish_failure
 from .execution import publish_map
@@ -14,7 +16,9 @@ from .runtime import transaction
 
 def _batch(session, kb_id, upper_at_ms, cursor, limit, *, only_candidates=False):
     knowledge = session.get(Knowledge, as_uuid(kb_id))
-    if knowledge is None or not read_wiki_config(knowledge.parser_config).enabled:
+    if knowledge is None or not read_wiki_config(
+        to_runtime(knowledge_configuration(knowledge))
+    ).enabled:
         return []
     upper = datetime.fromtimestamp(upper_at_ms / 1000, UTC).replace(tzinfo=None)
     query = select(Document.id, Document.created_at).where(
@@ -70,6 +74,16 @@ def register_backfill(session, kb_id, upper_at_ms, admission_id, batch_size):
                 registered += 1
             cursor = (created_at, document_id)
     return registered
+
+
+def confirm_batch_trigger(session, kb_id, admission_id):
+    lock_knowledge(session, kb_id)
+    session.execute(update(WikiDocumentState).where(
+        WikiDocumentState.kb_id == as_uuid(kb_id),
+        WikiDocumentState.admission_id == admission_id,
+        WikiDocumentState.stage == "map_pending",
+        WikiDocumentState.status == "pending",
+    ).values(publish_confirmed=True))
 
 
 def record_backfill_publish_failure(session, kb_id, admission_id, batch_size):

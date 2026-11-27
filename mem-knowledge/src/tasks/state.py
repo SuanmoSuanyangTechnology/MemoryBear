@@ -10,6 +10,7 @@ PARSE_TASK_KEY = "doc:{doc_id}:parse_task"
 PARSE_CANCEL_KEY = "doc:{doc_id}:parse_cancel"
 PARSE_TASK_TTL = 7200
 PARSE_CANCEL_TTL = 60
+PARSE_CLAIM_PREFIX = "CLAIMED:"
 
 REBUILD_TASK_GUARD_TTL_SECONDS = 7200
 _REBUILD_JOB_KEY_PREFIX = "evidence_graph:rebuild:job"
@@ -30,6 +31,14 @@ local current_value = redis.call('get', KEYS[1])
 if current_value and current_value == ARGV[1] then
     redis.call('expire', KEYS[1], ARGV[2])
     return 1
+end
+return 0
+"""
+
+_RELEASE_PARSE_TASK_SCRIPT = """
+local current_value = redis.call('get', KEYS[1])
+if current_value and (current_value == ARGV[1] or current_value == ARGV[2]) then
+    return redis.call('del', KEYS[1])
 end
 return 0
 """
@@ -115,8 +124,11 @@ def clear_parse_state(redis: Any, doc_id: str | uuid.UUID) -> int:
 
 def release_parse_task(redis: Any, doc_id: str | uuid.UUID, task_id: str) -> int:
     """A late worker cannot release a newer source task's dispatch claim."""
-    return int(redis.eval(_COMPARE_AND_DELETE_SCRIPT, 1,
-                          PARSE_TASK_KEY.format(doc_id=doc_id), task_id))
+    # ACK can replace the owned claim at any time, so check both values atomically.
+    return int(redis.eval(
+        _RELEASE_PARSE_TASK_SCRIPT, 1, PARSE_TASK_KEY.format(doc_id=doc_id),
+        task_id, PARSE_CLAIM_PREFIX + task_id,
+    ))
 
 
 def claim_or_get_rebuild_job(

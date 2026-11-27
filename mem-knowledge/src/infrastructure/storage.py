@@ -18,7 +18,7 @@ from mem_storage import (
     create_storage,
 )
 
-from ..config import KnowledgeSettings
+from ..application.config import KnowledgeSettings
 
 BackendFactory = Callable[[StorageConfig], Any]
 

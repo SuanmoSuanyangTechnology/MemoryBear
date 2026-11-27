@@ -1,5 +1,10 @@
 {
   "codes": {
+    "KB_UPLOAD_SAVE_UNKNOWN": "文件保存结果待确认，请先核对文档记录后再决定是否重试。",
+    "KB_TASK_DISPATCH_UNKNOWN": "任务投递结果待确认，请先查询文档状态，再决定是否重试。",
+    "KB_RETRIEVAL_RAG_NOT_ENABLED": "所选知识库未启用原文检索，请选择启用 RAG 的知识库。",
+    "KB_KNOWLEDGE_FIELD_IMMUTABLE": "知识库字段“{field}”创建后不可修改。",
+    "KB_PARSER_CONFIG_PARENT_CHILD_QA_CONFLICT": "父子分块不能与 QA 问题生成同时开启，请将每块问题数设为 0。",
     "KB_SHARE_SOURCE_NOT_FOUND": "源知识库不存在。",
     "KB_SHARE_TARGET_NOT_FOUND": "目标工作空间不存在。",
     "KB_SHARE_CROSS_TENANT": "只能在调用方所属租户内共享知识库。",
@@ -236,6 +241,9 @@
     "KB_CONNECTOR_SOURCE_INVALID": "外部内容来源不存在或无法访问，请检查来源地址和访问权限。"
   },
   "knowledge_codes": {
+    "KB_RETRIEVAL_RAG_NOT_ENABLED": "所选知识库未启用原文检索，请选择启用 RAG 的知识库。",
+    "KB_KNOWLEDGE_FIELD_IMMUTABLE": "知识库字段“{field}”创建后不可修改。",
+    "KB_PARSER_CONFIG_PARENT_CHILD_QA_CONFLICT": "父子分块不能与 QA 问题生成同时开启，请将每块问题数设为 0。",
     "VALIDATION_FAILED": "本次提交的格式、必填项或取值范围有误，请修正后重试。",
     "FILE_TOO_LARGE": "提交内容超过大小限制，请压缩或更换文件后重试。",
     "UNAUTHORIZED": "登录状态已失效，请重新登录。",

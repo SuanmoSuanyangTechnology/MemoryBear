@@ -11,7 +11,7 @@ from typing import Any
 
 from sqlalchemy import delete, select
 
-from ...bootstrap import get_settings
+from ...application.bootstrap import get_settings
 from ...models.owned import FILE_ROLE_DERIVED_IMAGE, Document, File
 from ...services.knowledge_file_storage import KnowledgeFileStorage, generate_kb_file_key
 from ...tasks.state import is_parse_cancelled

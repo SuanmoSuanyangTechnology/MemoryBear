@@ -13,6 +13,7 @@ from ...models.owned import (
     WikiPage,
     WikiPageSource,
 )
+from ...parser_configuration import to_runtime
 from ...rag.wiki.config import (
     ACTIVE_STATUSES,
     TASK_CLEANUP_BATCH_SIZE,
@@ -25,6 +26,7 @@ from ...rag.wiki.config import (
     read_wiki_config,
 )
 from ...rag.wiki.identity import TOPIC_MAP_VERSION
+from ...repositories.parser_configuration import knowledge_configuration
 from ...utils.datetime_utils import utcnow_naive
 from .common import (
     append_log,
@@ -132,6 +134,7 @@ def start_round(session, document, state, scope, *, source=False, reuse=False):
         state.source_task_id = None
     state.plan_ready = False
     state.mapped_version = 0
+    state.batch_id = state.claimed_at = None
     state.task_id = None
     state.admission_id = None
     state.publish_confirmed = False
@@ -232,7 +235,7 @@ def admit(
             }
         # The service may resolve a parse task registered while Wiki was disabled.
         raise WikiSourcePending("WIKI_SOURCE_NOT_READY", retryable=False)
-    if not read_wiki_config(knowledge.parser_config).enabled:
+    if not read_wiki_config(to_runtime(knowledge_configuration(knowledge))).enabled:
         if explicit:
             raise WikiError("WIKI_DISABLED", retryable=False)
         return None
@@ -258,7 +261,9 @@ def admit(
             state.mapped_version == state.requested_version
             and (state.map_progress or {}).get("identity_version") == TOPIC_MAP_VERSION
             and state.config_hash
-            == generation_config_hash(knowledge.llm_id, knowledge.parser_config)
+            == generation_config_hash(
+                knowledge.llm_id, to_runtime(knowledge_configuration(knowledge))
+            )
         )
         state = start_round(session, document, state, scope, reuse=reuse)
     elif state is None:
@@ -334,7 +339,7 @@ def chunks_changed(session, kb_id, document_id, *, incomplete=False):
         progress["chunk_mutation"] = {"incomplete": incomplete or previous.get("incomplete", False)}
         state.map_progress = progress
         return None
-    if not read_wiki_config(knowledge.parser_config).enabled:
+    if not read_wiki_config(to_runtime(knowledge_configuration(knowledge))).enabled:
         # 已有素材仍须失效；开启 Wiki 时可从 waiting_wiki 继续，不再读取旧页面。
         if state is not None and state.source_ready:
             fields = ("run", "progress", "process_begin_at", "process_duration", "progress_msg")
@@ -365,7 +370,8 @@ def chunks_changed(session, kb_id, document_id, *, incomplete=False):
 def source_started(session, kb_id, document_id, source_task_id, *, replace=False):
     knowledge, scope = lock_knowledge(session, kb_id)
     document, state = lock_document(session, kb_id, document_id)
-    enabled = read_wiki_config(knowledge.parser_config).enabled
+    parser_config = to_runtime(knowledge_configuration(knowledge))
+    enabled = read_wiki_config(parser_config).enabled
     if not enabled and state is None:
         return None
     if state and source_task_id and state.source_task_id == source_task_id:
@@ -378,7 +384,17 @@ def source_started(session, kb_id, document_id, source_task_id, *, replace=False
         }
     if state and not replace:
         raise WikiSuperseded("WIKI_SOURCE_TASK_SUPERSEDED", retryable=False)
-    state = start_round(session, document, state, scope, source=True)
+    from ...application.bootstrap import get_settings
+
+    resume_pages = bool(state and replace and state.stage == "reducing"
+                        and get_settings().wiki_batch_enabled(kb_id))
+    reuse = (resume_pages and state.mapped_version == state.requested_version
+             and (state.map_progress or {}).get("identity_version") == TOPIC_MAP_VERSION
+             and state.config_hash == generation_config_hash(
+                 knowledge.llm_id, parser_config))
+    state = start_round(session, document, state, scope, source=True, reuse=reuse)
+    if resume_pages:
+        state.map_progress = {**state.map_progress, "explicit_page_rerun": True}
     state.source_task_id = source_task_id
     return {**state_delivery(state), "source_ready": False, "wiki_enabled": enabled}
 
@@ -386,7 +402,7 @@ def source_started(session, kb_id, document_id, source_task_id, *, replace=False
 def source_completed(session, kb_id, document_id, source_task_id):
     knowledge, scope = lock_knowledge(session, kb_id)
     document, state = lock_document(session, kb_id, document_id)
-    enabled = read_wiki_config(knowledge.parser_config).enabled
+    enabled = read_wiki_config(to_runtime(knowledge_configuration(knowledge))).enabled
     if state is None:
         if not enabled:
             return None
@@ -455,7 +471,7 @@ def withdraw(session, kb_id, document_id, *, hard_delete=False):
     session.flush()
     if not hard_delete:
         settle_progress(session, document, state)
-    return [str(page_id) for page_id in sorted(pages, key=str)]
+    return page_handoffs(session, kb_id, pages)
 
 
 def reenable(session, kb_id, document_id):
@@ -488,5 +504,13 @@ def cancel(session, kb_id, document_id):
     append_log(document, "Wiki processing cancelled.")
     if state.mapped_version == state.requested_version and state.source_ready:
         dirty_pages(session, page_ids, status="cleanup_pending")
-        return [str(page_id) for page_id in sorted(page_ids, key=str)]
+        return page_handoffs(session, kb_id, page_ids)
     return []
+
+def page_handoffs(session, kb_id, page_ids):
+    from ...application.bootstrap import get_settings
+    from .deliveries import register
+
+    if get_settings().wiki_batch_enabled(kb_id):
+        return register(session, kb_id, page_ids)
+    return [str(pid) for pid in sorted(set(page_ids), key=str)]

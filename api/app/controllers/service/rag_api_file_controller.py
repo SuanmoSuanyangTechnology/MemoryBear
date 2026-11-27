@@ -3,7 +3,7 @@
 from typing import Any, Optional
 import uuid
 
-from fastapi import APIRouter, Body, Depends, Request, Query, File, UploadFile, Security
+from fastapi import APIRouter, Body, Depends, Request, Query, File, UploadFile, Security, Response
 from sqlalchemy.orm import Session
 
 from error_core.knowledge_upload import UploadCreated, UploadedDocument, upload_responses
@@ -30,6 +30,17 @@ from app.services.file_storage_service import FileStorageService, get_file_stora
 router = APIRouter(prefix="/files", tags=["V1 - RAG API"])
 api_logger = get_business_logger()
 file_controller = unwrap_current_workspace_guard(file_controller)
+
+
+@router.post("/v1/upload-and-parse", include_in_schema=False)
+@require_api_key_self_db(scopes=["rag"])
+@route_through_knowledge_service(
+    source=KnowledgeRetrievalSource.EXTERNAL_API,
+    profile=CallProfile.RAW_UPLOAD,
+    require_remote=True,
+)
+async def upload_and_parse_v1(request: Request) -> Response:
+    raise KnowledgeUnavailableError("Versioned knowledge upload requires the remote service")
 
 
 @router.get("/{kb_id}/{parent_id}/files", response_model=ApiResponse)

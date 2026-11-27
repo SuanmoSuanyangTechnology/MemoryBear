@@ -21,7 +21,7 @@ from redbear_model import (
 from ...repositories.model_registry import SyncSQLModelRegistry
 
 if TYPE_CHECKING:
-    from ...runtime import ProcessRuntime
+    from ...application.runtime import ProcessRuntime
 
 
 class TaskModelFactory:

@@ -10,7 +10,7 @@ from collections import Counter, defaultdict
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from typing import Any, TypeVar
 
-from ...bootstrap import get_settings
+from ...application.bootstrap import get_settings
 from .batching import build_extraction_batches, select_source_chunks
 from .extraction_cache import GraphExtractionCache
 from .models import (

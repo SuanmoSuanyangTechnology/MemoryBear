@@ -23,7 +23,7 @@ from sqlalchemy import (
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import declared_attr
 
-from ...db import KnowledgeBase
+from ...infrastructure.database.manager import KnowledgeBase
 
 SCOPE = ("tenant_id", "workspace_id", "kb_id")
 
@@ -120,6 +120,29 @@ class WikiPage(WikiScope, KnowledgeBase):
         )
 
 
+class WikiReduceDelivery(WikiScope, KnowledgeBase):
+    __tablename__ = "wiki_reduce_deliveries"
+
+    page_id = Column(UUID(as_uuid=True), primary_key=True)
+    delivery_id = Column(UUID(as_uuid=True), nullable=False)
+    attempt_id = Column(UUID(as_uuid=True), nullable=False)
+    status = Column(String(16), nullable=False)
+    input_revision = Column(BigInteger, nullable=False)
+    cas_used = Column(Integer, nullable=False)
+    compact_used = Column(Integer, nullable=False)
+    attempts = Column(Integer, nullable=False)
+    deadline_at = Column(DateTime)
+
+    @declared_attr
+    def __table_args__(cls):
+        return (
+            scope_fk("wiki_pages", "page_id", name="fk_wiki_delivery_page", ondelete="CASCADE"),
+            CheckConstraint(
+                "status IN ('queued','running','retry_wait')", name="ck_wiki_delivery_status",
+            ),
+        )
+
+
 class WikiDocumentState(WikiScope, KnowledgeBase):
     __tablename__ = "wiki_document_states"
 
@@ -128,6 +151,8 @@ class WikiDocumentState(WikiScope, KnowledgeBase):
     )
     requested_version = Column(BigInteger, nullable=False, default=1)
     mapped_version = Column(BigInteger, nullable=False, default=0)
+    batch_id = Column(UUID(as_uuid=True))
+    claimed_at = Column(DateTime)
     source_ready = Column(Boolean, nullable=False, default=False)
     plan_ready = Column(Boolean, nullable=False, default=False)
     stage = Column(String(32), nullable=False, default="waiting_source")
