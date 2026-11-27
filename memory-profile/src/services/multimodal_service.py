@@ -18,6 +18,7 @@ import struct
 import uuid
 import zipfile
 from abc import ABC, abstractmethod
+from collections.abc import Awaitable, Callable
 from ipaddress import ip_address
 from typing import Any
 from urllib.parse import urlparse
@@ -35,6 +36,7 @@ from src.bootstrap import get_settings
 from src.common.errors import BizCode, ProfileError
 from src.common.text_sanitize import sanitize_text
 from src.common.observability.logging import get_logger
+from src.infrastructure.file_service import FileServiceError
 from mem_storage import LocalStorage
 from src.services.file_content_service import extract_permanent_file_id
 from src.schemas.memory_storage import FileInput, FileType, FileUploadConfig, TransferMethod
@@ -491,6 +493,9 @@ class OpenAIFormatStrategy(MultimodalFormatStrategy):
                     "format": file_ext,
                 },
             }
+        except httpx.HTTPError as exc:
+            logger.error("Failed to fetch audio: %s", type(exc).__name__)
+            return False, {"type": "text", "text": "[Failed to download audio.]"}
         except Exception as e:
             logger.error(f"下载音频失败: {e}")
             return False, {
@@ -540,9 +545,13 @@ class MultimodalService:
         input_modalities (list): Input modality configuration of the model.
     """
 
-    def __init__(self, repository, model_view=None, *, attachment_storage):
+    def __init__(
+        self, repository, model_view=None, *, attachment_storage,
+        download_attachment: Callable[[uuid.UUID], Awaitable[bytes]],
+    ):
         self.repository = repository
         self.attachment_storage = attachment_storage
+        self.download_attachment = download_attachment
         self.model_view = model_view
         self.provider = model_view.provider.lower() if model_view else "openai"
         self.input_modalities = list(model_view.input_modalities or []) if model_view else []
@@ -568,8 +577,8 @@ class MultimodalService:
     ) -> int:
         """读取模型侧不可达的附件字节，供出站适配器内联使用。
 
-        - 持 upload_file_id：走 workspace/tenant 受限查询 + 存储后端直读，
-          除字节外还回填文件名、大小与 MIME，供感知记忆等下游使用；
+        - With an upload_file_id, validate ownership and fetch bytes through file-service,
+          then populate the name, size and MIME type for downstream processing.
         - 否则仅识别本服务自铸的永久 URL，由本服务自己 HTTP 取回，
           不把该 URL 交给模型，也不接受任意远程 URL（避免 SSRF）。
         """
@@ -585,7 +594,10 @@ class MultimodalService:
             if file_size <= 0 or file_size > get_settings().max_file_size:
                 raise _file_error("文件大小不在允许范围内", BizCode.FILE_READ_ERROR)
 
-            content = await self.attachment_storage.backend.download(metadata.file_key)
+            try:
+                content = await self.download_attachment(file.upload_file_id)
+            except FileServiceError as exc:
+                raise _file_error("文件读取失败", BizCode.FILE_READ_ERROR) from exc
             if len(content) != file_size:
                 logger.error(
                     "本地文件大小与元数据不一致",
@@ -633,6 +645,8 @@ class MultimodalService:
         document_image_recognition: bool = False,
         include_processing_errors: bool = True,
         file_upload_config: dict[str, Any] | None = None,
+        *,
+        use_resolved_url: bool = False,
     ) -> list[dict[str, Any]]:
         """
         处理文件列表，返回 LLM 可用的格式
@@ -670,7 +684,7 @@ class MultimodalService:
             # 模型侧不可达的附件只能由本服务读取字节后随请求出站，绝不能把
             # FILE_LOCAL_SERVER_URL 或私有 OSS URL 交给模型回拉；公网可达的
             # URL 保持原样直传，不额外搬运字节。
-            if _requires_inline_bearer(file):
+            if not use_resolved_url and _requires_inline_bearer(file):
                 if file.type == FileType.VIDEO:
                     # 视频没有通用内联协议：远程存储直达对象地址后交给模型自行判断能否
                     # 拉取；本地磁盘无对象 URL，给出管理员可操作的提示。
@@ -885,7 +899,37 @@ class MultimodalService:
         # 铸预签名 URL 前先做归属/租户范围校验。
         metadata = await self._get_local_file_metadata(file.upload_file_id, workspace_id)
         # 不传 file_name：避免强制 Content-Disposition: attachment。
-        return await storage.get_signed_url(metadata.file_key, expires=86400)
+        return await self._sign_attachment_url(metadata.file_key)
+
+    async def _sign_attachment_url(self, file_key: str) -> str:
+        return await self.attachment_storage.backend.get_signed_url(file_key, expires=86400)
+
+    async def resolve_uploaded_file_url(
+        self, file: FileInput, workspace_id: uuid.UUID | str | None
+    ) -> FileInput:
+        metadata = await self._get_local_file_metadata(file.upload_file_id, workspace_id)
+        if isinstance(self.attachment_storage.backend, LocalStorage):
+            url = self._permanent_attachment_url(file.upload_file_id)
+        else:
+            url = await self._sign_attachment_url(metadata.file_key)
+        if not url:
+            raise _file_error("无法生成试运行附件地址", BizCode.FILE_READ_ERROR)
+        file_type = metadata.content_type
+        if file.type == FileType.AUDIO and metadata.file_ext:
+            file_type = f"audio/{metadata.file_ext.lstrip('.').lower()}"
+        return file.model_copy(update={
+            "transfer_method": TransferMethod.REMOTE_URL,
+            "upload_file_id": None,
+            "url": url,
+            "name": file.name or metadata.file_name,
+            "file_type": file_type,
+            "size": metadata.file_size,
+        })
+
+    @staticmethod
+    def _permanent_attachment_url(file_id: uuid.UUID) -> str:
+        server_url = get_settings().file_local_server_url.rstrip("/")
+        return f"{server_url}/storage/permanent/{file_id}"
 
     async def get_file_url(self, file: FileInput) -> str:
         """
@@ -912,8 +956,7 @@ class MultimodalService:
                 raise _file_error(f"文件不存在或已删除: {file_id}", BizCode.NOT_FOUND)
 
             # 返回永久URL
-            server_url = get_settings().file_local_server_url
-            return f"{server_url}/storage/permanent/{file_id}"
+            return self._permanent_attachment_url(file_id)
 
     async def extract_document_text(self, file: FileInput) -> str:
         """
@@ -948,6 +991,9 @@ class MultimodalService:
                 return await self._extract_json_text(file_content)
             else:
                 return f"[Unsupported file type: {file_mime_type}]"
+        except httpx.HTTPError as exc:
+            logger.error("Failed to fetch document: %s", type(exc).__name__)
+            return "[Failed to load file.]"
         except Exception as e:
             logger.error(f"Failed to load file. - {e}")
             return "[Failed to load file.]"

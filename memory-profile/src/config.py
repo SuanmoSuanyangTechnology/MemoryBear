@@ -18,7 +18,6 @@ from pydantic import (
 from pydantic_settings import BaseSettings
 from sqlalchemy.engine import make_url
 
-
 def _redis_url_with_db(url: str, db: int) -> str:
     """Return ``url`` pointed at logical Redis database ``db``."""
 

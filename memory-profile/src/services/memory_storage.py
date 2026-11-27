@@ -7,6 +7,8 @@ import re
 from collections import Counter, defaultdict
 from datetime import datetime
 from enum import Enum
+from functools import partial
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
 from uuid import UUID
 
@@ -24,7 +26,6 @@ if TYPE_CHECKING:
     from src.runtime import ProfileRuntime
 
 import asyncio
-import base64
 import json
 import os
 import time
@@ -957,7 +958,10 @@ class MemoryStorageService:
             self.runtime, config_id, workspace_id, tenant_id, include_runtime_views=include_runtime_views
         )
 
-    async def pilot_run_stream(self, payload: PilotRunInput, language: str = "zh", *, workspace_id, tenant_id) -> AsyncGenerator[str, None]:
+    async def pilot_run_stream(
+        self, payload: PilotRunInput, language: str = "zh", *, workspace_id, tenant_id,
+        actor_id: UUID, actor_kind: str,
+    ) -> AsyncGenerator[str, None]:
         """
         流式执行试运行，产生 SSE 格式的进度事件
 
@@ -1049,6 +1053,8 @@ class MemoryStorageService:
                         progress_callback=progress_callback,
                         language=language,
                         model_views=views,
+                        actor_id=actor_id,
+                        actor_kind=actor_kind,
                     )
                     logger.info("[PILOT_RUN_STREAM] pipeline_main completed")
 
@@ -1093,25 +1099,18 @@ class MemoryStorageService:
                     # 超时，继续等待（这允许检测客户端断开）
                     continue
 
-            # 等待管线任务完成
             await pipeline_task
 
-            # 步骤 5: 读取提取结果
-            settings = get_settings()
-            result_path = settings.get_memory_output_path("extracted_result.json")
-            if not os.path.isfile(result_path):
+            result_path = Path(get_settings().get_memory_output_path("extracted_result.json"))
+            if not result_path.is_file():
                 raise FileNotFoundError(f"试运行完成，但未找到提取结果文件: {result_path}")
-
-            with open(result_path, "r", encoding="utf-8") as rf:
-                extracted_result = json.load(rf)
-
-            # 步骤 6: 组装结果（试运行不做额外覆盖率后处理）
+            with result_path.open("r", encoding="utf-8") as result_file:
+                extracted_result = json.load(result_file)
             result_data = {
                 "config_id": cid,
                 "time_log": None,
                 "extracted_result": extracted_result,
             }
-
             yield format_sse_message("result", result_data)
 
             # 步骤 7: 发出完成事件
@@ -1212,50 +1211,16 @@ class MemoryStorageService:
             text = f"[附件 {position}：类型={file_type}，名称={file_name}]"
         return {"type": "text", "text": text}
 
-    @staticmethod
-    def _replace_local_media_url(
-            parts: list[dict[str, Any]],
-            content: bytes,
-            mime_type: str,
-    ) -> None:
-        """将 URL 型多模态 part 中的本地地址替换为 Base64 Data URL。"""
-        data_url: str | None = None
-
-        def get_data_url() -> str:
-            nonlocal data_url
-            if data_url is None:
-                encoded = base64.b64encode(content).decode("ascii")
-                data_url = f"data:{mime_type};base64,{encoded}"
-            return data_url
-
-        for part in parts:
-            if not isinstance(part, dict):
-                continue
-            part_type = part.get("type")
-            if part_type == "image_url" and isinstance(part.get("image_url"), dict):
-                part["image_url"]["url"] = get_data_url()
-            elif part_type == "image" and isinstance(part.get("image"), str):
-                part["image"] = get_data_url()
-            elif part_type == "audio_url" and isinstance(part.get("audio_url"), dict):
-                part["audio_url"]["url"] = get_data_url()
-            elif part_type == "audio" and isinstance(part.get("audio"), str):
-                part["audio"] = get_data_url()
-            elif part_type == "video_url" and isinstance(part.get("video_url"), dict):
-                part["video_url"]["url"] = get_data_url()
-            elif part_type == "video" and isinstance(part.get("video"), str):
-                part["video"] = get_data_url()
-
     async def _process_trial_run_files(
-            cls,
+            self,
             files,
             multimodal_service,
             workspace_id: uuid.UUID,
-            tenant_id: uuid.UUID,
             input_modalities,
             language: str,
     ) -> list[dict[str, Any]]:
         """按请求顺序处理附件，对模型不支持的类型生成可见文本提示。"""
-        normalized_modalities = cls._normalize_modalities(input_modalities)
+        normalized_modalities = self._normalize_modalities(input_modalities)
         required_modalities = {
             FileType.IMAGE: "image",
             FileType.AUDIO: "audio",
@@ -1265,41 +1230,28 @@ class MemoryStorageService:
         for position, file in enumerate(files or [], start=1):
             required = required_modalities.get(file.type)
             if required and required not in normalized_modalities:
-                processed_parts.append(cls._file_marker_part(file, position, language))
-                processed_parts.append(cls._unsupported_file_part(file.type, language))
+                processed_parts.append(self._file_marker_part(file, position, language))
+                processed_parts.append(self._unsupported_file_part(file.type, language))
                 continue
 
-            local_media: tuple[bytes, str] | None = None
-            if file.transfer_method == TransferMethod.LOCAL_FILE:
+            is_uploaded_file = file.transfer_method == TransferMethod.LOCAL_FILE
+            if is_uploaded_file:
                 try:
-                    content, mime_type = await cls._load_trial_run_local_file(
-                        file,
-                        workspace_id,
-                        tenant_id,
-                    )
-                    if file.type in {FileType.IMAGE, FileType.AUDIO, FileType.VIDEO}:
-                        local_media = (content, mime_type)
-                except asyncio.CancelledError:
-                    raise
+                    file = await multimodal_service.resolve_uploaded_file_url(file, workspace_id)
                 except Exception:
                     logger.error(
-                        "[TRIAL_RUN_CHAT_STREAM] Failed to load local attachment: file_id=%s",
+                        "[TRIAL_RUN_CHAT_STREAM] Failed to resolve attachment URL: file_id=%s",
                         file.upload_file_id,
                         exc_info=True,
                     )
-                    processed_parts.append(cls._file_marker_part(file, position, language))
-                    processed_parts.append(cls._local_file_error_part(language))
+                    processed_parts.append(self._file_marker_part(file, position, language))
+                    processed_parts.append(self._local_file_error_part(language))
                     continue
 
             parts = await multimodal_service.process_files(
-                [file],
-                workspace_id=workspace_id,
-                document_image_recognition=False,
-                include_processing_errors=True,
+                [file], workspace_id=workspace_id, use_resolved_url=is_uploaded_file
             )
-            if local_media:
-                cls._replace_local_media_url(parts, *local_media)
-            processed_parts.append(cls._file_marker_part(file, position, language))
+            processed_parts.append(self._file_marker_part(file, position, language))
             processed_parts.extend(parts)
         return processed_parts
 
@@ -1383,8 +1335,11 @@ class MemoryStorageService:
             file,
             workspace_id: uuid.UUID,
             tenant_id: uuid.UUID,
+            *,
+            actor_id: UUID,
+            actor_kind: str,
     ) -> tuple[bytes, str]:
-        """校验本地附件归属并从配置的存储后端读取原始字节。"""
+        """Check attachment ownership before fetching bytes through file-service."""
         import magic
 
         metadata = await self.repository.metadata(
@@ -1392,12 +1347,17 @@ class MemoryStorageService:
         )
         if metadata is None:
             raise ValueError("local attachment is unavailable in the current workspace")
-        file_key = metadata.file_key
         metadata_content_type = metadata.content_type
         metadata_file_ext = metadata.file_ext
         metadata_file_name = metadata.file_name
 
-        content = await self.runtime.attachment_storage.backend.download(file_key)
+        content = await self.runtime.file_service.download(
+            file.upload_file_id,
+            workspace_id=workspace_id,
+            tenant_id=tenant_id,
+            actor_id=actor_id,
+            actor_kind=actor_kind,
+        )
         if not content:
             raise ValueError("local attachment is empty")
 
@@ -1420,6 +1380,9 @@ class MemoryStorageService:
             language: str = "zh",
             workspace_id: uuid.UUID | None = None,
             tenant_id: uuid.UUID | None = None,
+            *,
+            actor_id: UUID,
+            actor_kind: str,
     ) -> AsyncGenerator[str, None]:
         """按附件类型分别解析，再由文本模型合并生成流式回答。"""
         from src.services.model_config import ModelConfigService, ModelConfigurationError
@@ -1521,6 +1484,13 @@ class MemoryStorageService:
 
             config_workspace_id = memory_config.workspace_id
             config_tenant_id = memory_config.tenant_id
+            download_attachment = partial(
+                self.runtime.file_service.download,
+                workspace_id=config_workspace_id,
+                tenant_id=config_tenant_id,
+                actor_id=actor_id,
+                actor_kind=actor_kind,
+            )
 
             final_model_info = final_runtime
 
@@ -1547,12 +1517,15 @@ class MemoryStorageService:
 
                 model_info = runtime
                 # 附件在进入试运行前已经完成输入校验，加载与格式化异常不在这里转换为 LLM 错误。
-                multimodal_service = MultimodalService(self.repository, model_info, attachment_storage=self.runtime.attachment_storage)
+                multimodal_service = MultimodalService(
+                    self.repository, model_info,
+                    attachment_storage=self.runtime.attachment_storage,
+                    download_attachment=download_attachment,
+                )
                 parts = await self._process_trial_run_files(
                     [ref["file"] for ref in refs],
                     multimodal_service,
                     config_workspace_id,
-                    config_tenant_id,
                     model_info.input_modalities,
                     language,
                 )
@@ -1611,15 +1584,27 @@ class MemoryStorageService:
                 refs = attachment_groups[FileType.DOCUMENT]
                 documents: list[str] = []
                 # 文档字节在短会话关闭后下载和解析，避免长时间占用连接。
-                multimodal_service = MultimodalService(None, final_model_info, attachment_storage=self.runtime.attachment_storage)
+                multimodal_service = MultimodalService(
+                    self.repository, final_model_info,
+                    attachment_storage=self.runtime.attachment_storage,
+                    download_attachment=download_attachment,
+                )
                 for ref in refs:
                     file = ref["file"]
                     if file.transfer_method == TransferMethod.LOCAL_FILE:
-                        await self._load_trial_run_local_file(
-                            file,
-                            config_workspace_id,
-                            config_tenant_id,
-                        )
+                        try:
+                            file = await multimodal_service.resolve_uploaded_file_url(
+                                file, config_workspace_id
+                            )
+                        except Exception:
+                            logger.error(
+                                "[TRIAL_RUN_CHAT_STREAM] Failed to resolve document URL: file_id=%s",
+                                file.upload_file_id,
+                                exc_info=True,
+                            )
+                            error = self._local_file_error_part(language)
+                            documents.append(f"{attachment_label(ref)}\n{error['text']}")
+                            continue
                     text = await multimodal_service.extract_document_text(file)
                     documents.append(f"{attachment_label(ref)}\n{text}")
                 return {"text": "\n\n".join(documents), "tokens": 0}
@@ -1763,8 +1748,9 @@ class MemoryStorageService:
                 "message": "Configuration loading failed" if language == "en" else "配置读取失败",
             })
 
-    async def _pilot_snapshots(self, messages, config, views):
-        from pathlib import Path
+    async def _pilot_snapshots(
+        self, messages, config, views, *, actor_id: UUID, actor_kind: str
+    ):
         from types import SimpleNamespace
         from urllib.parse import unquote, urlparse
 
@@ -1773,7 +1759,20 @@ class MemoryStorageService:
 
         from src.common.prompt.prompt_utils import prompt_env
 
-        async def one(index, message, file):
+        download_attachment = partial(
+            self.runtime.file_service.download,
+            workspace_id=config.workspace_id,
+            tenant_id=config.tenant_id,
+            actor_id=actor_id,
+            actor_kind=actor_kind,
+        )
+
+        async def one(index, file_index, message, file):
+            failure = {
+                "message_index": index,
+                "file_index": file_index,
+                "file_type": file.type.value,
+            }
             try:
                 model_id = {
                     FileType.IMAGE: config.vision_model_id,
@@ -1783,17 +1782,32 @@ class MemoryStorageService:
                 }.get(file.type)
                 view = views.get(model_id)
                 if view is None:
-                    return None
+                    return None, {**failure, "code": "ATTACHMENT_MODEL_UNAVAILABLE"}
                 file = file.model_copy(deep=True)
-                media = MultimodalService(self.repository, view, attachment_storage=self.runtime.attachment_storage)
-                if file.transfer_method == TransferMethod.LOCAL_FILE:
+                media = MultimodalService(
+                    self.repository, view,
+                    attachment_storage=self.runtime.attachment_storage,
+                    download_attachment=download_attachment,
+                )
+                is_uploaded = file.transfer_method == TransferMethod.LOCAL_FILE
+                use_video_url = is_uploaded and file.type == FileType.VIDEO
+                processing_file = file
+                if use_video_url:
+                    processing_file = await media.resolve_uploaded_file_url(file, config.workspace_id)
+                    file.url = await media.get_file_url(file)
+                    file.name = processing_file.name
+                elif is_uploaded:
                     await self._load_trial_run_local_file(
-                        file, config.workspace_id, config.tenant_id
+                        file, config.workspace_id, config.tenant_id,
+                        actor_id=actor_id, actor_kind=actor_kind,
                     )
                     file.url = await media.get_file_url(file)
-                parts = await media.process_files([file], workspace_id=config.workspace_id)
+                parts = await media.process_files(
+                    [processing_file], workspace_id=config.workspace_id,
+                    include_processing_errors=False, use_resolved_url=use_video_url,
+                )
                 if not parts:
-                    return None
+                    return None, {**failure, "code": "ATTACHMENT_PROCESSING_FAILED"}
                 prompt = prompt_env.get_template("perceptual_summary_system.jinja2").render(
                     file_type=file.type,
                     language=langid.classify(message.content)[0] if message.content else "zh",
@@ -1863,23 +1877,26 @@ class MemoryStorageService:
                         "modalities": modalities,
                     },
                 )
-                return index, snapshot, file.type.value, file.url
+                return (index, snapshot, file.type.value, file.url), None
             except asyncio.CancelledError:
                 raise
             except Exception:
                 logger.warning(
                     "Pilot attachment processing failed: message_index=%s", index, exc_info=True
                 )
-                return None
+                return None, {**failure, "code": "ATTACHMENT_PROCESSING_FAILED"}
 
         tasks = [
-            one(index, message, file)
+            one(index, file_index, message, file)
             for index, message in enumerate(messages)
             if message.role == "user"
-            for file in message.files or []
+            for file_index, file in enumerate(message.files or [])
         ]
         results = await asyncio.gather(*tasks)
-        return [result for result in results if result is not None]
+        return (
+            [snapshot for snapshot, _ in results if snapshot is not None],
+            [failure for _, failure in results if failure is not None],
+        )
 
 
 
@@ -2042,6 +2059,8 @@ class MemoryStorageService:
         language: str = "zh",
         *,
         model_views=None,
+        actor_id: UUID,
+        actor_kind: str,
     ) -> None:
         """执行试运行模式的知识提取流水线（v0.3.13 QA 消息格式）。
 
@@ -2078,11 +2097,17 @@ class MemoryStorageService:
             step_start = time.time()
             await emit("perceptual_extract", "开始提取感知记忆", None)
 
-            perceptual_snapshots = await self._pilot_snapshots(messages, memory_config, model_views or {})
+            perceptual_snapshots, attachment_errors = await self._pilot_snapshots(
+                messages, memory_config, model_views or {},
+                actor_id=actor_id, actor_kind=actor_kind,
+            )
 
             await emit(
                 "perceptual_result", "感知记忆结果",
-                {"perceptual_nodes": _collect_perceptual_nodes_data(perceptual_snapshots)},
+                {
+                    "perceptual_nodes": _collect_perceptual_nodes_data(perceptual_snapshots),
+                    "attachment_errors": attachment_errors,
+                },
             )
             await emit("perceptual_complete", "感知记忆提取完成", {"count": len(perceptual_snapshots)})
             timing_logger.info("✓ %s: %.2fs", "Perceptual Snapshot Generation", time.time() - step_start)

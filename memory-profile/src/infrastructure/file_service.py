@@ -1,4 +1,4 @@
-"""Async client for the standalone file service (upload delegation).
+"""Async client for uploads and downloads through the standalone file service.
 
 memory-profile no longer owns object storage or writes ``file_metadata``: the
 ``file-service`` owns both. An upload is forwarded to the token-guarded internal
@@ -26,6 +26,7 @@ logger = logging.getLogger(__name__)
 
 #: Upload on file-service's token-guarded internal API.
 UPLOAD_PATH = "/internal/v1/files/upload"
+CONTENT_PATH = "/internal/v1/files/{file_id}/content"
 DEFAULT_CONTENT_TYPE = "application/octet-stream"
 
 
@@ -48,7 +49,7 @@ class FileServiceError(RuntimeError):
 
 
 class FileServiceClient:
-    """One file-service uploader per process."""
+    """One file-service client per process."""
 
     def __init__(
         self,
@@ -82,7 +83,7 @@ class FileServiceClient:
         actor_id: UUID,
         actor_kind: str,
     ) -> dict[str, str]:
-        """Authenticate one upload and carry the acting actor's identity.
+        """Authenticate one request and carry the acting actor's identity.
 
         The actor is the API-key id for a keyed caller, the same value the host
         passed as ``x-user-id`` / ``x-api-key-id``; ``X-Actor-Id`` is what the
@@ -97,6 +98,46 @@ class FileServiceClient:
         if workspace_id is not None:
             headers["X-Workspace-Id"] = str(workspace_id)
         return headers
+
+    def _http_client(self) -> httpx.AsyncClient:
+        return httpx.AsyncClient(
+            base_url=self._settings.file_service_base_url.rstrip("/"),
+            timeout=httpx.Timeout(
+                connect=2.0,
+                read=self._settings.file_service_read_timeout_seconds,
+                write=self._settings.file_service_write_timeout_seconds,
+                pool=None,
+            ),
+            transport=self._transport,
+            trust_env=False,
+        )
+
+    async def download(
+        self,
+        file_id: UUID,
+        *,
+        tenant_id: UUID,
+        workspace_id: UUID,
+        actor_id: UUID,
+        actor_kind: str,
+    ) -> bytes:
+        self._ensure_configured()
+        headers = self._headers(
+            tenant_id=tenant_id, workspace_id=workspace_id, actor_id=actor_id,
+            actor_kind=actor_kind,
+        )
+        try:
+            async with self._http_client() as client:
+                response = await client.get(CONTENT_PATH.format(file_id=file_id), headers=headers)
+                response.raise_for_status()
+        except httpx.HTTPStatusError as exc:
+            status = exc.response.status_code
+            raise FileServiceError(
+                f"File service returned HTTP {status}", status_code=404 if status == 404 else 502
+            ) from exc
+        except httpx.HTTPError as exc:
+            raise FileServiceError("File service is unavailable", status_code=503) from exc
+        return response.content
 
     async def upload(
         self,
@@ -128,20 +169,8 @@ class FileServiceClient:
         filename = getattr(file, "filename", None) or "upload"
         content_type = getattr(file, "content_type", None) or DEFAULT_CONTENT_TYPE
         files = {"file": (filename, content, content_type)}
-        timeout = httpx.Timeout(
-            connect=2.0,
-            read=self._settings.file_service_read_timeout_seconds,
-            write=self._settings.file_service_write_timeout_seconds,
-            pool=None,
-        )
-
         try:
-            async with httpx.AsyncClient(
-                base_url=self._settings.file_service_base_url.rstrip("/"),
-                timeout=timeout,
-                transport=self._transport,
-                trust_env=False,  # never send file bytes through an env proxy
-            ) as client:
+            async with self._http_client() as client:
                 response = await client.post(UPLOAD_PATH, headers=headers, files=files)
         except httpx.HTTPError as exc:
             raise FileServiceError(
@@ -176,7 +205,7 @@ class FileServiceClient:
         return {"file_id": file_id, "file_key": file_key}
 
     async def aclose(self) -> None:
-        """No persistent client: each upload owns its short-lived connection."""
+        """No persistent client: each request owns its short-lived connection."""
 
         return None
 
