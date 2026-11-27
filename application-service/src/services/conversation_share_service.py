@@ -16,6 +16,7 @@ from sqlalchemy.orm import Session
 
 from ..config import current_settings
 from ..errors import BizCode, BusinessException
+from ..memory.retrieval_trace.tool_steps import hydrate_message_meta
 from ..models.conversation_model import Conversation, Message
 from ..models.conversation_share_model import ConversationShare
 from ..utils.datetime_utils import to_timestamp_ms, utcnow_naive
