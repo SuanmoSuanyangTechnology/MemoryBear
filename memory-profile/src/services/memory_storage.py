@@ -1262,7 +1262,8 @@ class MemoryStorageService:
                 processed_parts.append(self._unsupported_file_part(file.type, language))
                 continue
 
-            if file.transfer_method == TransferMethod.LOCAL_FILE:
+            is_uploaded_file = file.transfer_method == TransferMethod.LOCAL_FILE
+            if is_uploaded_file:
                 try:
                     file = await multimodal_service.resolve_uploaded_file_url(file, workspace_id)
                 except Exception:
@@ -1275,16 +1276,9 @@ class MemoryStorageService:
                     processed_parts.append(self._local_file_error_part(language))
                     continue
 
-                if file.type == FileType.AUDIO:
-                    processed_parts.append(self._file_marker_part(file, position, language))
-                    processed_parts.append(multimodal_service.format_audio_url(file))
-                    continue
-                if multimodal_service.provider in {"bedrock", "anthropic"}:
-                    processed_parts.append(self._file_marker_part(file, position, language))
-                    processed_parts.append(self._unsupported_file_part(file.type, language))
-                    continue
-
-            parts = await multimodal_service.process_files([file], workspace_id=workspace_id)
+            parts = await multimodal_service.process_files(
+                [file], workspace_id=workspace_id, use_resolved_url=is_uploaded_file
+            )
             processed_parts.append(self._file_marker_part(file, position, language))
             processed_parts.extend(parts)
         return processed_parts

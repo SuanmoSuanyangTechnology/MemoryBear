@@ -493,6 +493,9 @@ class OpenAIFormatStrategy(MultimodalFormatStrategy):
                     "format": file_ext,
                 },
             }
+        except httpx.HTTPError as exc:
+            logger.error("Failed to fetch audio: %s", type(exc).__name__)
+            return False, {"type": "text", "text": "[Failed to download audio.]"}
         except Exception as e:
             logger.error(f"下载音频失败: {e}")
             return False, {
@@ -642,6 +645,8 @@ class MultimodalService:
         document_image_recognition: bool = False,
         include_processing_errors: bool = True,
         file_upload_config: dict[str, Any] | None = None,
+        *,
+        use_resolved_url: bool = False,
     ) -> list[dict[str, Any]]:
         """
         处理文件列表，返回 LLM 可用的格式
@@ -679,7 +684,7 @@ class MultimodalService:
             # 模型侧不可达的附件只能由本服务读取字节后随请求出站，绝不能把
             # FILE_LOCAL_SERVER_URL 或私有 OSS URL 交给模型回拉；公网可达的
             # URL 保持原样直传，不额外搬运字节。
-            if _requires_inline_bearer(file):
+            if not use_resolved_url and _requires_inline_bearer(file):
                 if file.type == FileType.VIDEO:
                     # 视频没有通用内联协议：远程存储直达对象地址后交给模型自行判断能否
                     # 拉取；本地磁盘无对象 URL，给出管理员可操作的提示。
@@ -904,10 +909,11 @@ class MultimodalService:
     ) -> FileInput:
         metadata = await self._get_local_file_metadata(file.upload_file_id, workspace_id)
         if isinstance(self.attachment_storage.backend, LocalStorage):
-            raise _file_error("试运行附件需要模型可访问的对象存储地址", BizCode.FILE_READ_ERROR)
-        url = await self._sign_attachment_url(metadata.file_key)
-        if urlparse(url).scheme not in {"http", "https"} or _model_cannot_reach_url(url):
-            raise _file_error("试运行附件地址不可访问", BizCode.FILE_READ_ERROR)
+            url = self._permanent_attachment_url(file.upload_file_id)
+        else:
+            url = await self._sign_attachment_url(metadata.file_key)
+        if not url:
+            raise _file_error("无法生成试运行附件地址", BizCode.FILE_READ_ERROR)
         file_type = metadata.content_type
         if file.type == FileType.AUDIO and metadata.file_ext:
             file_type = f"audio/{metadata.file_ext.lstrip('.').lower()}"
@@ -920,21 +926,10 @@ class MultimodalService:
             "size": metadata.file_size,
         })
 
-    def format_audio_url(self, file: FileInput) -> dict[str, Any]:
-        if self.provider != "dashscope":
-            return {"type": "text", "text": "[当前模型提供商未配置音频 URL 输入]"}
-        file_type = file.file_type or ""
-        if file_type.startswith("audio/"):
-            audio_format = file_type.split("/", 1)[1].split(";", 1)[0].lower()
-        else:
-            audio_format = urlparse(file.url).path.rsplit(".", 1)[-1].lower()
-        return {
-            "type": "input_audio",
-            "input_audio": {
-                "data": file.url,
-                "format": OPENAI_AUDIO_FORMAT_ALIASES.get(audio_format, audio_format),
-            },
-        }
+    @staticmethod
+    def _permanent_attachment_url(file_id: uuid.UUID) -> str:
+        server_url = get_settings().file_local_server_url.rstrip("/")
+        return f"{server_url}/storage/permanent/{file_id}"
 
     async def get_file_url(self, file: FileInput) -> str:
         """
@@ -961,8 +956,7 @@ class MultimodalService:
                 raise _file_error(f"文件不存在或已删除: {file_id}", BizCode.NOT_FOUND)
 
             # 返回永久URL
-            server_url = get_settings().file_local_server_url
-            return f"{server_url}/storage/permanent/{file_id}"
+            return self._permanent_attachment_url(file_id)
 
     async def extract_document_text(self, file: FileInput) -> str:
         """
