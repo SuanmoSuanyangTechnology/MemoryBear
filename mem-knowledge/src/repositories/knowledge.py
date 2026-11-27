@@ -247,6 +247,7 @@ async def get_knowledges_by_parent_ids_async(
     db: AsyncSession,
     parent_ids: list[uuid.UUID],
     workspace_id: uuid.UUID,
+    status: int | None = None,
 ) -> list[Knowledge]:
     if not parent_ids:
         return []
@@ -254,7 +255,7 @@ async def get_knowledges_by_parent_ids_async(
         select(Knowledge).where(
             Knowledge.parent_id.in_(parent_ids),
             Knowledge.workspace_id == workspace_id,
-            Knowledge.status != 2,
+            Knowledge.status == status if status is not None else Knowledge.status != 2,
             Knowledge.permission_id != PermissionType.Memory,
         )
     )
