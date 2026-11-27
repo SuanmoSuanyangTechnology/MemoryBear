@@ -65,7 +65,16 @@ class ReadContextFactory:
                 reason="memory_config_missing",
             )
         config = await self._configs.load_config(resolved_config_id)
-        if config is None:
+        if config is None or (
+            config_id is not None
+            and (
+                config.workspace_id != principal.workspace_id
+                or (
+                    principal.tenant_id is not None
+                    and config.tenant_id != principal.tenant_id
+                )
+            )
+        ):
             raise ReadConfigUnavailableError(
                 "Memory configuration not found", reason="memory_config_not_found"
             )
