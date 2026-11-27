@@ -1,6 +1,6 @@
 """Minimal read projections for dashboard counters owned by the API host."""
 
-from sqlalchemy import Boolean, Column, DateTime, Integer, String
+from sqlalchemy import Boolean, Column, DateTime, Integer
 from sqlalchemy.dialects.postgresql import UUID
 
 from src.models.base import ReadOnlyBase
@@ -36,10 +36,6 @@ class DashboardApiKey(ReadOnlyBase):
     __tablename__ = "api_keys"
     id = Column(UUID(as_uuid=True), primary_key=True)
     workspace_id = Column(UUID(as_uuid=True), nullable=False)
-    type = Column(String(50), nullable=False)
-    resource_id = Column(UUID(as_uuid=True), nullable=True)
-    is_active = Column(Boolean, nullable=False)
-    expires_at = Column(DateTime, nullable=True)
 
 
 class DashboardApiKeyLog(ReadOnlyBase):

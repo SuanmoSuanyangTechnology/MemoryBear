@@ -10,7 +10,6 @@ SERVICE_ROOT = Path(__file__).resolve().parents[1]
 FORBIDDEN_IMPORT_ROOTS = {"api", "app"}
 READ_ONLY_PG_REPOSITORIES = {
     SERVICE_ROOT / "src/repositories/conversation_detail.py",
-    SERVICE_ROOT / "src/repositories/service_key.py",
     SERVICE_ROOT / "src/repositories/operations.py",
     SERVICE_ROOT / "src/repositories/dashboard.py",
     SERVICE_ROOT / "src/repositories/emotion_analytics.py",

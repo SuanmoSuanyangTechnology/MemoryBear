@@ -65,7 +65,6 @@ class ProfileRuntime:
         self.emotion_reply = EmotionReplyService(
             self.emotion_classifier.predict,
             self.memory_enterprise.emotion_policy,
-            postgres=self.postgres,
             policy_enabled=self.memory_enterprise.enabled,
         )
         self.http_metrics = HttpMetrics()

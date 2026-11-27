@@ -150,8 +150,8 @@ Required direct-mode headers are `x-tenant-id`, `x-workspace-id`, `x-source`, an
 
 Emotion reply accepts the Gateway's verified API-key token or the API proxy's
 trusted identity headers. Both entry points require the `memory` scope.
-Memory-profile checks that the key is an active, unexpired service key bound
-to the authenticated workspace and tenant before running classification.
+Memory-profile uses the authenticated tenant and workspace to look up the
+emotion reply policy.
 With `MEMORY_ENTERPRISE_BASE_URL` and `MEMORY_INTERNAL_TOKEN` configured,
 memory-profile sends the emotion code to memory-enterprise after BERT classification.
 memory-enterprise compares the token against its own `MEMORY_INTERNAL_TOKEN` and
