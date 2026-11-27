@@ -20,6 +20,7 @@ from typing import Annotated, Any
 from fastapi import APIRouter, Body, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 
+from src.common.errors import BizCode, ProfileError
 from src.common.external_api import external_api
 from src.common.responses import ApiResponse
 from src.middleware.auth import SOURCE_INTERNAL, MemoryPrincipal
@@ -78,8 +79,8 @@ async def read_prediction_statements(
     context: Context,
     body: PredictionStatementReadBody,
 ) -> SyncResponse:
-    if context.source != SOURCE_INTERNAL:
-        raise HTTPException(status_code=403, detail="user context is required")
+    if context.source != SOURCE_INTERNAL or context.actor_kind != "actor":
+        raise ProfileError(BizCode.FORBIDDEN, "User authentication required", status_code=403)
     return await _handler(request).read_prediction_statements(request, context, body)
 
 
