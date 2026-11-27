@@ -9,12 +9,12 @@ import SliderInput from '@/components/SliderInput';
 import SwitchFormItem from '@/components/FormItem/SwitchFormItem';
 import { stringRegExp } from '@/utils/validator';
 import {
-  DELIMITER_OPTIONS,
   IndexingStrategy,
   horizontalClassNames,
   modelFields,
   parentChunkModeOptions,
 } from './constants';
+import DelimiterSelect from './DelimiterSelect';
 import type { V1WorkspaceModels } from '@/views/KnowledgeBase/typesV1';
 import type { Model } from '@/views/ModelManagement/types';
 import type { CreateKbFormValues } from './types';
@@ -446,7 +446,7 @@ const ChunkSection = ({ active }: SectionProps) => {
                 label={<FieldLabel title={t('knowledgeBase.createModal.parentChunkDelimiter')} desc={t('knowledgeBase.createModal.parentChunkDelimiterDesc')} />}
                 className={horizontalClassNames}
               >
-                <Select mode="multiple" options={DELIMITER_OPTIONS.map((o) => ({ ...o, label: t(o.label) }))} />
+                <DelimiterSelect />
               </Form.Item>
             </>
           )}
@@ -464,7 +464,7 @@ const ChunkSection = ({ active }: SectionProps) => {
             label={<FieldLabel title={t('knowledgeBase.createModal.childChunkDelimiter')} desc={t('knowledgeBase.createModal.childChunkDelimiterDesc')} />}
             className={horizontalClassNames}
           >
-            <Select mode="multiple" options={DELIMITER_OPTIONS.map((o) => ({ ...o, label: t(o.label) }))} />
+            <DelimiterSelect />
           </Form.Item>
         </>
       )}
@@ -492,7 +492,7 @@ const ChunkSection = ({ active }: SectionProps) => {
             label={<FieldLabel title={t('knowledgeBase.createModal.delimiter')} desc={t('knowledgeBase.createModal.delimiterDesc')} />}
             className={horizontalClassNames}
           >
-            <Select mode="multiple" options={DELIMITER_OPTIONS.map((o) => ({ ...o, label: t(o.label) }))} />
+            <DelimiterSelect />
           </Form.Item>
         </>
       )}

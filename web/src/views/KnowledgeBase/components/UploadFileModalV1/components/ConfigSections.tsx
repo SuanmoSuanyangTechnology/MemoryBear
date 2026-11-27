@@ -7,11 +7,11 @@ import RadioGroupCard from '@/components/RadioGroupCard';
 import SwitchFormItem from '@/components/FormItem/SwitchFormItem';
 import type { Model } from '@/views/ModelManagement/types';
 import {
-  DELIMITER_OPTIONS,
   horizontalClassNames,
   multimodalFields,
   parentChunkModeOptions,
 } from '../../CreateKnowledgeBaseModal/constants';
+import DelimiterSelect from '../../CreateKnowledgeBaseModal/DelimiterSelect';
 import type { UploadFormValues } from '../types';
 
 interface SectionProps {
@@ -118,7 +118,7 @@ const ChunkSection = ({ active, isParentChildMode }: SectionProps & { isParentCh
                 label={<FieldLabel title={t('knowledgeBase.createModal.parentChunkDelimiter')} desc={t('knowledgeBase.createModal.parentChunkDelimiterDesc')} />}
                 className={horizontalClassNames}
               >
-                <Select mode="multiple" options={DELIMITER_OPTIONS.map((o) => ({ ...o, label: t(o.label) }))} />
+                <DelimiterSelect />
               </Form.Item>
             </>
           )}
@@ -136,7 +136,7 @@ const ChunkSection = ({ active, isParentChildMode }: SectionProps & { isParentCh
             label={<FieldLabel title={t('knowledgeBase.createModal.childChunkDelimiter')} desc={t('knowledgeBase.createModal.childChunkDelimiterDesc')} />}
             className={horizontalClassNames}
           >
-            <Select mode="multiple" options={DELIMITER_OPTIONS.map((o) => ({ ...o, label: t(o.label) }))} />
+            <DelimiterSelect />
           </Form.Item>
         </>
       )}
@@ -164,7 +164,7 @@ const ChunkSection = ({ active, isParentChildMode }: SectionProps & { isParentCh
             label={<FieldLabel title={t('knowledgeBase.createModal.delimiter')} desc={t('knowledgeBase.createModal.delimiterDesc')} />}
             className={horizontalClassNames}
           >
-            <Select mode="multiple" options={DELIMITER_OPTIONS.map((o) => ({ ...o, label: t(o.label) }))} />
+            <DelimiterSelect />
           </Form.Item>
         </>
       )}
