@@ -1,0 +1,71 @@
+.directory-tree.directory-tree,
+.directory-tree .ant-tree {
+  background: transparent !important;
+  background-color: transparent !important;
+}
+
+.directory-tree .ant-tree-node-content-wrapper {
+  height: 36px !important;
+  display: flex !important;
+  align-items: center !important;
+  padding: 0 8px !important;
+  border-radius: 4px;
+  background: transparent !important;
+  color: #171719 !important;
+  flex: 1 !important;
+  min-width: 0 !important;
+  transition: background-color 0.2s ease !important;
+}
+
+.directory-tree .ant-tree-node-content-wrapper:hover {
+  background: #f7f9fc !important;
+}
+
+.directory-tree .ant-tree-node-selected,
+.directory-tree .ant-tree-node-selected:hover {
+  background: #f2f4f7 !important;
+  color: #171719 !important;
+}
+
+.directory-tree .ant-tree-switcher {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  width: 16px !important;
+  height: 36px !important;
+  line-height: 36px !important;
+  flex-shrink: 0 !important;
+  margin-inline-end: 0 !important;
+}
+
+.directory-tree .ant-tree-switcher::before {
+  background: transparent !important;
+}
+
+.directory-tree .ant-tree-switcher img,
+.directory-tree .ant-tree-switcher .ant-tree-switcher-icon {
+  transition: transform 0.3s ease !important;
+  transform: rotate(0deg) !important;
+}
+
+.directory-tree .ant-tree-switcher_open img,
+.directory-tree .ant-tree-switcher_open .ant-tree-switcher-icon {
+  transform: rotate(90deg) !important;
+}
+
+.directory-tree .ant-tree-title {
+  flex: 1 !important;
+  min-width: 0 !important;
+}
+
+.directory-tree .folder-actions {
+  display: none !important;
+}
+
+.directory-tree .ant-tree-node-content-wrapper:hover .folder-actions {
+  display: flex !important;
+}
+
+.directory-tree .ant-tree-child-tree {
+  margin: 0 !important;
+}

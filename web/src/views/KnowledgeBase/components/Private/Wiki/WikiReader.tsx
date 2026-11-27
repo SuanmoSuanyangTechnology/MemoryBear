@@ -2,10 +2,11 @@ import { type FC, type MouseEvent } from 'react';
 import { Breadcrumb, Button, Flex } from 'antd';
 import { useWikiPageDetail } from '../hooks/useWikiPageDetail';
 import { useTranslation } from 'react-i18next';
+import { useNavigate } from 'react-router-dom';
 
 import WikiCatalog from './WikiCatalog';
 import type { BreadcrumbPath } from '@/hooks/useBreadcrumbManager';
-import type { KnowledgeBaseListItem } from '@/views/KnowledgeBase/types';
+import type { V1KnowledgeListItem } from '@/views/KnowledgeBase/typesV1';
 import { WIKI_CATALOG_PAGE_ID, WIKI_SUMMARY_PAGE_ID, type WikiPage, type WikiPageDetail } from './types';
 import DirectoryToggle from '../DirectoryToggle';
 import Empty from '@/components/Empty';
@@ -13,7 +14,7 @@ import WikiArticle from './WikiArticle';
 
 interface WikiReaderProps {
   breadcrumbPath: BreadcrumbPath;
-  knowledgeBase: KnowledgeBaseListItem;
+  knowledgeBase: V1KnowledgeListItem;
   page?: WikiPage;
   initialDetail?: WikiPageDetail;
   summaryMode?: boolean;
@@ -27,7 +28,6 @@ interface WikiReaderProps {
   error: boolean;
   onOpenGraph: () => void;
   onOpenFiles: () => void;
-  onOpenKnowledgeBaseSettings: (step?: number) => void;
   onPageSelect: (pageId: string) => void;
 }
 
@@ -44,12 +44,12 @@ const WikiReader: FC<WikiReaderProps> = ({
   error,
   onOpenGraph,
   onOpenFiles,
-  onOpenKnowledgeBaseSettings,
   onPageSelect,
   directoryCollapsed,
   onToggleDirectory,
 }) => {
   const { t } = useTranslation();
+  const navigate = useNavigate();
   const pageId = page?.id;
   const isSummary = pageId === WIKI_SUMMARY_PAGE_ID;
   const isCatalog = pageId === WIKI_CATALOG_PAGE_ID || isSummary;
@@ -105,7 +105,7 @@ const WikiReader: FC<WikiReaderProps> = ({
     />
   );
 
-  const wikiDisabled = !knowledgeBase?.parser_config?.wiki?.enabled;
+  const wikiDisabled = !['rag_wiki', 'wiki'].includes(knowledgeBase?.index_strategy as string);
   const noSourceFiles = !(knowledgeBase.doc_num ?? 0);
 
   if (loading || error || wikiDisabled || noSourceFiles || !page) {
@@ -149,8 +149,8 @@ const WikiReader: FC<WikiReaderProps> = ({
                 </Button>
               )}
               {wikiDisabled && (
-                <Button type="primary" onClick={() => onOpenKnowledgeBaseSettings(2)}>
-                  {t('knowledgeBase.privateWiki.configure')}
+                <Button type="primary" onClick={() => navigate('/knowledge-base')}>
+                  {t('knowledgeBase.createNewKnowledgeBase')}
                 </Button>
               )}
             </Flex>

@@ -51,31 +51,31 @@ export interface PageResponse {
   total: number;
   hasnext: boolean;
 }
-// Wiki 目录树（逐层分页）
+// Wiki directory tree (paginated level by level)
 export type PageType = 'summary' | 'entity' | 'concept';
 
-// 支持单个类型或最多三个类型的逗号分隔组合。
+// Supports a single type or a comma-separated combination of up to three types.
 export type PageTypesQuery = PageType | `${PageType},${PageType}` | `${PageType},${PageType},${PageType}`;
 export interface  WikiTreeQuery {
   /**
-   * 父级目录
+   * Parent directory
    */
   folder_id?: string;
   /**
-   * 逗号分隔：summary、entity、concept；
-   * 省略表示全部。
-   * Wiki 页签传 entity,concept
-   * 摘要页签传 summary。
+   * Comma-separated: summary, entity, concept;
+   * omit to mean all.
+   * The Wiki tab passes entity,concept;
+   * the summary tab passes summary.
    */
   page_types?: PageTypesQuery;
   /**
-   * 页码，从 1 开始；
-   * 目录树按当前 folder_id 和 page_types 独立分页。
+   * Page number, starting from 1;
+   * the directory tree is paginated independently by the current folder_id and page_types.
    */
   page?: number;
   /**
-   * 每页条数，默认 50，上限 200；
-   * 目录树按直属目录节点和页面节点合计。
+   * Page size, default 50, up to 200;
+   * the directory tree counts direct folder nodes and page nodes together.
    */
   pagesize?: number;
 }
@@ -87,7 +87,7 @@ export interface WikiTreeItem {
   page_type: PageType
   version: number;
 
-  // node_kind = folder 时，存在下面字段
+  // Present when node_kind = folder
   has_children?: boolean;
   page_count?: number;
 }
@@ -97,7 +97,7 @@ export interface WikiTreeResponse {
   page: PageResponse
 }
 
-// Wiki 索引与统计
+// Wiki index and statistics
 export interface WikiIndexFolder {
   id: string;
   name: string;
@@ -114,27 +114,27 @@ export interface WikiIndexResponse {
   folders: WikiIndexFolder[]
 }
 
-// Wiki 页面列表与搜索
+// Wiki page list and search
 export interface WikiPagesQuery {
   /**
-   * 按标题或简述执行不区分大小写的包含搜索；
-   * 默认空字符串，不搜索正文。
+   * Case-insensitive contains search on title or summary;
+   * defaults to an empty string, does not search the body.
    */
   keyword?: string;
   /**
-   * 逗号分隔：summary、entity、concept；
-   * 省略表示全部。
-   * Wiki 页签传 entity,concept
-   * 摘要页签传 summary。
+   * Comma-separated: summary, entity, concept;
+   * omit to mean all.
+   * The Wiki tab passes entity,concept;
+   * the summary tab passes summary.
    */
   page_types?: PageTypesQuery;
   /**
-   * 页码，从 1 开始。
+   * Page number, starting from 1.
    */
   page?: number;
   /**
-   * 每页页面条数
-   * 默认 50，上限 200。
+   * Page size.
+   * Default 50, up to 200.
    */
   pagesize?: number;
   /** Filter by source document, used by the file list "Related Wiki" drawer */
@@ -160,7 +160,7 @@ export interface WikiPagesResponse {
   page: PageResponse;
 }
 
-// Wiki 页面详情与来源
+// Wiki page detail and sources
 export interface SourceItem {
   ref: string;
   document_id: string;
@@ -189,28 +189,28 @@ export interface WikiPageDetail {
     reason: string;
 }
 
-// Wiki 页面关系图
+// Wiki page relation graph
 export interface WikiGraphQuery {
   /**
-   * overview=全局概览；ego=中心页面邻域。
+   * overview=global overview; ego=neighborhood of the center page.
    */
   mode: 'overview' | 'ego';
   /**
-   * ego 模式必填；overview 模式可省略。
+   * Required in ego mode; may be omitted in overview mode.
    */
   center_page_id?: string;
   /**
-   * 逗号分隔 summary/entity/concept；
-   * 注意图谱参数名为 types，不是 page_types。
+   * Comma-separated summary/entity/concept;
+   * note that the graph parameter is named types, not page_types.
    */
   types?: PageTypesQuery;
   /**
-   * ego 扩展深度，默认 1，最多 2。
+   * ego expansion depth, default 1, max 2.
    */
   depth?: number;
   /**
-   * 请求节点数上限；
-   * 实际还受服务端节点预算限制，边另有独立预算。
+   * Requested node count upper limit;
+   * in practice it is also capped by the server-side node budget, and edges have a separate budget.
    */
   limit?: number;
 }

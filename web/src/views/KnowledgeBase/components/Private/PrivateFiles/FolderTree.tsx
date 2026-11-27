@@ -99,11 +99,10 @@ const buildTreeNodes = async (
   if (!currentParent) return [];
 
   // Only request current level data once, no pagination
-  const response = await getFolderList({ 
-    kb_id: kbId, 
-    parent_id: currentParent, 
+  const response = await getFolderList(kbId, currentParent || kbId, {
     page: 1, 
-    pagesize: 1000 
+    pagesize: 100,
+    file_ext: 'folder',
   } as any);
   
   const rawItems = extractItems(response);

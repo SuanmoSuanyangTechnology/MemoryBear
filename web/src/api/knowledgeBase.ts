@@ -1,11 +1,8 @@
 import { request, cookieUtils } from "@/utils/request";
-import type { AxiosProgressEvent } from "axios";
 import type {
   ShareRequestParams,
   SpaceItem,
-  UploadFileFormData,
   FolderFormData,
-  UploadFileResponse,
   KnowledgeBase,
   KnowledgeBaseFormData,
   ListQuery,
@@ -25,27 +22,6 @@ export interface WikiRevision {
 export type WikiRevisionSummary = Omit<WikiRevision, 'markdown'>;
 
 
-//获取知识库类型 (返回字符串数组，每个字符串是 KnowledgeBase 的 type 值)
-export const getKnowledgeBaseTypeList = async (): Promise<string[]> => {
-  const response = await request.get(`/knowledges/knowledgetype`);
-  // 如果直接返回字符串数组，直接返回
-  if (Array.isArray(response)) {
-    return response.map(item => {
-      // 如果是字符串，直接返回
-      if (typeof item === 'string') {
-        return item;
-      }
-      // 如果是对象且有 type 字段，提取 type 值
-      if (typeof item === 'object' && item !== null && 'type' in item) {
-        return String(item.type);
-      }
-      // 其他情况转换为字符串
-      return String(item);
-    });
-  }
-  // 如果不是数组，返回空数组
-  return [];
-};
 // 获取文件地址
 export const getFileUrl = (fileId: string) => {
   return `/files/${fileId}`;
@@ -55,20 +31,6 @@ export const getFileUrl = (fileId: string) => {
 export const getKnowledgeBaseListUrl = '/knowledges/knowledges';
 export const getKnowledgeBaseList = (query?: ListQuery) => {
   return request.get(getKnowledgeBaseListUrl, query);
-};
-// 知识库详情
-export const getKnowledgeBaseDetail = async (id: string) => {
-  const response = await request.get(`/knowledges/${id}`);
-  return response as KnowledgeBase;
-};
-// 创建知识库
-export const createKnowledgeBase = async (data: KnowledgeBaseFormData) => {
-  const payload: KnowledgeBaseFormData = {
-    ...data,
-    permission_id: data.permission_id ?? 'private',
-  };
-  const response = await request.post(`/knowledges/knowledge`, payload);
-  return response as KnowledgeBase;
 };
 // 更新知识库
 export const updateKnowledgeBase = async (id: string, data: KnowledgeBaseFormData) => {
@@ -95,9 +57,8 @@ export const getShareSpaceList = async (id: string) => {
 }
 
 // 获取文件夹列表
-export const getFolderList = async (query: FolderFormData) => { 
-  const id = query.parent_id ?? query.kb_id;
-  const response = await request.get(`/files/${query.kb_id}/${id}/files`);
+export const getFolderList = async (kb_id: string, id: string, query: FolderFormData) => {
+  const response = await request.get(`/files/${kb_id}/${id}/files`, query);
   return response as any;
 };
 // 创建文件夹
@@ -106,38 +67,6 @@ export const createFolder = async (params: FolderFormData) => {
     params,
   });
   return response as FolderFormData;
-};
-interface UploadFileOptions {
-  kb_id?: string;
-  parent_id?: string;
-  onUploadProgress?: (event: AxiosProgressEvent) => void;
-  signal?: AbortSignal;
-}
-// 上传文件
-export const uploadFile = async (data: FormData, options?: UploadFileOptions) => {
-  const { kb_id, parent_id, onUploadProgress, signal } = options || {};
-  const params: Record<string, string> = {};
-  if (kb_id) params.kb_id = kb_id;
-  if (parent_id) params.parent_id = parent_id;
-  const response = await request.uploadFile(`/files/v1/file`, data, {
-    params,
-    onUploadProgress,
-    signal,
-  });
-  return response as UploadFileResponse;
-};
-// 上传 QA 文件
-export const uploadQaFile = async (data: FormData, options?: UploadFileOptions) => {
-  const { kb_id, parent_id, onUploadProgress, signal } = options || {};
-  const params: Record<string, string> = {};
-  if (kb_id) params.kb_id = kb_id;
-  if (parent_id) params.parent_id = parent_id;
-  const response = await request.uploadFile(`/chunks/v1/${kb_id}/import_qa`, data, {
-    params,
-    onUploadProgress,
-    signal,
-  });
-  return response as UploadFileResponse;
 };
 
 // 下载文件
@@ -178,33 +107,12 @@ export const downloadFile = async (fileId: string, fileName?: string, original?:
     throw error;
   }
 };
-// 更新文件信息
-export const updateFile = async (id: string, data: UploadFileFormData) => {
-  const response = await request.put(`/files/${id}`, data);
-  return response as UploadFileResponse;
-};
 // 删除文件 文件夹 id
 export const deleteFile = async (id: string) => {
   const response = await request.delete(`/files/${id}`);
   return response as any;
 };
 
-// 获取文档列表
-export const getDocumentListUrl = (kb_id:string) => `/documents/${kb_id}/documents`
-export const getDocumentList = async (kb_id:string, query: PathQuery) => {
-  const response = await request.get(getDocumentListUrl(kb_id), query);
-  return response as KnowledgeBaseDocumentData[];
-};
-// 文档详情
-export const getDocumentDetail = async (id: string) => {
-  const response = await request.get(`/documents/${id}`);
-  return response as KnowledgeBaseDocumentData;
-};
-// 创建文档
-export const createDocument = async (data: KnowledgeBaseDocumentData) => {
-  const response = await request.post(`/documents/document`, data);
-  return response as KnowledgeBaseDocumentData;
-};
 // 自定义文档上传并创建
 export const createDocumentAndUpload = async ( data: any, params: PathQuery) => {
   const response = await request.post(`/files/customtext`, data, { params } );
