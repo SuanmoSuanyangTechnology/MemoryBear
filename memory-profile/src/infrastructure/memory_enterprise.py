@@ -226,6 +226,30 @@ class MemoryEnterpriseManager:
         names = payload.get("names") if isinstance(payload, dict) else None
         return {str(key): str(value) for key, value in (names or {}).items()}
 
+    async def scene_ids(
+        self, *, tenant_id: UUID, scene_names: list[str]
+    ) -> dict[str, str]:
+        """Scene name → id for the tenant's own scenes (enterprise-owned).
+
+        The reverse of :meth:`scene_names`; the end-user merge uses it to key
+        legacy ``domain_specific_info`` entries by the canonical scene type id,
+        exactly like the enterprise ``memory.ontology_query`` plugin.
+        """
+
+        if not scene_names:
+            return {}
+        if not self.enabled:
+            return {}
+        response = await (await self.client()).post(
+            "/internal/v1/ontology/scene-ids",
+            headers=self._auth_headers(tenant_id=tenant_id),
+            json={"scene_names": scene_names},
+        )
+        response.raise_for_status()
+        payload = response.json()
+        ids = payload.get("ids") if isinstance(payload, dict) else None
+        return {str(key): str(value) for key, value in (ids or {}).items()}
+
     async def field_labels(
         self, *, tenant_id: UUID, scene_ids: list[str]
     ) -> dict[str, dict[str, str]]:

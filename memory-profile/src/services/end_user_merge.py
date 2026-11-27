@@ -4,8 +4,10 @@ The API's ``EndUserService.merge_end_users`` split into stages:
 
 1. validate source/target rows and the workspace boundary while holding the
    per-user ``memory_write:<id>`` Redis locks;
-2. commit the soft-delete, the ``end_user_merge`` intent and the rebuilt target
-   profile in ONE transaction (the old id then routes to the target);
+2. commit the soft-delete, the ``end_user_merge`` intent, the rebuilt target
+   profile and — for a write-triggered merge — the source's identity stamp in
+   ONE transaction (the old id then routes to the target, and a failed merge
+   never leaves a source "confirmed" without the matching edge);
 3. migrate ownership: graph nodes via Neo4j or messages via RAG;
 4. move the PG reference rows;
 5. publish ``app.tasks.do_layer2_reflection`` to the API worker (graph only).
@@ -20,6 +22,7 @@ import asyncio
 import logging
 import uuid
 from collections.abc import Awaitable, Callable
+from contextlib import nullcontext
 from dataclasses import dataclass
 from typing import Any
 
@@ -106,6 +109,22 @@ class MergeOutcome:
     end_user_id: str
 
 
+@dataclass(frozen=True, slots=True)
+class IdentityStamp:
+    """The source row's identity values for a write-triggered merge.
+
+    The API writes these inside the merge-intent transaction (``flush`` before
+    ``_merge_end_users_locked``), so a failed merge rolls them back and the
+    next write retries the merge. Carrying them here keeps that transaction
+    boundary instead of committing the stamp in a separate one.
+    """
+
+    workspace_id: uuid.UUID
+    end_user_id: uuid.UUID
+    identity_features: str
+    identity_status: str = "confirmed"
+
+
 class EndUserMergeService:
     def __init__(
         self,
@@ -139,7 +158,11 @@ class EndUserMergeService:
         return self._graph_merge is not None and self._rag_merge is not None
 
     async def merge(
-        self, source: set[uuid.UUID], target: uuid.UUID
+        self,
+        source: set[uuid.UUID],
+        target: uuid.UUID,
+        *,
+        identity: IdentityStamp | None = None,
     ) -> MergeOutcome:
         if not source:
             raise MergeRejected("No source user provided.")
@@ -150,13 +173,29 @@ class EndUserMergeService:
                 "graph/RAG merge adapters are not wired; refusing a half-merge"
             )
 
-        locks = await acquire_memory_write_locks(
-            self._settings, {target, *source}
-        )
+        locks: list[Any] = []
         try:
-            storage_type, workspace_id = await self._commit_merge_intent(
-                source, target, locks
-            )
+            if identity is not None:
+                # The API's lock order for an identity merge: the advisory lock
+                # first (so it can never deadlock against an API process that
+                # holds it and waits for the write locks), then the per-user
+                # write locks, then the FOR UPDATE re-read — all inside the
+                # transaction that commits the intent and the identity stamp.
+                async with self._postgres.session() as session:
+                    await self._lock_identity(session, identity)
+                    locks = await acquire_memory_write_locks(
+                        self._settings, {target, *source}
+                    )
+                    storage_type, workspace_id = await self._commit_merge_intent(
+                        source, target, locks, identity=identity, intent_session=session
+                    )
+            else:
+                locks = await acquire_memory_write_locks(
+                    self._settings, {target, *source}
+                )
+                storage_type, workspace_id = await self._commit_merge_intent(
+                    source, target, locks
+                )
 
             source_ids = sorted(str(value) for value in source)
             if storage_type == "rag":
@@ -171,7 +210,8 @@ class EndUserMergeService:
                 storage_type, target, workspace_id, source
             )
         finally:
-            await release_memory_write_locks(locks)
+            if locks:
+                await release_memory_write_locks(locks)
 
         logger.info(
             "[merge_end_users] 完成: source=%s target=%s storage=%s",
@@ -181,16 +221,36 @@ class EndUserMergeService:
         )
         return MergeOutcome(end_user_id=target.hex)
 
+    @staticmethod
+    async def _lock_identity(session: Any, identity: IdentityStamp) -> None:
+        """Transaction-scoped identity lock, on the API's exact key.
+
+        ``pg_advisory_xact_lock`` is re-entrant inside one transaction, so
+        calling it again when the intent session is reused is harmless.
+        """
+
+        await session.execute(
+            sa.text("SELECT pg_advisory_xact_lock(hashtextextended(:key, 0))"),
+            {"key": f"eu_identity:{identity.workspace_id}|{identity.identity_features}"},
+        )
+
     async def _commit_merge_intent(
         self,
         source: set[uuid.UUID],
         target: uuid.UUID,
         locks: list[Any],
+        *,
+        identity: IdentityStamp | None = None,
+        intent_session: Any | None = None,
     ) -> tuple[str, uuid.UUID]:
         """Validate everything, then commit soft-delete + intent + profile."""
 
         repository = EndUserMergeRepository
-        async with self._postgres.session() as session:
+        if intent_session is not None:
+            manager: Any = nullcontext(intent_session)
+        else:
+            manager = self._postgres.session()
+        async with manager as session:
             source_users: dict[uuid.UUID, EndUser] = {}
             for end_user_id in source:
                 user = await repository.get_end_user_any(session, end_user_id)
@@ -246,6 +306,36 @@ class EndUserMergeService:
                         f"Inactive source user {source_id} has no matching merge intent.",
                         reason="conflict",
                     )
+
+            if identity is not None:
+                # Write-triggered merge: the candidate is re-read under a row
+                # lock (the API's second guard) and the identity columns are
+                # written in this transaction, so a later failure rolls them
+                # back with the intent instead of leaving the source
+                # "confirmed" forever.
+                if identity.end_user_id not in source:
+                    raise MergeRejected(
+                        "Identity subject is not a merge source.", reason="conflict"
+                    )
+                if intent_session is None:
+                    await self._lock_identity(session, identity)
+                current = await repository.get_active_by_identity(
+                    session,
+                    workspace_id=workspace_id,
+                    identity_features=identity.identity_features,
+                    for_update=True,
+                )
+                if current is None or current.id != target:
+                    raise MergeRejected(
+                        "Identity merge target changed during lock acquisition.",
+                        reason="conflict",
+                    )
+                await repository.stamp_identity(
+                    session,
+                    end_user_id=identity.end_user_id,
+                    identity_features=identity.identity_features,
+                    identity_status=identity.identity_status,
+                )
 
             prepared = await self._prepare_metadata(
                 session,
@@ -547,6 +637,7 @@ __all__ = [
     "ConfigResolver",
     "EndUserMergeService",
     "GraphMerge",
+    "IdentityStamp",
     "MergeNotReady",
     "MergeOutcome",
     "MergeRejected",
