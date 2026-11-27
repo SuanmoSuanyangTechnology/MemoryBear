@@ -31,7 +31,7 @@ from fastapi import Request
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 from memorybear_grpc.metadata import traceparent_trace_id
 from pydantic import BaseModel
-from starlette.routing import compile_path
+from starlette.convertors import UUIDConvertor
 
 from .circuit import CircuitBreaker
 from .knowledge_routes import versioned_knowledge_target
@@ -85,12 +85,20 @@ def rewrite_internal_path(external_path: str) -> str:
 def _compile_api_key_path(template: str) -> tuple[str, re.Pattern[str]]:
     """Compile one "METHOD /path/{param}" allowlist entry into (method, regex).
 
-    ``{param}`` matches one segment. Typed parameters such as ``{id:uuid}``
-    match only the declared type. Cache the result for the route's lifetime.
+    ``{param}`` matches one segment, and ``{id:uuid}`` matches a UUID segment.
+    Cache the result for the route's lifetime.
     """
     method, _, path = template.partition(" ")
-    pattern, _, _ = compile_path(path.strip())
-    return method.strip().upper(), pattern
+    parts = re.split(r"(\{[^}]+\})", path.strip())
+    regex = []
+    for index, part in enumerate(parts):
+        if index % 2 == 0:
+            regex.append(re.escape(part))
+        elif part.endswith(":uuid}"):
+            regex.append(UUIDConvertor.regex)
+        else:
+            regex.append("[^/]+")
+    return method.strip().upper(), re.compile("".join(regex))
 
 
 class TargetRoute(BaseModel):
