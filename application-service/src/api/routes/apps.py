@@ -95,7 +95,10 @@ def create_app(
         data=payload,
     )
     # After creation, fetch and return the bound ontology info (no ontology_id -> default)
-    return success(data=service.to_schema_with_ontology(app, workspace_id), msg="创建应用成功")
+    return success(
+        data=service.to_schema_with_ontology(app, workspace_id, principal.tenant_id),
+        msg="创建应用成功",
+    )
 
 
 @router.get("", summary="应用列表（分页）", response_model=ApiResponse)
@@ -175,7 +178,9 @@ def list_apps(
         app_ids = [app_id.strip() for app_id in ids.split(',') if app_id.strip()]
         if app_ids:
             items_orm = service.get_apps_by_ids(app_ids, workspace_id)
-            items = service.to_schemas_with_ontology(items_orm, workspace_id)
+            items = service.to_schemas_with_ontology(
+                items_orm, workspace_id, principal.tenant_id,
+            )
             if include_external_status:
                 apply_external_status(
                     items,
@@ -206,9 +211,12 @@ def list_apps(
         ontology_status=ontology_status,
         field_search=field_search,
         orchestration_mode=orchestration_mode,
+        tenant_id=principal.tenant_id,
     )
 
-    items = service.to_schemas_with_ontology(items_orm, workspace_id)
+    items = service.to_schemas_with_ontology(
+        items_orm, workspace_id, principal.tenant_id,
+    )
     if include_external_status:
         apply_external_status(
             items,
@@ -402,7 +410,9 @@ def delete_app(
     if runtime.settings.application_service_market_mode == "gateway":
         app = service.get_app(app_id, workspace_id)
         external = app.origin == "external"
-    service.delete_app(app_id=app_id, workspace_id=workspace_id)
+    service.delete_app(
+        app_id=app_id, workspace_id=workspace_id, tenant_id=principal.tenant_id,
+    )
     if external:
         try:
             asyncio.run(

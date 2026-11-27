@@ -433,6 +433,29 @@ class AppServiceSettings(BaseSettings):
     memory_profile_write_timeout_seconds: float = Field(
         default=600.0, gt=0, validation_alias="MEMORY_PROFILE_WRITE_TIMEOUT_SECONDS"
     )
+    # East-west face of memory-enterprise (ontology bindings + emotion reply
+    # policies). Community deployments run without this service; an empty base
+    # URL keeps the enterprise plugins unregistered and the open-source
+    # defaults in effect. The scoped token is the only credential this service
+    # holds: memory-enterprise admits it on the app-service routes and nowhere
+    # else.
+    memory_enterprise_base_url: str = Field(
+        default="",
+        validation_alias="MEMORY_ENTERPRISE_BASE_URL",
+    )
+    memory_enterprise_application_service_token: SecretStr = Field(
+        default=SecretStr(""),
+        validation_alias="MEMORY_ENTERPRISE_APPLICATION_SERVICE_TOKEN",
+    )
+    memory_enterprise_connect_timeout_seconds: float = Field(
+        default=5.0, gt=0, validation_alias="MEMORY_ENTERPRISE_CONNECT_TIMEOUT_SECONDS"
+    )
+    memory_enterprise_read_timeout_seconds: float = Field(
+        default=30.0, gt=0, validation_alias="MEMORY_ENTERPRISE_READ_TIMEOUT_SECONDS"
+    )
+    memory_enterprise_write_timeout_seconds: float = Field(
+        default=30.0, gt=0, validation_alias="MEMORY_ENTERPRISE_WRITE_TIMEOUT_SECONDS"
+    )
     # East-west direct dependency on model-service (annotation embeddings),
     # never routed through the gateway; same env name as the monolith's
     # outbound knob. Unset or unreachable degrades annotation writes to a

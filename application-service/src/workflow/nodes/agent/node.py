@@ -217,9 +217,10 @@ class AgentNode(BaseNode):
                     from ....memory.memory_service import create_long_term_memory_tool
                     from ....services.memory_config_service import MemoryConfigService
 
-                    async with get_async_db_context() as db:
-                        workspace_uuid = uuid.UUID(str(workspace_id))
-                        config_id = await MemoryConfigService(db).get_workspace_active_config_id_async(workspace_uuid)
+                    workspace_uuid = uuid.UUID(str(workspace_id))
+                    config_id = await MemoryConfigService().get_workspace_active_config_id_async(
+                        workspace_uuid, user_id,
+                    )
 
                     # create_long_term_memory_tool checks 'enabled' internally; align it here
                     memory_tool = create_long_term_memory_tool(

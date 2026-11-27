@@ -437,8 +437,8 @@ class AppChatService:
         app_id — not configured / disabled / no annotations all return None and
         the caller proceeds with normal orchestration; any exception also
         degrades to None (annotations are additive and never block the turn).
-        Memory dispatch only runs when the cluster memory switch
-        (supervisor_config.memory.enabled) is on.
+        The memory-pair dispatch is unconditional here; the release
+        config.memory.enabled gate lives inside dispatch_memory_pair.
         """
         try:
             from ..models.annotation_model import HitLogSource
@@ -467,18 +467,13 @@ class AppChatService:
                 content=answer,
                 meta_data={"usage": {}},
             )
-            supervisor_config = getattr(config, "supervisor_config", None)
-            if hasattr(supervisor_config, "model_dump"):
-                supervisor_config = supervisor_config.model_dump()
-            memory_cfg = (supervisor_config or {}).get("memory") if isinstance(supervisor_config, dict) else None
-            if isinstance(memory_cfg, dict) and memory_cfg.get("enabled"):
-                await self.conversation_service.dispatch_memory_pair(
-                    conversation_id,
-                    user_message={"id": user_message_id, "content": message, "meta_data": {"files": []}},
-                    assistant_message={"id": message_id, "content": answer, "meta_data": {"usage": {}}},
-                    storage_type=storage_type or "neo4j",
-                    user_rag_memory_id=user_rag_memory_id or "",
-                )
+            await self.conversation_service.dispatch_memory_pair(
+                conversation_id,
+                user_message={"id": user_message_id, "content": message, "meta_data": {"files": []}},
+                assistant_message={"id": message_id, "content": answer, "meta_data": {"usage": {}}},
+                storage_type=storage_type or "neo4j",
+                user_rag_memory_id=user_rag_memory_id or "",
+            )
             return match
         except Exception as e:  # noqa: BLE001 - annotations are an additive capability
             logger.warning(f"集群标注命中处理失败（已跳过，走正常编排）: {e}")
@@ -1060,7 +1055,8 @@ class AppChatService:
         # write, the cache has no consumer, and skipping avoids orphan keys.
         system_prompt = await apply_emotion_detection(
             system_prompt, emotion_detection, user_message_id,
-            app_id=config.app_id, tenant_id=tenant_id, db=self.db, write_cache=memory,
+            app_id=config.app_id, tenant_id=tenant_id, workspace_id=workspace_id,
+            db=self.db, write_cache=memory,
         )
 
         # Weak models: drive multi-round tool calls with the ReAct prompt and
@@ -1574,7 +1570,8 @@ class AppChatService:
             # fast write, the cache has no consumer — skip to avoid orphan keys.
             system_prompt = await apply_emotion_detection(
                 system_prompt, emotion_detection, user_message_id,
-                app_id=config.app_id, tenant_id=tenant_id, db=self.db, write_cache=memory,
+                app_id=config.app_id, tenant_id=tenant_id, workspace_id=workspace_id,
+                db=self.db, write_cache=memory,
             )
 
             # Weak model: drive multi-round tool calls with a ReAct prompt and

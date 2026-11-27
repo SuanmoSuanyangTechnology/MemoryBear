@@ -601,7 +601,7 @@ def update_workspace_models_configs(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """更新当前工作空间的模型配置（过渡期由老单体原子写，状态与体原样转发）"""
+    """更新当前工作空间的模型配置（本地写列 + memory-profile 登记重算任务）"""
     workspace_id = current_user.current_workspace_id
     locale = get_language_from_header(language_type)
     logger.info(
@@ -611,6 +611,7 @@ def update_workspace_models_configs(
         locale,
     )
     status_code, body = workspace_models_service.update_workspace_models(
+        db,
         workspace_id=workspace_id,
         actor=current_user,
         models_update=models_update,

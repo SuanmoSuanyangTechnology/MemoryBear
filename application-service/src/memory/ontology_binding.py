@@ -1,11 +1,12 @@
 """Remote ontology binding facade for the split application service.
 
-Ontology tables are owned by the memory domain; this service must not read
-them directly. While the memory module is loaded, the monolith registers an
-in-process ``memory.ontology_binding`` plugin and exposes it over the internal
-callback endpoints (``/api/internal/app-service/apps/ontology-*``); this
-module is the remote counterpart registered under the same plugin name, so
-callers keep using ``get_plugin(ONTOLOGY_BINDING_PLUGIN)``.
+Ontology tables and their app bindings are owned by the memory domain; this
+service must not read them directly. Community deployments have no
+memory-enterprise at all; enterprise deployments reach its app-service
+internal routes (``/internal/v1/apps/ontology-*``) with the scoped
+application-service token. The facade is registered under the
+``memory.ontology_binding`` plugin name, so callers keep using
+``get_plugin(ONTOLOGY_BINDING_PLUGIN)``.
 
 The enterprise wiring registers it through
 ``enterprise_ext.app.register_app_plugins``. Open-source builds leave the
@@ -20,24 +21,23 @@ import uuid
 from collections.abc import Iterable
 from typing import Any
 
-from ..infrastructure.upstream import MonolithUpstream, UpstreamUnavailableError
+from ..integrations.memory_enterprise import (
+    MemoryEnterpriseClient,
+    MemoryEnterpriseProtocolError,
+    MemoryEnterpriseUnavailableError,
+)
 
 logger = logging.getLogger(__name__)
 
 ONTOLOGY_BINDING_PLUGIN = "memory.ontology_binding"
 
-_BATCH_PATH = "/api/internal/app-service/apps/ontology-batch"
-_FILTER_PATH = "/api/internal/app-service/apps/ontology-filter"
-_BIND_PATH = "/api/internal/app-service/apps/ontology-bind"
-_UNBIND_PATH = "/api/internal/app-service/apps/ontology-unbind"
-
 
 class OntologyUpstreamError(RuntimeError):
-    """The ontology callback channel is unconfigured or returned a bad envelope.
+    """The ontology service is unconfigured or rejected the request.
 
-    ``code`` carries the monolith business code when the endpoint answered with
-    a business error envelope, so callers can pass it through to clients;
-    transport failures leave it as None.
+    ``code`` carries the business code when memory-enterprise answered with a
+    business error envelope, so callers can pass it through to clients;
+    transport and protocol failures leave it as None.
     """
 
     def __init__(self, message: str, code: int | None = None) -> None:
@@ -50,7 +50,7 @@ def _dedupe(app_ids: Iterable[uuid.UUID]) -> list[uuid.UUID]:
 
 
 class RemoteOntologyBinder:
-    """HTTP counterpart of the monolith ``SyncOntologyBinder``.
+    """Memory-enterprise counterpart of the monolith ``SyncOntologyBinder``.
 
     ``uses_local_db`` tells callers this binder does not touch the local
     session; they must end their transaction before invoking it (no remote
@@ -59,24 +59,31 @@ class RemoteOntologyBinder:
 
     uses_local_db = False
 
-    def __init__(self, upstream: MonolithUpstream) -> None:
-        self._upstream = upstream
+    def __init__(self, client: MemoryEnterpriseClient) -> None:
+        self._client = client
 
     def load_app_ontology_batch(
             self,
             db: Any,
             app_ids: Iterable[uuid.UUID],
+            tenant_id: uuid.UUID | None = None,
     ) -> dict[uuid.UUID, dict] | None:
         """Batch-load the effective ontology sub-object per app.
 
-        Returns None when the monolith reports the memory module is not
-        loaded (community edition / License without the memory feature);
-        ``db`` is unused and kept for signature parity with the local binder.
+        Returns None when the memory-enterprise channel is unconfigured
+        (community edition); ``db`` is unused and kept for signature parity
+        with the local binder.
         """
         ids = _dedupe(app_ids)
         if not ids:
             return {}
-        data = self._call(_BATCH_PATH, {"app_ids": [str(app_id) for app_id in ids]})
+        if not self._client.configured:
+            return None
+        try:
+            envelope = self._client.ontology_batch(app_ids=ids, tenant_id=tenant_id)
+        except (MemoryEnterpriseUnavailableError, MemoryEnterpriseProtocolError) as exc:
+            raise OntologyUpstreamError(str(exc)) from exc
+        data = self._data(envelope, "ontology-batch")
         if not data.get("available"):
             return None
         payload = data.get("ontology")
@@ -102,21 +109,28 @@ class RemoteOntologyBinder:
             app_ids: Iterable[uuid.UUID],
             ontology_status: str | None,
             field_search: str | None,
+            tenant_id: uuid.UUID | None = None,
     ) -> set[uuid.UUID] | None:
         """Return the candidate apps matching the ontology filter.
 
-        Returns None when the monolith reports the memory module is not
-        loaded so callers can ignore the filter instead of returning an
-        empty page.
+        Returns None when the memory-enterprise channel is unconfigured so
+        callers can ignore the filter instead of returning an empty page.
         """
         ids = _dedupe(app_ids)
         if not ids:
             return set()
-        data = self._call(_FILTER_PATH, {
-            "app_ids": [str(app_id) for app_id in ids],
-            "ontology_status": ontology_status,
-            "field_search": field_search,
-        })
+        if not self._client.configured:
+            return None
+        try:
+            envelope = self._client.ontology_filter(
+                app_ids=ids,
+                tenant_id=tenant_id,
+                ontology_status=ontology_status,
+                field_search=field_search,
+            )
+        except (MemoryEnterpriseUnavailableError, MemoryEnterpriseProtocolError) as exc:
+            raise OntologyUpstreamError(str(exc)) from exc
+        data = self._data(envelope, "ontology-filter")
         if not data.get("available"):
             return None
         raw_ids = data.get("app_ids")
@@ -136,51 +150,61 @@ class RemoteOntologyBinder:
         """Write the first binding for a just-created app.
 
         Fail-loud: the caller already committed the local app row, so an
-        unavailable channel or a rejected binding must surface to the caller
-        (which compensates) instead of being swallowed.
+        unusable channel or a rejected binding must surface to the caller
+        (which compensates) instead of being swallowed. The binder is only
+        registered when the channel is configured, so the client raises
+        ``MemoryEnterpriseUnavailableError`` for the unconfigured case too.
         """
-        data = self._call(_BIND_PATH, {
-            "app_id": str(app_id),
-            "tenant_id": str(tenant_id),
-            "ontology_id": str(ontology_id),
-        })
+        try:
+            envelope = self._client.ontology_bind(
+                app_id=app_id,
+                tenant_id=tenant_id,
+                ontology_id=ontology_id,
+            )
+        except (MemoryEnterpriseUnavailableError, MemoryEnterpriseProtocolError) as exc:
+            raise OntologyUpstreamError(str(exc)) from exc
+        data = self._data(envelope, "ontology-bind")
         if not data.get("available"):
-            raise OntologyUpstreamError("ontology binding is unavailable on the monolith")
+            raise OntologyUpstreamError("ontology binding is unavailable")
 
-    def unbind_app(self, app_id: uuid.UUID) -> None:
+    def unbind_app(self, app_id: uuid.UUID, tenant_id: uuid.UUID | None = None) -> None:
         """Soft-delete the app's active binding after the local delete commit.
 
-        Unlike ``bind_app``, unavailable is not an error: it means the monolith
-        did not load the memory module, so there is no binding to remove and the
-        delete may proceed. The callback is idempotent.
+        Unlike ``bind_app``, an unconfigured channel is not an error: the
+        community edition has no memory domain, hence no binding to remove,
+        and the delete may proceed. A configured-but-unreachable channel or a
+        rejected unbind still fails loud so the caller can compensate. The
+        call is idempotent.
         """
-        data = self._call(_UNBIND_PATH, {"app_id": str(app_id)})
+        if not self._client.configured:
+            logger.warning(
+                "memory enterprise is not configured; skipping unbind",
+                extra={"app_id": str(app_id)},
+            )
+            return
+        try:
+            envelope = self._client.ontology_unbind(app_id=app_id, tenant_id=tenant_id)
+        except (MemoryEnterpriseUnavailableError, MemoryEnterpriseProtocolError) as exc:
+            raise OntologyUpstreamError(str(exc)) from exc
+        data = self._data(envelope, "ontology-unbind")
         if not data.get("available"):
             logger.warning(
-                "ontology module unavailable on the monolith; skipping unbind",
+                "ontology module unavailable; skipping unbind",
                 extra={"app_id": str(app_id)},
             )
 
-    def _call(self, path: str, json_body: dict[str, Any]) -> dict[str, Any]:
-        if not self._upstream.configured:
-            raise OntologyUpstreamError("application service upstream is not configured")
-        try:
-            response = self._upstream.forward("POST", path, json_body=json_body)
-        except UpstreamUnavailableError as exc:
-            raise OntologyUpstreamError(str(exc)) from exc
-        body = response.body if isinstance(response.body, dict) else {}
-        if response.status_code != 200 or body.get("code") != 0:
-            message = (
-                body.get("msg") or body.get("error")
-                or "ontology callback rejected the request"
-            )
-            raw_code = body.get("code")
+    @staticmethod
+    def _data(envelope: dict[str, Any], operation: str) -> dict[str, Any]:
+        if envelope.get("code") != 0:
+            message = envelope.get("msg")
             raise OntologyUpstreamError(
-                str(message), code=raw_code if isinstance(raw_code, int) else None
+                message if isinstance(message, str) and message
+                else f"{operation} was rejected by memory enterprise",
+                code=envelope.get("code"),
             )
-        data = body.get("data")
+        data = envelope.get("data")
         if not isinstance(data, dict):
-            raise OntologyUpstreamError("ontology callback returned no data envelope")
+            raise OntologyUpstreamError(f"{operation} returned no data envelope")
         return data
 
 
