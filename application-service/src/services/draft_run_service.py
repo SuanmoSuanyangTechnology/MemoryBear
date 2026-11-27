@@ -69,6 +69,12 @@ from .multimodal_service import (
     serialize_file_reference,
 )
 from .tool_orchestrator import ToolOrchestrator
+from ..memory.retrieval_trace.tool_steps import (
+    ToolStepCollector,
+    apply_text_event,
+    apply_tool_event,
+    merge_tool_steps,
+)
 from .context_assembler import (
     ContextEvidence,
     append_external_context_rule,
@@ -1114,6 +1120,8 @@ class AgentRunService:
             status: str = "completed",
             error: Any = None,
             message_id: Optional[str] = None,
+            last_seq: Optional[int] = None,
+            last_message: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """Build the model_end event for the compare scenario uniformly."""
         data = {
@@ -1129,6 +1137,10 @@ class AgentRunService:
             "suggested_questions": suggested_questions or [],
             "status": status,
             "message_id": message_id,
+            # Last seq of this model's own timeline (each column is one turn).
+            "last_seq": last_seq,
+            # Full text of this column's last body segment.
+            "last_message": last_message,
             "timestamp": time.time(),
             "time": now_ms(),
         }
@@ -2495,6 +2507,10 @@ class AgentRunService:
                         "usage": {},
                         "elapsed_time": elapsed_time,
                         "message_length": len(annotation_match["answer"]),
+                        # No step was opened on an annotation hit, so the turn's
+                        # timeline is empty; the key stays for frame shape.
+                        "last_seq": None,
+                        "last_message": {"seq": None, "content": annotation_match["answer"]},
                         "annotation_hit": {
                             "annotation_id": str(annotation_match["annotation_id"]),
                             "similarity": annotation_match["similarity"],
@@ -2625,6 +2641,11 @@ class AgentRunService:
 
             context = None
 
+            # This turn's tool calls in arrival order (streamed with `seq` and
+            # persisted with the message). Created before the replay below, which
+            # also feeds it.
+            tool_steps = ToolStepCollector()
+
             # 8. Send the start event
             yield self._format_sse_event("start", {
                 "conversation_id": conversation_id,
@@ -2633,22 +2654,35 @@ class AgentRunService:
                 "timestamp": time.time()
             })
 
-            # Re-send the weak model's tool call steps to the frontend
+            # Re-send the weak model's tool call steps to the frontend.
+            # Replayed steps already finished before this collector existed, so no
+            # clock is started (their duration would read as ~0ms).
             for step in orchestrator_node_executions:
                 event_type = "tool_error" if step.get("status") == "failed" else "tool_end"
-                yield self._format_sse_event("tool_start", {
-                    "step_id": step.get("step_id"),
-                    "name": step.get("node_name"),
-                    "input": step.get("input"),
-                    "meta": step.get("meta"),
-                })
-                yield self._format_sse_event(event_type, {
-                    "step_id": step.get("step_id"),
-                    "name": step.get("node_name"),
-                    "output": step.get("output"),
-                    "error": step.get("error"),
-                    "meta": step.get("meta"),
-                })
+                start_payload = apply_tool_event(
+                    tool_steps,
+                    "tool_start",
+                    {
+                        "step_id": step.get("step_id"),
+                        "name": step.get("node_name"),
+                        "input": step.get("input"),
+                        "meta": step.get("meta"),
+                    },
+                    replay=True,
+                )
+                yield self._format_sse_event("tool_start", start_payload)
+                end_payload = apply_tool_event(
+                    tool_steps,
+                    event_type,
+                    {
+                        "step_id": step.get("step_id"),
+                        "name": step.get("node_name"),
+                        "output": step.get("output"),
+                        "error": step.get("error"),
+                        "meta": step.get("meta"),
+                    },
+                )
+                yield self._format_sse_event(event_type, end_payload)
 
             # Create the Agent execution record (running status)
             # skip_save=True only means "do not persist conversation messages" (the
@@ -2741,12 +2775,30 @@ class AgentRunService:
                     yield self._format_sse_event("reasoning", {"content": chunk["content"]})
                 elif isinstance(chunk, dict) and chunk.get("type") == "node_executions":
                     node_executions = chunk.get("data", [])
+                    tool_steps.reconcile(node_executions)
                 elif isinstance(chunk, dict) and chunk.get("type") == "tool_start":
-                    yield self._format_sse_event("tool_start", {"step_id": chunk.get("step_id"), "name": chunk["name"], "input": chunk.get("input"), "meta": chunk.get("meta")})
+                    start_payload = apply_tool_event(tool_steps, "tool_start", {
+                        "step_id": chunk.get("step_id"),
+                        "name": chunk["name"],
+                        "input": chunk.get("input"),
+                        "meta": chunk.get("meta"),
+                    })
+                    yield self._format_sse_event("tool_start", start_payload)
                 elif isinstance(chunk, dict) and chunk.get("type") == "tool_end":
-                    yield self._format_sse_event("tool_end", {"step_id": chunk.get("step_id"), "name": chunk["name"], "output": chunk.get("output"), "meta": chunk.get("meta")})
+                    end_payload = apply_tool_event(tool_steps, "tool_end", {
+                        "step_id": chunk.get("step_id"),
+                        "name": chunk["name"],
+                        "output": chunk.get("output"),
+                        "meta": chunk.get("meta"),
+                    })
+                    yield self._format_sse_event("tool_end", end_payload)
                 elif isinstance(chunk, dict) and chunk.get("type") == "tool_error":
-                    yield self._format_sse_event("tool_error", {"step_id": chunk.get("step_id"), "name": chunk["name"], "error": chunk.get("error")})
+                    tool_error_payload = apply_tool_event(tool_steps, "tool_error", {
+                        "step_id": chunk.get("step_id"),
+                        "name": chunk["name"],
+                        "error": chunk.get("error"),
+                    })
+                    yield self._format_sse_event("tool_error", tool_error_payload)
                 elif isinstance(chunk, dict) and chunk.get("type") == "agent_log":
                     # Incremental snapshot: fallback until the final state arrives (a
                     # mid-flight exception still leaves an inspectable trace)
@@ -2781,7 +2833,10 @@ class AgentRunService:
                     yield self._format_sse_event(event_type, chunk)
                 else:
                     full_content += chunk
-                    yield self._format_sse_event("message", {"content": chunk})
+                    # `seq` = the text segment this chunk belongs to; consecutive
+                    # chunks share one segment until a tool call interrupts them.
+                    _text_payload = apply_text_event(tool_steps, {"content": chunk})
+                    yield self._format_sse_event("message", _text_payload)
                     if tts_task is not None:
                         await text_queue.put(chunk)
 
@@ -2819,7 +2874,7 @@ class AgentRunService:
                     user_message_id=user_message_id,
                     app_id=_app_id,
                     user_id=user_id,
-                    meta_data={
+                    meta_data=merge_tool_steps({
                         "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": total_tokens},
                         "reasoning_content": full_reasoning or None,
                         "suggested_questions": suggested_questions,
@@ -2829,7 +2884,7 @@ class AgentRunService:
                         "model_config_id": str(model_config.id),
                         **({"model_parameters_override": model_parameters_override}
                            if model_parameters_override else {}),
-                    },
+                    }, tool_steps),
                     files=files,
                     processed_files=processed_files,
                     audio_url=stream_audio_url,
@@ -2918,6 +2973,13 @@ class AgentRunService:
                 "message_length": len(full_content),
                 "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": total_tokens},
                 "citations": filtered_citations,
+                # Last seq of this turn's timeline, so the client closes the
+                # reply from this frame instead of waiting for the stream to
+                # fall silent.
+                "last_seq": tool_steps.last_seq(),
+                # Full text of the last body segment, so the client can close the
+                # reply with the message itself instead of stitching chunks.
+                "last_message": tool_steps.last_message(),
             }
             if sub_agent:
                 # Sub Agent completion event: carries execution_id / tokens; the
@@ -4486,6 +4548,10 @@ class AgentRunService:
                 suggested_questions = []
                 stream_error = None
                 message_id = None
+                # This model's tool calls, in arrival order. Built here (not inside
+                # run_stream) because the inner call returns SSE text only — there is
+                # no structured channel to hand a snapshot back up.
+                tool_steps = ToolStepCollector()
 
                 # Each model's parameters are passed via the explicit override.
                 # Never mutate the shared agent_config.model_parameters: parallel
@@ -4517,13 +4583,13 @@ class AgentRunService:
                             full_content += chunk
 
                             # Forward the message chunk event (with the model identifier)
-                            await event_queue.put(self._format_sse_event("model_message", {
+                            await event_queue.put(self._format_sse_event("model_message", apply_text_event(tool_steps, {
                                 "model_index": idx,
                                 "model_config_id": model_config_id,
                                 "label": model_label,
                                 "conversation_id": returned_conversation_id,
                                 "content": chunk
-                            }))
+                            })))
 
                         # Forward the deep-thinking event (with the model identifier)
                         if event_type == "reasoning" and event_data:
@@ -4539,32 +4605,42 @@ class AgentRunService:
 
                         # Forward tool call events (with the model identifier)
                         if event_type == "tool_start" and event_data:
-                            await event_queue.put(self._format_sse_event("model_tool_start", {
+                            start_payload = apply_tool_event(tool_steps, "tool_start", {
                                 "model_index": idx,
                                 "model_config_id": model_config_id,
                                 "step_id": event_data.get("step_id"),
                                 "name": event_data.get("name", ""),
                                 "input": event_data.get("input"),
-                            }))
+                                "meta": event_data.get("meta"),
+                            })
+                            await event_queue.put(self._format_sse_event(
+                                "model_tool_start", start_payload
+                            ))
 
                         if event_type == "tool_end" and event_data:
-                            await event_queue.put(self._format_sse_event("model_tool_end", {
+                            end_payload = apply_tool_event(tool_steps, "tool_end", {
                                 "model_index": idx,
                                 "model_config_id": model_config_id,
                                 "step_id": event_data.get("step_id"),
                                 "name": event_data.get("name", ""),
                                 "output": event_data.get("output"),
                                 "meta": event_data.get("meta"),
-                            }))
+                            })
+                            await event_queue.put(self._format_sse_event(
+                                "model_tool_end", end_payload
+                            ))
 
                         if event_type == "tool_error" and event_data:
-                            await event_queue.put(self._format_sse_event("model_tool_error", {
+                            error_tool_payload = apply_tool_event(tool_steps, "tool_error", {
                                 "model_index": idx,
                                 "model_config_id": model_config_id,
                                 "step_id": event_data.get("step_id"),
                                 "name": event_data.get("name", ""),
                                 "error": event_data.get("error"),
-                            }))
+                            })
+                            await event_queue.put(self._format_sse_event(
+                                "model_tool_error", error_tool_payload
+                            ))
 
                         # Extract feature output fields from the end event
                         if event_type == "end" and event_data:
@@ -4609,7 +4685,9 @@ class AgentRunService:
                             suggested_questions=suggested_questions,
                             status="failed",
                             error=stream_error,
-                            message_id=message_id
+                            message_id=message_id,
+                            last_seq=tool_steps.last_seq(),
+                            last_message=tool_steps.last_message(),
                         )
                     ))
                     return {
@@ -4646,6 +4724,7 @@ class AgentRunService:
                     "error": None,
                     "total_tokens": total_tokens,
                     "user_message_id": str(model_user_message_id),
+                    "timeline": tool_steps.build(),
                 }
 
                 # Send the model completion event
@@ -4662,7 +4741,9 @@ class AgentRunService:
                         audio_status=audio_status,
                         citations=citations,
                         suggested_questions=suggested_questions,
-                        message_id=message_id
+                        message_id=message_id,
+                        last_seq=tool_steps.last_seq(),
+                        last_message=tool_steps.last_message(),
                     )
                 ))
 
@@ -4713,7 +4794,9 @@ class AgentRunService:
                         conversation_id=model_conversation_id,
                         elapsed_time=timeout,
                         status="failed",
-                        error=compact_error
+                        error=compact_error,
+                        last_seq=tool_steps.last_seq(),
+                        last_message=tool_steps.last_message(),
                     )
                 ))
 
@@ -4756,7 +4839,9 @@ class AgentRunService:
                         conversation_id=model_conversation_id,
                         elapsed_time=0,
                         status="failed",
-                        error=compact_error
+                        error=compact_error,
+                        last_seq=tool_steps.last_seq(),
+                        last_message=tool_steps.last_message(),
                     )
                 ))
 
@@ -4901,6 +4986,8 @@ class AgentRunService:
                                     "citations": r.get("citations", []),
                                     "suggested_questions": r.get("suggested_questions", []),
                                     "audio_status": r.get("audio_status"),
+                                    **({"timeline": r["timeline"]}
+                                       if r.get("timeline") else {}),
                                 },
                             },
                         ))
@@ -5254,6 +5341,10 @@ class AgentRunService:
         citations = []
         audio_url = None
         audio_status = None
+        # The inner run_stream is called with skip_save=True, so it persists
+        # nothing (including no tool steps). Collect them here from the forwarded
+        # events and write them onto the new version's meta_data below.
+        tool_steps = ToolStepCollector()
 
         # Send the start event
         yield self._format_sse_event("start", {
@@ -5292,11 +5383,19 @@ class AgentRunService:
                 # Accumulate content and forward the event
                 if event_type == "message" and event_data:
                     full_content += event_data.get("content", "")
-                    yield event_str
+                    # Feed the local collector so the new version's meta_data carries
+                    # the same text segments the client just saw streamed, then
+                    # re-emit with `seq` (the frame is rebuilt, not forwarded).
+                    yield self._format_sse_event(
+                        "message", apply_text_event(tool_steps, event_data)
+                    )
                 elif event_type == "reasoning" and event_data:
                     full_reasoning += event_data.get("content", "")
                     yield event_str
                 elif event_type == "tool_start" or event_type == "tool_end" or event_type == "tool_error":
+                    # Feed the local collector so the new version's meta_data carries
+                    # the same tool steps the client just saw streamed.
+                    apply_tool_event(tool_steps, event_type, event_data)
                     yield event_str
                 elif event_type in ("agent_log", "agent_log_final"):
                     # The regenerate endpoint does not return agent execution trace
@@ -5328,7 +5427,7 @@ class AgentRunService:
             content=full_content,
             version=new_version,
             parent_message_id=parent_msg_id,
-            meta_data={
+            meta_data=merge_tool_steps({
                 "reasoning_content": full_reasoning or None,
                 "regenerated_from": str(message_id),
                 "suggested_questions": suggested_questions,
@@ -5339,7 +5438,7 @@ class AgentRunService:
                 "model_config_id": str(model_config.id),
                 **({"model_parameters_override": model_parameters_override}
                    if model_parameters_override else {}),
-            },
+            }, tool_steps),
         )
 
         logger.info(
@@ -5362,5 +5461,9 @@ class AgentRunService:
             "audio_url": audio_url,
             "audio_status": audio_status,
             "citations": citations,
+            # Last seq of this turn's timeline (see the run_stream end event).
+            "last_seq": tool_steps.last_seq(),
+            # Full text of the last body segment (same as the run_stream end frame).
+            "last_message": tool_steps.last_message(),
             "timestamp": time.time()
         })

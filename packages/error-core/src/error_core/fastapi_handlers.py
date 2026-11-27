@@ -54,6 +54,28 @@ VALIDATION_ERROR_KEYS = {
 VALIDATION_FALLBACK_KEY = "errors.validation.invalid_field"
 
 
+def request_validation_detail(errors: list[dict[str, Any]]) -> str:
+    messages = []
+    for error in errors:
+        message = str(error.get("msg") or "").removeprefix("Value error, ")
+        loc = error.get("loc") or ()
+        if error.get("type") in {"uuid_parsing", "uuid_type", "missing"} and loc:
+            # Keep the field/index on Agent reference errors without echoing input.
+            fields = [str(part) for part in loc[1:]]
+            shape = tuple(part for part in fields if not part.isdecimal())
+            if shape[:1] == ("agent_config",):
+                shape = shape[1:]
+            if loc[0] == "body" and shape in {
+                ("knowledge_retrieval", "knowledge_bases", "kb_id"),
+                ("knowledge_retrieval", "reranker_id"),
+                ("tools", "tool_id"),
+                ("skills", "skill_ids"),
+            }:
+                message = f"{'.'.join(fields)}: {message}"
+        messages.append(message)
+    return "; ".join(messages) or "请求参数校验失败"
+
+
 @dataclass(frozen=True, slots=True)
 class ErrorHandlerDeps:
     """Service-specific bindings used by the shared handlers."""
@@ -239,14 +261,7 @@ def register_error_handlers(application: FastAPI, deps: ErrorHandlerDeps) -> Non
 
     @application.exception_handler(RequestValidationError)
     async def request_validation_error_handler(request: Request, exc: RequestValidationError):
-        # Same fallback literal as the host handler (wire parity).
-        detail = (
-            "; ".join(
-                str(error.get("msg") or "").removeprefix("Value error, ")
-                for error in exc.errors()
-            )
-            or "请求参数校验失败"
-        )
+        detail = request_validation_detail(exc.errors())
         language = request_locale(request, deps)
         message = deps.translate("errors.common.validation_failed", language)
         diagnostic = format_diagnostics(
@@ -354,5 +369,6 @@ __all__ = [
     "render_error",
     "request_locale",
     "request_trace_id",
+    "request_validation_detail",
     "validation_error_content",
 ]

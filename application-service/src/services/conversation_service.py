@@ -25,6 +25,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
 from ..errors import BizCode, BusinessException, ResourceNotFoundException
+from ..memory.retrieval_trace.tool_steps import hydrate_message_meta
 from ..models.conversation_model import Conversation, Message
 from ..models.message_feedback_model import MessageFeedback
 from ..repositories.conversation_repository import ConversationRepository, MessageRepository
@@ -72,6 +73,10 @@ class ConversationService:
         "audio_url",
         "audio_status",
         "files",
+        # Ordered timeline of the turn (schema_version 1): text segments, tool
+        # calls and sub-agent dispatches. Additive: the key is absent for turns
+        # without steps.
+        "timeline",
     }
 
     def _resolve_v1_internal_user_id(
@@ -255,7 +260,13 @@ class ConversationService:
                     "role": message.role,
                     "content": message.content,
                     "status": message.status,
-                    "meta_data": self._sanitize_v1_message_meta_data(message.meta_data),
+                    # The whitelist keeps `timeline`; slicing each text step
+                    # here spares the caller from re-deriving offsets from the
+                    # body it already received.
+                    "meta_data": hydrate_message_meta(
+                        self._sanitize_v1_message_meta_data(message.meta_data),
+                        message.content,
+                    ),
                     "created_at": message.created_at,
                     "version": message.version or 1,
                     "is_current": False if message.is_current is False else True,

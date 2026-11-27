@@ -18,8 +18,10 @@
 from __future__ import annotations
 
 import itertools
+import json
 import logging
-from collections.abc import AsyncIterator, Awaitable, Callable, Iterator, Sequence
+import re
+from collections.abc import AsyncIterator, Awaitable, Callable, Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Generic, TypeVar
 from uuid import UUID
@@ -89,18 +91,61 @@ def _http_status(exc: BaseException) -> int | None:
     return None
 
 
-def _upstream_code(exc: BaseException) -> str | None:
-    """沿异常链读取供应商错误码（字符串），供逐供应商映射使用。"""
+#: 纯三位数字是 HTTP 状态回显（SpeedBear 402 的 ``error.code`` 固定为 "402"），
+#: 不能当分级码用；真正的分级在 ``error.error_code``。
+_STATUS_ECHO = re.compile(r"\d{3}")
 
-    current: BaseException | None = exc
-    for _ in range(8):
-        if current is None:
-            break
-        for attr in ("code", "error_code", "type"):
-            value = getattr(current, attr, None)
-            if isinstance(value, str) and value:
-                return value
-        current = current.__cause__ or current.__context__
+
+def _str_attr(exc: BaseException, name: str) -> str | None:
+    value = getattr(exc, name, None)
+    if isinstance(value, str) and value.strip():
+        return value.strip()
+    return None
+
+
+def _error_code_in_body(body: object) -> str | None:
+    """读响应体里的 ``error.error_code``（SpeedBear 402 分级的唯一机器字段）。
+
+    OpenAI 兼容 SDK 会把 ``body["error"]`` 剥壳后挂到 ``exc.body``；直接透传的宿主
+    也可能保留 ``{"error": {...}}`` 外壳，两种形态都读。非 JSON / 非映射静默跳过。
+    """
+
+    if isinstance(body, bytes):
+        body = body.decode("utf-8", "ignore")
+    if isinstance(body, str):
+        try:
+            body = json.loads(body)
+        except (TypeError, ValueError):
+            return None
+    if not isinstance(body, Mapping):
+        return None
+    for container in (body.get("error"), body):
+        if not isinstance(container, Mapping):
+            continue
+        value = container.get("error_code")
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return None
+
+
+def upstream_error_code(exc: BaseException) -> str | None:
+    """沿异常链读取供应商错误码（字符串），供逐供应商映射使用。
+
+    顺序：``error_code`` 属性 → 响应体 ``error.error_code`` → ``code``（跳过纯三位
+    HTTP 状态回显）→ ``type``。既有供应商把码挂在异常属性 ``code`` 上，SpeedBear
+    1.13 起只把分级码放在响应体内，故响应体必须先于 ``code`` 读。
+    """
+
+    for current in _causes(exc):
+        if value := _str_attr(current, "error_code"):
+            return value
+        if value := _error_code_in_body(getattr(current, "body", None)):
+            return value
+        value = _str_attr(current, "code")
+        if value and not _STATUS_ECHO.fullmatch(value):
+            return value
+        if value := _str_attr(current, "type"):
+            return value
     return None
 
 
@@ -121,12 +166,29 @@ def is_transient_channel_error(exc: BaseException) -> bool:
     return False
 
 
-def is_switchable_channel_error(exc: BaseException) -> bool:
-    """可换渠道（429/5xx/鉴权失败/凭据无效，spec §11.2 次行）→ 顺延下一候选。"""
+#: 402 里只有渠道级额度不足可换渠道：租户/项目/Key 级额度不足换渠道也不会有额度，
+#: 换过去只会把一次可解释的失败变成一次无谓的上游调用。
+_SWITCHABLE_QUOTA_PREFIXES = ("BILLING_CHANNEL_", "ENDPOINT_NO_CHANNEL_QUOTA")
+
+
+def _is_channel_quota_error(upstream_code: str | None) -> bool:
+    normalized = (upstream_code or "").upper()
+    return any(normalized.startswith(prefix) for prefix in _SWITCHABLE_QUOTA_PREFIXES)
+
+
+def is_switchable_channel_error(
+    exc: BaseException, *, upstream_code: str | None = None
+) -> bool:
+    """可换渠道（429/5xx/鉴权失败/凭据无效/渠道级额度不足，spec §11.2）→ 顺延下一候选。"""
     for current in _causes(exc):
         if isinstance(current, CredentialDecryptError):
             return True
     status = _http_status(exc)
+    if status == 402:
+        # 只有渠道级额度不足（上游声明会话内可能恢复）才值得换渠道。
+        return _is_channel_quota_error(
+            upstream_code if upstream_code is not None else upstream_error_code(exc)
+        )
     return status is not None and (status in (401, 403, 429) or status >= 500)
 
 
@@ -215,7 +277,7 @@ def _channel_failure(
         classify_provider_failure(
             candidate.channel.provider,
             _http_status(exc),
-            _upstream_code(exc),
+            upstream_error_code(exc),
             str(exc),
             channel_id=candidate.channel.id,
         ),
@@ -284,7 +346,7 @@ def run_candidate_fallback(
                 break
             except Exception as exc:
                 last_error = exc
-                if is_client_disconnect(_http_status(exc), _upstream_code(exc)):
+                if is_client_disconnect(_http_status(exc), upstream_error_code(exc)):
                     raise  # 调用方已断开：不重试、不换渠道
                 if is_transient_channel_error(exc):
                     if attempt < max_attempts_per_channel - 1:
@@ -292,7 +354,7 @@ def run_candidate_fallback(
                     failures.append(_channel_failure(candidate, exc))
                     _notify_candidate_failure(on_candidate_failure, candidate, exc)
                     break
-                if is_switchable_channel_error(exc):
+                if is_switchable_channel_error(exc, upstream_code=upstream_error_code(exc)):
                     failures.append(_channel_failure(candidate, exc))
                     _notify_candidate_failure(on_candidate_failure, candidate, exc)
                     break
@@ -367,7 +429,7 @@ async def run_candidate_fallback_async(
                 break
             except Exception as exc:
                 last_error = exc
-                if is_client_disconnect(_http_status(exc), _upstream_code(exc)):
+                if is_client_disconnect(_http_status(exc), upstream_error_code(exc)):
                     raise  # 调用方已断开：不重试、不换渠道
                 if is_transient_channel_error(exc):
                     if attempt < max_attempts_per_channel - 1:
@@ -375,7 +437,7 @@ async def run_candidate_fallback_async(
                     failures.append(_channel_failure(candidate, exc))
                     _notify_candidate_failure(on_candidate_failure, candidate, exc)
                     break
-                if is_switchable_channel_error(exc):
+                if is_switchable_channel_error(exc, upstream_code=upstream_error_code(exc)):
                     failures.append(_channel_failure(candidate, exc))
                     _notify_candidate_failure(on_candidate_failure, candidate, exc)
                     break

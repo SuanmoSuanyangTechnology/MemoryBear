@@ -27,6 +27,12 @@
     },
     "quota_resources": {
       "model": "Model"
+    },
+    "invoke": {
+      "quota_tenant": "Tenant balance is insufficient, please top up and retry",
+      "quota_project": "Project budget is insufficient, please raise the project budget and retry",
+      "quota_api_key": "This API key has run out of quota, please use another key or contact the administrator",
+      "quota_generic": "Model quota is insufficient, please top up and retry"
     }
   }
 }

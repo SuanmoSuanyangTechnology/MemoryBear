@@ -15,7 +15,7 @@ from app.core.workflow.nodes.code.config import CodeNodeConfig
 from app.core.workflow.nodes.enums import HttpErrorHandle
 from app.core.workflow.variable.base_variable import VariableType, DEFAULT_VALUE
 from app.core.config import settings
-from app.core.workflow.nodes.http_client import get_http_client
+from app.core.workflow.nodes.http_client import get_sandbox_client
 
 logger = logging.getLogger(__name__)
 
@@ -150,7 +150,7 @@ class CodeNode(BaseNode):
         for attempt in range(max_attempts):
             try:
                 logger.info(f"节点 {self.node_id} 代码执行，尝试 {attempt + 1}/{max_attempts}")
-                client = get_http_client()
+                client = get_sandbox_client()
                 response = await client.post(
                     f"{settings.SANDBOX_URL}/v1/sandbox/run",
                     headers={

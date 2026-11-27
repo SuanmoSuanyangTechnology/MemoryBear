@@ -26,6 +26,18 @@ from app.services.multi_agent_release_resolver import (
     resolve_release_for_save,
 )
 from app.models.annotation_model import HitLogSource
+from app.core.memory.retrieval_trace.tool_steps import (
+    ToolStepCollector,
+    apply_agent_event,
+    apply_text_event,
+    apply_tool_event,
+    merge_tool_steps,
+)
+
+# 带排序 `seq` 的工具调用事件名（Agent 循环与集群转发共用一处定义）。
+_TOOL_EVENT_NAMES = frozenset({"tool_start", "tool_end", "tool_error"})
+# 主管派发子 Agent 的事件：同样需要 `seq`，否则 Agent 卡片无法插在前后两段正文之间。
+_AGENT_STEP_EVENTS = frozenset({"agent_dispatch", "agent_complete"})
 
 logger = get_business_logger()
 
@@ -773,6 +785,9 @@ class MultiAgentService:
 
         full_content = ""
         total_tokens = 0
+        # 主管自身的工具调用（子 Agent 的工具到不了这条流），按到达顺序收集，
+        # 保证刷新后时间线与流式时一致。
+        tool_steps = ToolStepCollector()
         # 本轮 assistant 消息 ID（S1 轮次锚点）：预先生成并下传给编排器，
         # master 执行记录据此带 message_id（经 BatchPersistQueue 回填），
         # 日志详情按消息挂载节点时不再依赖"时序就近"兜底——
@@ -790,7 +805,7 @@ class MultiAgentService:
             _answer = _annotation_hit["answer"]
             yield f"event: start\ndata: {json.dumps({'conversation_id': str(request.conversation_id) if request.conversation_id else None, 'message_id': str(message_id), 'user_message_id': str(user_message_id)}, ensure_ascii=False)}\n\n"
             yield f"event: message\ndata: {json.dumps({'content': _answer, 'conversation_id': str(request.conversation_id) if request.conversation_id else None}, ensure_ascii=False)}\n\n"
-            yield f"event: end\ndata: {json.dumps({'conversation_id': str(request.conversation_id) if request.conversation_id else None, 'message_id': str(message_id), 'message_length': len(_answer), 'usage': {'prompt_tokens': 0, 'completion_tokens': 0, 'total_tokens': 0}}, ensure_ascii=False)}\n\n"
+            yield f"event: end\ndata: {json.dumps({'conversation_id': str(request.conversation_id) if request.conversation_id else None, 'message_id': str(message_id), 'message_length': len(_answer), 'usage': {'prompt_tokens': 0, 'completion_tokens': 0, 'total_tokens': 0}, 'last_seq': tool_steps.last_seq(), 'last_message': {'seq': None, 'content': _answer}}, ensure_ascii=False)}\n\n"
             return
 
         # 2. 创建编排器
@@ -844,6 +859,13 @@ class MultiAgentService:
                     for _k in ("suggested_questions", "citations", "audio_url", "audio_status"):
                         if _k in data:
                             end_extras[_k] = data[_k]
+                    # 补本轮最后一个 seq：seq 由本层 collector 分配，前端据此在
+                    # end 帧直接收尾，不必等流变静默。
+                    data["last_seq"] = tool_steps.last_seq()
+                    # 同一帧带上最后一轮消息全文。
+                    data["last_message"] = tool_steps.last_message()
+                    yield f"event: end\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
+                    continue
                 except Exception:
                     pass
 
@@ -866,18 +888,49 @@ class MultiAgentService:
                     else:
                         _stream_failure = _error_payload
 
-            yield event
-            # 落库正文只认集群级的 `message` 事件（按事件名判定）。
-            # 子 Agent 的正文走 `sub_agent_message`：若一并累加，落库的 assistant
-            # 正文会比界面显示多出一份重复内容（刷新后主气泡变长）。
-            if _event_name == "message" and "data:" in event:
+            if _event_name in _TOOL_EVENT_NAMES and "data:" in event:
+                # 解析 → 归约 → 重发：payload 必须先带上 `seq`（终态还有
+                # `duration_ms`）才能离开本层，因此这里重组帧而非直接转发。
                 try:
-                    data_line = event.split("data: ", 1)[1].strip()
-                    data = json.loads(data_line)
-                    if "content" in data:
-                        full_content += data["content"]
+                    _payload = json.loads(event.split("data: ", 1)[1].strip())
                 except Exception:
-                    pass
+                    yield event
+                else:
+                    _reduced = apply_tool_event(tool_steps, _event_name, _payload)
+                    yield f"event: {_event_name}\ndata: {json.dumps(_reduced, ensure_ascii=False)}\n\n"
+                    continue
+
+            if _event_name == "message" and "data:" in event:
+                # 正文同样重组帧：`seq` 标记本 chunk 所属的文本段，客户端据此把正文
+                # 与工具步骤交错排布。正文只认集群级的 `message` 事件：子 Agent 的
+                # 正文走 `sub_agent_message`，若一并累加，落库正文会比界面多一份
+                # （刷新后主气泡变长）。
+                try:
+                    _payload = json.loads(event.split("data: ", 1)[1].strip())
+                except Exception:
+                    _payload = None
+                if _payload is not None:
+                    _reduced = apply_text_event(tool_steps, _payload)
+                    if "content" in _reduced:
+                        full_content += _reduced["content"]
+                    yield f"event: message\ndata: {json.dumps(_reduced, ensure_ascii=False)}\n\n"
+                    continue
+
+            if _event_name in _AGENT_STEP_EVENTS and "data:" in event:
+                # 主管派发子 Agent 是本轮的一个步骤，与工具调用同构：带上 `seq` 后
+                # 客户端才能把 Agent 卡片卡在前后两段正文之间。只改这两帧，
+                # 子 Agent 自己的事件保持原有通道与形状。
+                try:
+                    _payload = json.loads(event.split("data: ", 1)[1].strip())
+                except Exception:
+                    yield event
+                else:
+                    _reduced = apply_agent_event(tool_steps, _event_name, _payload)
+                    _frame = json.dumps(_reduced, ensure_ascii=False)
+                    yield f"event: {_event_name}\ndata: {_frame}\n\n"
+                    continue
+
+            yield event
 
         # 子 Agent 失败且本轮没有任何主气泡正文（如协作模式首个 Agent 即失败）：
         # 空正文按 failed 落库，content 用该错误帧的 msg。
@@ -903,12 +956,12 @@ class MultiAgentService:
         _result.user_message_id = user_message_id
         _result.full_content = full_content
         _result.total_tokens = total_tokens
-        _result.assistant_meta = {
+        _result.assistant_meta = merge_tool_steps({
             "elapsed_time": elapsed_time,
             "mode": getattr(orchestrator, "_normalized_mode", None),
             "merge_mode_actual": getattr(orchestrator, "_merge_mode_actual", None),
             "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": total_tokens},
-        }
+        }, tool_steps)
         # 建议问题 / 引用 / 语音落库（与 Agent 应用一致）；对应 features 未开启时 end_extras 为空，不写任何字段
         if end_extras:
             if "suggested_questions" in end_extras:
@@ -1468,6 +1521,9 @@ class MultiAgentService:
                 "message_id": str(new_message_id),
                 "message_length": len(_answer),
                 "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
+                # 标注命中不进编排器，本轮没有分配任何 seq
+                "last_seq": None,
+                "last_message": {"seq": None, "content": _answer},
             })
             yield _sse("regenerate_end", {
                 "message_id": str(new_message_id),
@@ -1481,6 +1537,7 @@ class MultiAgentService:
         full_content = ""
         usage: Dict[str, Any] = {}
         end_extras: Dict[str, Any] = {}
+        tool_steps = ToolStepCollector()
         stream_failed = False
         error_emitted = False
         failure_error: Optional[str] = None
@@ -1536,6 +1593,11 @@ class MultiAgentService:
 
                 if _ev == "message" and "content" in _data:
                     full_content += _data["content"]
+                    event = _sse(_ev, apply_text_event(tool_steps, _data))
+                elif _data and _ev in _TOOL_EVENT_NAMES:
+                    event = _sse(_ev, apply_tool_event(tool_steps, _ev, _data))
+                elif _data and _ev in _AGENT_STEP_EVENTS:
+                    event = _sse(_ev, apply_agent_event(tool_steps, _ev, _data))
                 yield event
         except (GeneratorExit, _asyncio.CancelledError):
             # 消费方中途断开（GeneratorExit / 任务取消均属 BaseException，不会被下方
@@ -1579,7 +1641,10 @@ class MultiAgentService:
             content=full_content,
             version=new_version,
             parent_message_id=parent_msg_id,
-            meta_data=self._build_regenerate_meta(message_id, usage=usage, extra=end_extras),
+            meta_data=merge_tool_steps(
+                self._build_regenerate_meta(message_id, usage=usage, extra=end_extras),
+                tool_steps,
+            ),
             message_id=new_message_id,
         )
 
@@ -1616,6 +1681,8 @@ class MultiAgentService:
             "message_id": str(new_message_id),
             "message_length": len(full_content),
             "usage": usage or {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
+            "last_seq": tool_steps.last_seq(),
+            "last_message": tool_steps.last_message(),
             **end_extras,
         })
         yield _sse("regenerate_end", {

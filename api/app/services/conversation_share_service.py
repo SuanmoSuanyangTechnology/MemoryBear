@@ -11,6 +11,7 @@ from app.core.utils.datetime_utils import to_timestamp_ms, utcnow_naive
 from app.core.error_codes import BizCode
 from app.core.exceptions import BusinessException
 from app.core.logging_config import get_business_logger
+from app.core.memory.retrieval_trace.tool_steps import hydrate_message_meta
 from app.core.config import settings
 from app.models import ConversationShare, Message
 
@@ -147,7 +148,7 @@ class ConversationShareService:
                     "role": msg.role,
                     "content": msg.content,
                     "created_at": to_timestamp_ms(msg.created_at),
-                    "meta_data": msg.meta_data,
+                    "meta_data": hydrate_message_meta(msg.meta_data, msg.content),
                     "feedback_type": None,
                     "feedback_content": None,
                 }

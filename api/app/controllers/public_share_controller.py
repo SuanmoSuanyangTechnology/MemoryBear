@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 from app.core.error_codes import BizCode
 from app.core.exceptions import BusinessException
 from app.core.logging_config import get_business_logger
+from app.core.memory.retrieval_trace.tool_steps import hydrate_message_meta
 from app.core.quota_manager import (
     check_end_user_quota_async,
     report_quota_change,
@@ -48,7 +49,7 @@ from app.utils.app_config_utils import workflow_config_4_app_release, \
 from app.utils.redis_cache import CACHE_MISS, get_json_async, set_json_async, redis_cache
 from app.services.message_feedback_service import FavoriteService
 from app.services.message_feedback_service import FeedbackService
-from app.models import Message, MessageFeedback
+from app.models import App, Message, MessageFeedback
 
 router = APIRouter(prefix="/public/share", tags=["Public Share"])
 logger = get_business_logger()
@@ -64,6 +65,14 @@ SHARE_FORWARD_EVENTS = frozenset({
     "memory_stage",
     "tool_end",
     "tool_error",
+    # 集群主管派发子 Agent：携带 `seq`，用于把 Agent 卡片插在共享回复的两段正文
+    # 之间。纯加法，不认识这两个事件的调用方直接忽略。
+    "agent_dispatch",
+    "agent_complete",
+    # 子 Agent 轨迹：集群流只转发 agent_dispatch / agent_complete，子 Agent 的工具
+    # 调用只能从 `agent_log.data.iterations[].tool_calls[]` 拿到。
+    "agent_log",
+    "agent_log_final",
     "end",
     "error",
     "regenerate_end",
@@ -536,17 +545,25 @@ def get_conversation(
         }
 
     def _resolve_meta(msg) -> dict | None:
-        """将 meta_data.files 中的本地附件解析为可访问 URL，不改动 ORM 原始数据"""
+        """将 meta_data.files 中的本地附件解析为可访问 URL，并给每个 text step
+        补上它自己的正文；不改动 ORM 原始数据。
+
+        体验会话与后台会话页渲染同一条时间线，所以切片也在这里做完：落库只记
+        length，响应里既然同时有段长与正文，就把切好的文本随 step 一起返回。
+        """
         meta = msg.meta_data
-        if not isinstance(meta, dict) or not meta.get("files"):
+        if not isinstance(meta, dict):
             return meta
-        resolved_files = []
-        for f in meta["files"]:
-            if not isinstance(f, dict):
-                continue
-            file_url = f.get("url") or local_file_url_map.get(str(f.get("upload_file_id")))
-            resolved_files.append({**f, "url": file_url} if file_url else f)
-        return {**meta, "files": resolved_files}
+        resolved = dict(meta)
+        if meta.get("files"):
+            resolved_files = []
+            for f in meta["files"]:
+                if not isinstance(f, dict):
+                    continue
+                file_url = f.get("url") or local_file_url_map.get(str(f.get("upload_file_id")))
+                resolved_files.append({**f, "url": file_url} if file_url else f)
+            resolved["files"] = resolved_files
+        return hydrate_message_meta(resolved, msg.content)
 
     # 构建消息响应列表
     message_responses = []
@@ -593,6 +610,34 @@ def get_conversation(
 
     conv_dict = conversation_schema.Conversation.model_validate(conversation).model_dump(mode="json")
     conv_dict["messages"] = message_responses
+
+    # 集群子 Agent 轨迹：子 Agent 的工具调用只存在于
+    # `agent_log.data.iterations[].tool_calls[]`（集群流只转发 agent_dispatch /
+    # agent_complete）。体验分享要渲染与后台同款的子 Agent 卡片，因此返回同一份
+    # 按消息分组的节点明细（主执行 + 子执行折叠，与日志详情同一个服务方法）。
+    # 工作流分享维持原状：它的节点明细来自 workflow_executions，是另一套契约。
+    app = db.get(App, conversation.app_id) if conversation.app_id else None
+    app_type = app.type if app is not None else AppType.AGENT
+    if app_type not in (AppType.WORKFLOW, AppType.PURE_WORKFLOW):
+        try:
+            page_messages = [
+                msg
+                for group in messages
+                for msg in (group if isinstance(group, list) else [group])
+            ]
+            node_map = AppLogService(db)._get_agent_node_executions(
+                conversation_id, page_messages
+            )
+            conv_dict["node_executions_map"] = {
+                key: [node.model_dump(mode="json") for node in nodes]
+                for key, nodes in node_map.items()
+            }
+        except Exception as e:
+            # 节点明细是加法：构建失败不能让分享链接打不开会话
+            logger.warning(f"分享端会话详情构建子 Agent 节点明细失败（已降级为空）: {e}")
+            conv_dict["node_executions_map"] = {}
+    else:
+        conv_dict["node_executions_map"] = {}
 
     # Aggregate human-intervention data across all executions in this
     # conversation. Structure: { message_id: { execution_id, status, interventions } }

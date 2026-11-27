@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
 from app.core.logging_config import get_business_logger
+from app.core.memory.retrieval_trace.tool_steps import hydrate_message_meta
 from app.core.response_utils import success
 from app.db import get_db
 from app.dependencies import get_current_user, cur_workspace_access_guard
@@ -236,6 +237,12 @@ def get_app_log_detail(
                 files=files,
                 created_at=m.created_at,
             ))
+
+    # 日志详情是时间线的读面：响应里同时有段长与正文，所以切片在这里做完。
+    # 每个 text step 直接带 content 发给调用方，调用方不需要再按偏移切；落库与
+    # SSE 契约仍只记 length。
+    for msg in msg_list:
+        msg.meta_data = hydrate_message_meta(msg.meta_data, msg.content)
 
     # 聚合人工介入信息，结构与 /public/share/conversations/{conversation_id} 一致
     pending_intervention_map = log_service.build_pending_intervention_map(conversation_id)

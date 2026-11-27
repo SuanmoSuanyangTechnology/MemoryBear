@@ -1,5 +1,6 @@
 """Normalize LLM provider exceptions into stable application errors."""
 
+import re
 from dataclasses import dataclass, replace
 from typing import Any, Protocol
 
@@ -122,6 +123,22 @@ _DASHSCOPE_CODE_MAP = {
     "internalerror": "server_error",
     "serviceunavailable": "server_error",
 }
+
+#: 纯三位数字是 HTTP 状态回显（SpeedBear 402 的 error.code 固定为 "402"）。
+_STATUS_ECHO = re.compile(r"\d{3}")
+
+#: SpeedBear 1.13 起额度不足的分级码：前一组归额度耗尽（3018），
+#: 渠道级额度不足是暂时态，归服务暂不可用（10003）。
+_QUOTA_EXHAUSTED_CODE_PREFIXES = (
+    "billing_tenant_",
+    "billing_project_",
+    "billing_api_key_",
+    "billing_insufficient_quota",
+)
+_CHANNEL_QUOTA_CODE_PREFIXES = (
+    "billing_channel_",
+    "endpoint_no_channel_quota",
+)
 
 _DASHSCOPE_AMBIGUOUS_CODES = frozenset({
     "invalidparameter",
@@ -305,15 +322,35 @@ def _response_mapping(error: Exception) -> dict[str, Any] | None:
 
 
 def _mapping_error_code(data: dict[str, Any] | None) -> str | None:
-    """Read a machine error code from common flat or nested response bodies."""
+    """Read a machine error code from common flat or nested response bodies.
+
+    ``error.error_code`` 先于 ``error.code``：SpeedBear 1.13 起额度不足把分级码放在
+    ``error_code``，而 ``code`` 固定为 HTTP 状态回显（字符串 "402"），按 ``code`` 取值
+    会把分级丢失。纯三位数字一律视为状态回显而非机器码。
+    """
     if not data:
         return None
     nested = data.get("error") or data.get("Error")
     if isinstance(nested, dict):
-        code = nested.get("code") or nested.get("Code")
-        if normalized := _normalize_code(code):
+        for key in ("error_code", "errorCode", "ErrorCode"):
+            if normalized := _machine_code(nested.get(key)):
+                return normalized
+    for key in ("error_code", "errorCode", "ErrorCode"):
+        if normalized := _machine_code(data.get(key)):
             return normalized
-    return _normalize_code(data.get("code") or data.get("Code"))
+    if isinstance(nested, dict):
+        code = nested.get("code") or nested.get("Code")
+        if normalized := _machine_code(code):
+            return normalized
+    return _machine_code(data.get("code") or data.get("Code"))
+
+
+def _machine_code(code: Any | None) -> str | None:
+    """Normalize a provider code, dropping pure 3-digit HTTP status echoes."""
+    normalized = _normalize_code(code)
+    if normalized is not None and _STATUS_ECHO.fullmatch(normalized):
+        return None
+    return normalized
 
 
 def _mapping_error_message(data: dict[str, Any] | None) -> str | None:
@@ -374,8 +411,10 @@ def extract_provider_error_info(
         http_status = http_status or status
 
         response_data = _response_mapping(item)
-        provider_code = provider_code or _normalize_code(getattr(item, "code", None))
+        # 响应体（error.error_code）先于异常属性 code：前者是 SpeedBear 402 的分级码，
+        # 后者的 "402" 只是 HTTP 状态回显（_machine_code 已过滤）。
         provider_code = provider_code or _mapping_error_code(response_data)
+        provider_code = provider_code or _machine_code(getattr(item, "code", None))
         if structured_message := _mapping_error_message(response_data):
             structured_messages.append(structured_message)
 
@@ -416,7 +455,16 @@ def _contains_any(message: str, phrases: tuple[str, ...]) -> bool:
 
 
 def _classification_for_provider_code(code: str | None) -> ClassifiedLLMError | None:
-    """Map a provider-neutral machine code to the internal error contract."""
+    """Map a provider-neutral machine code to the internal error contract.
+
+    SpeedBear 的额度不足分级码按前缀归类：租户/项目/API Key/未细分都属 ``quota_exceeded``
+    （3018），渠道级额度不足是暂时态，归 ``server_error``（10003）而非额度耗尽。
+    """
+    normalized = (code or "").lower()
+    if normalized.startswith(_QUOTA_EXHAUSTED_CODE_PREFIXES):
+        return _CLASSIFICATIONS["quota_exceeded"]
+    if normalized.startswith(_CHANNEL_QUOTA_CODE_PREFIXES):
+        return _CLASSIFICATIONS["server_error"]
     key = _PROVIDER_CODE_MAP.get(code or "")
     return _CLASSIFICATIONS[key] if key else None
 

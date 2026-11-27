@@ -46,10 +46,16 @@ from app.models.app_model import AppStatus, AppType
 from app.models.tool_model import ToolConfig, WorkflowToolConfig
 from app.plugins import get_plugin
 from app.repositories.app_repository import get_apps_by_id, AppRepository
+from app.repositories.tool_repository import ToolRepository
 from app.repositories.workflow_repository import WorkflowConfigRepository
 from app.schemas import app_schema
 from app.schemas.workflow_schema import WorkflowConfigUpdate
 from app.services.agent_config_converter import AgentConfigConverter
+from app.services.agent_config_references import (
+    filter_copied_agent_config,
+    validate_agent_config_references,
+    validate_enabled_tool_refs,
+)
 from app.services.asset_release_resolver import (
     AssetReleaseResolver,
     AsyncAssetReleaseResolver,
@@ -943,6 +949,14 @@ class AppService:
                 created_at=now,
                 updated_at=now,
             )
+            if app.type == AppType.AGENT and data.agent_config is not None:
+                config_tenant_id = validate_agent_config_references(
+                    self.db, data.agent_config, workspace_id, tenant_id
+                ) or ToolRepository.get_tenant_id_by_workspace_id(self.db, workspace_id)
+                if config_tenant_id is not None:
+                    validate_enabled_tool_refs(
+                        self.db, data.agent_config, config_tenant_id
+                    )
             self.db.add(app)
             self.db.flush()  # 获取 app.id
 
@@ -1220,36 +1234,26 @@ class AppService:
                 ).first()
 
                 if source_config:
-                    if is_cross_workspace:
-                        # 跨工作空间：model/tools/skills 属于 tenant 级别直接保留，
-                        # knowledge_bases 属于 workspace 级别需过滤，memory_config 需清空
-                        _, kb_ids = self._collect_resource_ids_from_config(
-                            None, source_config.knowledge_retrieval
+                    if target_tenant_id is None:
+                        target_tenant_id = ToolRepository.get_tenant_id_by_workspace_id(
+                            self.db, target_workspace_id
                         )
-                        _, available_kb_ids = self._preload_cross_workspace_resources(
-                            target_tenant_id, target_workspace_id, set(), kb_ids
-                        )
-                        new_model_config_id = source_config.default_model_config_id
-                        new_knowledge_retrieval = self._clean_knowledge_retrieval(
-                            source_config.knowledge_retrieval, available_kb_ids
-                        )
-                        new_tools = copy.deepcopy(source_config.tools) if source_config.tools else []
-                        new_memory = self._clean_memory_cross_workspace(
-                            source_config.memory, target_workspace_id
-                        )
-                        new_skills = copy.deepcopy(source_config.skills) if source_config.skills else {}
-                    else:
-                        new_model_config_id = source_config.default_model_config_id
-                        new_knowledge_retrieval = copy.deepcopy(source_config.knowledge_retrieval) if source_config.knowledge_retrieval else None
-                        new_tools = copy.deepcopy(source_config.tools) if source_config.tools else []
-                        new_memory = copy.deepcopy(source_config.memory) if source_config.memory else None
-                        new_skills = copy.deepcopy(source_config.skills) if source_config.skills else {}
+                        if target_tenant_id is None:
+                            raise ResourceNotFoundException("工作空间", str(target_workspace_id))
+                    new_knowledge_retrieval, new_tools, new_skills = filter_copied_agent_config(
+                        self.db, source_config, source_app.workspace_id, target_workspace_id,
+                        target_tenant_id,
+                    )
+                    new_memory = (
+                        self._clean_memory_cross_workspace(source_config.memory, target_workspace_id)
+                        if is_cross_workspace else copy.deepcopy(source_config.memory)
+                    )
 
                     new_config = AgentConfig(
                         id=uuid.uuid4(),
                         app_id=new_app.id,
                         system_prompt=source_config.system_prompt,
-                        default_model_config_id=new_model_config_id,
+                        default_model_config_id=source_config.default_model_config_id,
                         model_parameters=copy.deepcopy(source_config.model_parameters) if source_config.model_parameters else None,
                         knowledge_retrieval=new_knowledge_retrieval,
                         memory=new_memory,
@@ -1775,6 +1779,16 @@ class AppService:
         stmt = select(AgentConfig).where(AgentConfig.app_id == app_id, AgentConfig.is_active.is_(True)).order_by(
             AgentConfig.updated_at.desc())
         agent_cfg: Optional[AgentConfig] = self.db.scalars(stmt).first()
+
+        # References are judged against the config being replaced, so a stale
+        # tool selection that is already stored stays saveable.
+        config_tenant_id = validate_agent_config_references(
+            self.db, data, app.workspace_id, None
+        ) or ToolRepository.get_tenant_id_by_workspace_id(self.db, app.workspace_id)
+        if config_tenant_id is not None:
+            validate_enabled_tool_refs(
+                self.db, data, config_tenant_id, agent_cfg.tools if agent_cfg else None
+            )
         now = utcnow_naive()
 
         if not agent_cfg:

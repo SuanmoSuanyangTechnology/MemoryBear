@@ -36,7 +36,7 @@ class AgentConfigConverter:
         
         # 2. 知识库检索配置
         if config.knowledge_retrieval:
-            result["knowledge_retrieval"] = config.knowledge_retrieval.model_dump()
+            result["knowledge_retrieval"] = config.knowledge_retrieval.model_dump(mode="json")
         
         # 3. 记忆配置
         if hasattr(config, 'memory') and config.memory:
@@ -48,11 +48,11 @@ class AgentConfigConverter:
         
         # 5. 工具配置
         if hasattr(config, 'tools') and config.tools:
-            result["tools"] = [tool.model_dump() for tool in config.tools]
+            result["tools"] = [tool.model_dump(mode="json") for tool in config.tools]
 
         if hasattr(config, "skills") and config.skills:
             result["skills"] = (
-                config.skills.model_dump()
+                config.skills.model_dump(mode="json")
                 if hasattr(config.skills, "model_dump")
                 else config.skills
             )
