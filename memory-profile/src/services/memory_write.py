@@ -30,7 +30,7 @@ import uuid
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import sqlalchemy as sa
 
@@ -50,6 +50,9 @@ from src.repositories.memory_messages_write import (
     MemoryMessageWriteRepository,
 )
 from src.runtime import ProfileRuntime
+
+if TYPE_CHECKING:
+    from src.services.end_user_merge import IdentityStamp
 
 logger = logging.getLogger(__name__)
 
@@ -881,15 +884,17 @@ class MemoryWriteService:
     ) -> tuple[str, str, bool] | None:
         """Confirm the caller's subject and merge it into an existing one.
 
-        Ordering follows the API: the identity columns are stamped on the
-        current row *before* the merge, so a source that is about to be
-        soft-deleted keeps the feature string that answers "which subject was
-        this moved under". The advisory lock cannot span the merge either way —
-        the merged transaction commits repeatedly and releases it — exactly as
-        the API documents on its own identity lock.
+        The no-merge branch stamps and commits here. The merge branch does NOT:
+        the identity columns are written inside the merge-intent transaction and
+        roll back with it, exactly like the API's ``flush`` before
+        ``_merge_end_users_locked``. Committing the stamp first would leave a
+        source "confirmed" after a failed merge, and the write fast path
+        (same features + confirmed) would then never retry the merge.
         """
 
         clean = identity_features.strip()
+
+        from src.services.end_user_merge import IdentityStamp
 
         async with self._runtime.postgres.session() as session:
             await session.execute(
@@ -902,13 +907,24 @@ class MemoryWriteService:
                 await session.commit()
                 return str(end_user_id), "confirmed", False
 
-            await _stamp_identity(session, end_user_id, clean, "confirmed")
-            await session.commit()
-
-        await self._merge_end_users(source=end_user_id, target=candidate_id)
+        await self._merge_end_users(
+            source=end_user_id,
+            target=candidate_id,
+            identity=IdentityStamp(
+                workspace_id=workspace_id,
+                end_user_id=end_user_id,
+                identity_features=clean,
+            ),
+        )
         return str(candidate_id), "confirmed", True
 
-    async def _merge_end_users(self, *, source: uuid.UUID, target: uuid.UUID) -> None:
+    async def _merge_end_users(
+        self,
+        *,
+        source: uuid.UUID,
+        target: uuid.UUID,
+        identity: IdentityStamp | None = None,
+    ) -> None:
         """Run the ported merge (PG intent, graph, RAG, metadata, reflection)."""
 
         from src.infrastructure.forget_candidates import ForgetCandidateRefresher
@@ -938,7 +954,10 @@ class MemoryWriteService:
                 model_service=self._runtime.model_service,
                 settings=self._runtime.settings,
             ),
-            scene_names=build_scene_name_resolver(self._runtime.postgres),
+            scene_names=build_scene_name_resolver(
+                self._runtime.postgres, self._runtime.memory_enterprise
+            ),
+            config_resolver=self._resolve_reflection_config,
             refresh_forget_candidates=ForgetCandidateRefresher(
                 postgres=self._runtime.postgres,
                 neo4j=self._runtime.neo4j,
@@ -946,7 +965,19 @@ class MemoryWriteService:
                 limits=self._runtime.quota.effective_limits,
             ),
         )
-        await service.merge({source}, target)
+        await service.merge({source}, target, identity=identity)
+
+    async def _resolve_reflection_config(self, end_user_id: uuid.UUID):
+        """The merged target's workspace active config (API parity).
+
+        A write-triggered merge must dispatch the same Layer2 reflection as an
+        explicit merge; without this resolver the merge service skips it.
+        """
+
+        target = await self._end_users.write_target(str(end_user_id))
+        if target is None:
+            return None
+        return await self._configs.active_config_id(target["workspace_id"])
 
     # ── shared helpers ───────────────────────────────────────────────────
 

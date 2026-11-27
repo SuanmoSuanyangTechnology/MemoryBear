@@ -104,6 +104,61 @@ class EndUserMergeRepository:
             )
 
     @staticmethod
+    async def get_active_by_identity(
+        session: AsyncSession,
+        *,
+        workspace_id: uuid.UUID,
+        identity_features: str,
+        for_update: bool = False,
+    ) -> EndUser | None:
+        """The oldest active subject carrying this feature string (API rule).
+
+        ``for_update`` is the API's second guard after the identity advisory
+        lock: it re-reads the winning candidate under the row lock so a
+        candidate that changed between lookup and lock acquisition cannot be
+        merged into blindly.
+        """
+
+        statement = (
+            sa.select(EndUser)
+            .where(
+                EndUser.workspace_id == workspace_id,
+                EndUser.identity_features == identity_features,
+                EndUser.is_active.is_(True),
+            )
+            .order_by(EndUser.created_at.asc())
+            .limit(1)
+        )
+        if for_update:
+            statement = statement.with_for_update()
+        result = await session.execute(statement)
+        return result.scalars().first()
+
+    @staticmethod
+    async def stamp_identity(
+        session: AsyncSession,
+        *,
+        end_user_id: uuid.UUID,
+        identity_features: str,
+        identity_status: str,
+    ) -> None:
+        """Write the identity columns inside the merge-intent transaction.
+
+        The API flushes these values on the source row before the intent commit
+        and rolls them back with it, so a failed merge never leaves a source
+        "confirmed" without a matching merge edge. This method never commits.
+        """
+
+        await session.execute(
+            sa.update(EndUser)
+            .where(EndUser.id == end_user_id)
+            .values(
+                identity_features=identity_features,
+                identity_status=identity_status,
+            )
+        )
+
+    @staticmethod
     def add_merge_record(
         session: AsyncSession,
         *,
