@@ -37,10 +37,10 @@ MEMORY_LIMITS_PATH = "/internal/v1/quota/tenants/{tenant_id}/memory-limits"
 
 
 #: Bounded metadata-scope endpoint (the enterprise service owns the tables).
-METADATA_SCOPE_PATH = "/internal/v1/ontology/metadata-scope"
+METADATA_SCOPE_PATH = "/internal/v1/memory/ontology/metadata-scope"
 
 #: System-default emotion policy endpoint.
-DEFAULT_EMOTION_POLICY_PATH = "/internal/v1/ontology/default-emotion-policies/{emotion_code}"
+DEFAULT_EMOTION_POLICY_PATH = "/internal/v1/memory/ontology/default-emotion-policies/{emotion_code}"
 
 
 #: Retrieval-failure alerts handed to the enterprise notification center. The
@@ -169,7 +169,7 @@ class MemoryEnterpriseManager:
         headers["X-Trace-Id"] = get_trace_id()
         async with asyncio.timeout(self._settings.memory_enterprise_timeout_seconds):
             response = await (await self.client()).get(
-                "/internal/v1/ontology/app-emotion-policy",
+                "/internal/v1/memory/ontology/app-emotion-policy",
                 params={"app_id": str(app_id), "emotion_code": emotion_code},
                 headers=headers,
             )
@@ -217,7 +217,7 @@ class MemoryEnterpriseManager:
         if not self.enabled:
             return {}
         response = await (await self.client()).post(
-            "/internal/v1/ontology/scene-names",
+            "/internal/v1/memory/ontology/scene-names",
             headers=self._auth_headers(tenant_id=tenant_id),
             json={"scene_ids": scene_ids},
         )
@@ -241,7 +241,7 @@ class MemoryEnterpriseManager:
         if not self.enabled:
             return {}
         response = await (await self.client()).post(
-            "/internal/v1/ontology/field-labels",
+            "/internal/v1/memory/ontology/field-labels",
             headers=self._auth_headers(tenant_id=tenant_id),
             json={"scene_ids": scene_ids},
         )

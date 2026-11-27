@@ -33,7 +33,7 @@ from src.domain.shared.ids import TenantId
 logger = logging.getLogger(__name__)
 
 #: Scene-name resolution endpoint on the enterprise service.
-SCENE_NAMES_PATH = "/internal/v1/ontology/scene-names"
+SCENE_NAMES_PATH = "/internal/v1/memory/ontology/scene-names"
 
 def _secret_value(value: object) -> str:
     """Read a plain string or a ``SecretStr`` without importing pydantic here."""
