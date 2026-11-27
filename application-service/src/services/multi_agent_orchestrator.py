@@ -616,6 +616,7 @@ class MultiAgentOrchestrator:
         self._master_agent_id = getattr(config, "master_agent_id", None)
         self._master_agent_name = getattr(config, "master_agent_name", None)
         self.tenant_id = None
+        self.workspace_id = None
         self.sub_agents = {}
         # Sub-agent entries after create() resolution (agent_id replaced with a
         # valid release ID); None when constructed without create(), and
@@ -1391,6 +1392,7 @@ class MultiAgentOrchestrator:
             else:
                 app = db.get(App, config.app_id)
             if app and app.workspace_id:
+                orchestrator.workspace_id = app.workspace_id
                 if isinstance(db, AsyncSession):
                     orchestrator.tenant_id = await ToolRepository.get_tenant_id_by_workspace_id_async(
                         db,
@@ -2972,6 +2974,7 @@ class MultiAgentOrchestrator:
                     self._turn_user_message_id,
                     app_id=self._app_id,
                     tenant_id=self.tenant_id,
+                    workspace_id=self.workspace_id,
                     db=self.db,
                     write_cache=self.cluster_memory_enabled(),
                 )

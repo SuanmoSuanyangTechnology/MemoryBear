@@ -1526,8 +1526,9 @@ class AgentRunService:
         enabled = bool(memory_config and memory_config.get("enabled"))
         config_id = None
         if enabled and workspace_id:
-            async with get_async_db_context() as db:
-                config_id = await MemoryConfigService(db).get_workspace_active_config_id_async(workspace_id)
+            config_id = await MemoryConfigService().get_workspace_active_config_id_async(
+                workspace_id, user_id,
+            )
 
         tool = create_long_term_memory_tool(
             memory_config, user_id, workspace_id, storage_type, user_rag_memory_id,
@@ -1956,7 +1957,8 @@ class AgentRunService:
             # Emotion-aware reply: must complete before ToolOrchestrator / LangChainAgent.
             system_prompt = await apply_emotion_detection(
                 system_prompt, emotion_detection, user_message_id,
-                app_id=agent_config.app_id, tenant_id=tenant_id, db=self.db,
+                app_id=agent_config.app_id, tenant_id=tenant_id,
+                workspace_id=workspace_id, db=self.db,
                 write_cache=False,
             )
             use_agent_mode = ModelFeature.FUNCTION_CALL in features
@@ -2594,7 +2596,8 @@ class AgentRunService:
             # Emotion-aware reply: must complete before ToolOrchestrator / LangChainAgent.
             system_prompt = await apply_emotion_detection(
                 system_prompt, emotion_detection, user_message_id,
-                app_id=agent_config.app_id, tenant_id=tenant_id, db=self.db,
+                app_id=agent_config.app_id, tenant_id=tenant_id,
+                workspace_id=workspace_id, db=self.db,
                 write_cache=False,
             )
             use_agent_mode = ModelFeature.FUNCTION_CALL in features

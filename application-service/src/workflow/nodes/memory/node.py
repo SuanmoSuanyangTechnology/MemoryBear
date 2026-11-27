@@ -10,7 +10,6 @@ from ..base_node import BaseNode
 from .config import MemoryReadNodeConfig, MemoryWriteNodeConfig
 from ...variable.base_variable import VariableType
 from ...variable.variable_objects import FileVariable, ArrayVariable
-from ....db import get_async_db_context
 from ....schemas import FileInput
 from ....services.memory_config_service import MemoryConfigService
 
@@ -31,14 +30,17 @@ class MemoryReadNode(BaseNode):
         }
 
     @staticmethod
-    async def _get_workspace_memory_config_id(state: WorkflowState) -> uuid.UUID:
+    async def _get_workspace_memory_config_id(
+            state: WorkflowState, end_user_id: str,
+    ) -> uuid.UUID:
         workspace_id = state.get("workspace_id")
         if not workspace_id:
             raise RuntimeError("Workspace id is required")
 
         workspace_uuid = workspace_id if isinstance(workspace_id, uuid.UUID) else uuid.UUID(str(workspace_id))
-        async with get_async_db_context() as db:
-            return await MemoryConfigService(db).get_workspace_active_config_id_async(workspace_uuid)
+        return await MemoryConfigService().get_workspace_active_config_id_async(
+            workspace_uuid, end_user_id,
+        )
 
     async def execute(self, state: WorkflowState, variable_pool: VariablePool) -> Any:
         self.typed_config = MemoryReadNodeConfig(**self.config)
@@ -47,7 +49,7 @@ class MemoryReadNode(BaseNode):
         if not end_user_id:
             raise RuntimeError("End user id is required")
 
-        config_id = await self._get_workspace_memory_config_id(state)
+        config_id = await self._get_workspace_memory_config_id(state, end_user_id)
         raw_app_id = self.workflow_config.get("app_id")
         app_id = uuid.UUID(str(raw_app_id)) if raw_app_id else None
 
@@ -106,7 +108,7 @@ class MemoryWriteNode(BaseNode):
 
         if not end_user_id:
             raise RuntimeError("End user id is required")
-        config_id = await MemoryReadNode._get_workspace_memory_config_id(state)
+        config_id = await MemoryReadNode._get_workspace_memory_config_id(state, end_user_id)
         messages = []
         if self.typed_config.message:
             messages.append({
