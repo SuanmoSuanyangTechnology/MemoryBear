@@ -27,6 +27,7 @@ logger = logging.getLogger(__name__)
 #: Upload on file-service's token-guarded internal API.
 UPLOAD_PATH = "/internal/v1/files/upload"
 CONTENT_PATH = "/internal/v1/files/{file_id}/content"
+FILE_URL_PATH = "/internal/v1/storage/files/{file_id}/url"
 DEFAULT_CONTENT_TYPE = "application/octet-stream"
 
 
@@ -138,6 +139,35 @@ class FileServiceClient:
         except httpx.HTTPError as exc:
             raise FileServiceError("File service is unavailable", status_code=503) from exc
         return response.content
+
+    async def get_permanent_url(self, file_id: UUID) -> str:
+        """Resolve a permanent URL for a file the caller has authorized."""
+        if not self._settings.file_service_base_url:
+            raise FileServiceError("File service is not configured", status_code=503)
+        try:
+            async with self._http_client() as client:
+                response = await client.get(
+                    FILE_URL_PATH.format(file_id=file_id), params={"permanent": "true"}
+                )
+                response.raise_for_status()
+            payload = response.json()
+        except httpx.HTTPStatusError as exc:
+            status = exc.response.status_code
+            raise FileServiceError(
+                f"File service returned HTTP {status}", status_code=404 if status == 404 else 502
+            ) from exc
+        except httpx.HTTPError as exc:
+            raise FileServiceError("File service is unavailable", status_code=503) from exc
+        except ValueError as exc:
+            raise FileServiceError(
+                "File service returned an invalid response", status_code=502
+            ) from exc
+
+        data = payload.get("data") if isinstance(payload, dict) and payload.get("code") == 0 else None
+        url = data.get("url") if isinstance(data, dict) else None
+        if not isinstance(url, str) or not url.strip():
+            raise FileServiceError("File service returned an invalid URL", status_code=502)
+        return url
 
     async def upload(
         self,
