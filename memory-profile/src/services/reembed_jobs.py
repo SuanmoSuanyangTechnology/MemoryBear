@@ -124,18 +124,30 @@ class ReembedJobService:
         # The host registers a rebuild only when the embedding slot changed AND
         # the two configs resolve to different underlying models. Equal names
         # (including "both unresolved", exactly as the host compares them) mean
-        # the vector space did not change. Both no-op branches are successes and
-        # still invalidate the cached memory configs below, like the host, which
-        # runs that side effect regardless of whether a job was created.
+        # the vector space did not change. A no-op is a success and still
+        # invalidates the cached memory configs, like the host, which runs that
+        # side effect regardless of whether a job was created.
         slot_unchanged = old_config is not None and old_config == new_config
-        model_unchanged = old_model_name == new_model_name
-        if slot_unchanged or model_unchanged:
+        if slot_unchanged:
+            # The host never enters the embedding branch, so it never guards.
             await self._invalidate_memory_config_caches(workspace_id)
             return {
                 "job_id": await self.repository.active_job_id(workspace_id),
                 "task_id": None,
                 "created": False,
             }
+
+        # The slot changed, so the host runs the in-flight guard *before* it
+        # compares model names: swapping between two configs of the same model
+        # during a rebuild is refused too (409). The create path repeats this
+        # check under the workspace lock in ``create_job``.
+        if old_model_name == new_model_name:
+            if await self.repository.active_job_id(workspace_id) is not None:
+                raise ReembedJobCreateConflictError(
+                    "该工作空间已有进行中的重算任务，不能重复登记"
+                )
+            await self._invalidate_memory_config_caches(workspace_id)
+            return {"job_id": None, "task_id": None, "created": False}
 
         fingerprint = request_fingerprint(
             {
