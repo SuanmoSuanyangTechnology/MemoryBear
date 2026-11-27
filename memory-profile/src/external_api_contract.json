@@ -75,6 +75,15 @@
           "in": "header",
           "required": false
         },
+        "header:timezone_header": {
+          "annotation": "str | None",
+          "constraints": [
+            "alias=X-Timezone"
+          ],
+          "default": null,
+          "in": "header",
+          "required": false
+        },
         "query:end_time": {
           "annotation": "int | None",
           "constraints": [],
@@ -123,11 +132,11 @@
           "required": false
         },
         "query:timezone": {
-          "annotation": "str",
+          "annotation": "str | None",
           "constraints": [],
           "default": null,
           "in": "query",
-          "required": true
+          "required": false
         }
       },
       "response": {
@@ -378,6 +387,15 @@
           "in": "header",
           "required": false
         },
+        "header:timezone_header": {
+          "annotation": "str | None",
+          "constraints": [
+            "alias=X-Timezone"
+          ],
+          "default": null,
+          "in": "header",
+          "required": false
+        },
         "query:end_time": {
           "annotation": "int | None",
           "constraints": [],
@@ -419,11 +437,11 @@
           "required": false
         },
         "query:timezone": {
-          "annotation": "str",
+          "annotation": "str | None",
           "constraints": [],
           "default": null,
           "in": "query",
-          "required": true
+          "required": false
         }
       },
       "response": {

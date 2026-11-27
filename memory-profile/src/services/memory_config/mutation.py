@@ -423,12 +423,12 @@ class MemoryConfigMutationService:
         workspace = await self.workspaces.workspace_row(workspace_id)
         if workspace is None or not workspace["is_active"]:
             raise WorkspaceNotFoundError(str(workspace_id))
-        validation = await self.validation.valid_config(config_id, locale=locale)
+        # validation = await self.validation.valid_config(config_id, locale=locale)
         updated = await self.mutations.set_workspace_active(workspace_id, config_id)
         if not updated:
             raise WorkspaceNotFoundError(str(workspace_id))
         return ActiveConfigResult(
             config_id=config_id,
-            warnings=validation.get("warnings", []),
+            warnings=[],
             success=True,
         )

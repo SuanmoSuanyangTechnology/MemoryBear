@@ -905,10 +905,16 @@ class MultimodalService:
         return await self.attachment_storage.backend.get_signed_url(file_key, expires=86400)
 
     async def resolve_uploaded_file_url(
-        self, file: FileInput, workspace_id: uuid.UUID | str | None
+        self,
+        file: FileInput,
+        workspace_id: uuid.UUID | str | None,
+        *,
+        get_permanent_url: Callable[[uuid.UUID], Awaitable[str]] | None = None,
     ) -> FileInput:
         metadata = await self._get_local_file_metadata(file.upload_file_id, workspace_id)
-        if isinstance(self.attachment_storage.backend, LocalStorage):
+        if get_permanent_url is not None:
+            url = await get_permanent_url(file.upload_file_id)
+        elif isinstance(self.attachment_storage.backend, LocalStorage):
             url = self._permanent_attachment_url(file.upload_file_id)
         else:
             url = await self._sign_attachment_url(metadata.file_key)

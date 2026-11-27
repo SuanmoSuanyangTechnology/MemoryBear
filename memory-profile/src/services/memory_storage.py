@@ -1237,7 +1237,14 @@ class MemoryStorageService:
             is_uploaded_file = file.transfer_method == TransferMethod.LOCAL_FILE
             if is_uploaded_file:
                 try:
-                    file = await multimodal_service.resolve_uploaded_file_url(file, workspace_id)
+                    if file.type in {FileType.IMAGE, FileType.VIDEO}:
+                        file = await multimodal_service.resolve_uploaded_file_url(
+                            file,
+                            workspace_id,
+                            get_permanent_url=self.runtime.file_service.get_permanent_url,
+                        )
+                    else:
+                        file = await multimodal_service.resolve_uploaded_file_url(file, workspace_id)
                 except Exception:
                     logger.error(
                         "[TRIAL_RUN_CHAT_STREAM] Failed to resolve attachment URL: file_id=%s",
@@ -2299,7 +2306,7 @@ class MemoryStorageService:
             
             # 如果created_at是字符串格式，尝试格式化
             if isinstance(created_at, str):
-                formatted_created_at = self._format_datetime(created_at)
+                formatted_created_at = self._format_interaction_datetime(created_at)
             emotion_type = record.get('emotion_type')
             emotion_intensity = record.get('emotion_intensity')
             if emotion_type !=None:

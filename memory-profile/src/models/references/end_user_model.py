@@ -1,8 +1,11 @@
 """Read-only mappings for API-owned end-user tables."""
 
+import uuid
+
 from sqlalchemy import Boolean, Column, DateTime, Integer, String, Text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 
+from src.common.timing import utcnow_naive
 from src.models.base import ReadOnlyBase
 
 
@@ -23,7 +26,9 @@ class EndUser(ReadOnlyBase):
     is_active = Column(Boolean, nullable=False)
     write_time = Column(DateTime, nullable=True)
     created_at = Column(DateTime, nullable=True)
-    updated_at = Column(DateTime, nullable=True)
+    updated_at = Column(
+        DateTime, default=utcnow_naive, onupdate=utcnow_naive, nullable=True
+    )
     reflection_time = Column(DateTime, nullable=True)
     #: Grace deadline written when a shorter retention period expires identities.
     grace_period_until = Column(DateTime, nullable=True)
@@ -57,9 +62,13 @@ class EndUser(ReadOnlyBase):
 
 
 class EndUserMerge(ReadOnlyBase):
+    """The merge-intent edge. The table is API-owned and its ``id`` has no
+    server default, so the client must supply it exactly like the API's model
+    does; without it every merge insert violates the NOT NULL constraint."""
+
     __tablename__ = "end_user_merge"
 
-    id = Column(UUID(as_uuid=True), primary_key=True)
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     workspace_id = Column(UUID(as_uuid=True), nullable=False)
     origin_id = Column(UUID(as_uuid=True), nullable=True)
     origin_other_id = Column(String, nullable=False)

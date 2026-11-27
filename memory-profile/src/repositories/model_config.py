@@ -128,12 +128,16 @@ class ModelConfigRepository:
 
         ``slot`` chooses the preset column; callers pass a :class:`ModelSlot`
         value from the service, never user input. ``workspace_model_id`` is the
-        workspace row's own column already parsed, used when the workspace is
-        not default-config (or its preset column is empty).
+        workspace row's own column already parsed, used only when the workspace
+        is not default-config or no preset row exists.
 
-        The returned mapping always has one row (the driver-side values are
-        joined from a one-row subquery), so ``config_exists`` distinguishes a
-        missing config from a missing model.
+        A default-config workspace with a preset row resolves **every** slot
+        from that row, exactly like the API's ``_effective_workspace_models``:
+        a NULL preset slot stays NULL (and fails resolution as "not configured")
+        instead of falling back to the workspace's copied column. The returned
+        mapping always has one row (the driver-side values are joined from a
+        one-row subquery), so ``config_exists`` distinguishes a missing config
+        from a missing model.
         """
 
         preset_model_id = (
@@ -144,7 +148,16 @@ class ModelConfigRepository:
         )
         effective_model_id = _uuid_literal(workspace_model_id)
         if is_default_config:
-            effective_model_id = sa.func.coalesce(preset_model_id, effective_model_id)
+            preset_exists = sa.exists(
+                select(1)
+                .select_from(WorkspaceDefaultModelPreset)
+                .where(
+                    WorkspaceDefaultModelPreset.singleton_key == DEFAULT_PRESET_KEY
+                )
+            )
+            effective_model_id = sa.case(
+                (preset_exists, preset_model_id), else_=effective_model_id
+            )
 
         config_exists = sa.exists(
             select(1)

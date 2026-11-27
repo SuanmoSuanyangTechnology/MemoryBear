@@ -177,7 +177,9 @@ class MemoryHandler:
                 model_service=self.runtime.model_service,
                 settings=self.runtime.settings,
             ),
-            scene_names=build_scene_name_resolver(self.runtime.postgres),
+            scene_names=build_scene_name_resolver(
+                self.runtime.postgres, self.runtime.memory_enterprise
+            ),
             refresh_forget_candidates=ForgetCandidateRefresher(
                 postgres=self.runtime.postgres,
                 neo4j=self.runtime.neo4j,

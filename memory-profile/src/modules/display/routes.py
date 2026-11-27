@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Header, Query, Request
+from fastapi.exceptions import RequestValidationError
 
 from src.common.external_api import external_api
 from src.common.responses import ApiResponse
@@ -21,6 +22,23 @@ from src.schemas.display import ActivityCompositionData, ActivityStatisticsData
 
 router = APIRouter(prefix="/memory-display", tags=["Memory Display"])
 Context = Annotated[MemoryPrincipal, Depends(require_memory_context)]
+
+
+async def _display_timezone(
+    timezone: str | None = Query(None, description="IANA 时区名称"),
+    timezone_header: str | None = Header(None, alias="X-Timezone", description="IANA 时区名称"),
+) -> str:
+    """Accept gateway headers while preserving legacy internal query precedence."""
+    if timezone is not None:
+        return timezone
+    if timezone_header is not None:
+        return timezone_header
+    raise RequestValidationError(
+        [{"type": "missing", "loc": ("query", "timezone"), "msg": "Field required", "input": None}]
+    )
+
+
+DisplayTimezone = Annotated[str, Depends(_display_timezone)]
 
 
 def _handler(request: Request) -> MemoryDisplayHandler:
@@ -97,7 +115,7 @@ async def get_retrieved(
 async def get_engines(
     request: Request,
     context: Context,
-    timezone: str = Query(..., description="IANA 时区名称"),
+    timezone: DisplayTimezone,
     language_type: str | None = Header(None, alias="X-Language-Type"),
     end_user_id: str | None = Query(None, description="终端用户 ID；不传则查询整个工作空间"),
     page: int = Query(1, ge=1, description="页码，从 1 开始"),
@@ -122,7 +140,7 @@ async def get_engines(
 async def get_all(
     request: Request,
     context: Context,
-    timezone: str = Query(..., description="IANA 时区名称"),
+    timezone: DisplayTimezone,
     language_type: str | None = Header(None, alias="X-Language-Type"),
     end_user_id: str | None = Query(None, description="终端用户 ID；不传则查询整个工作空间"),
     page: int = Query(1, ge=1, description="页码，从 1 开始"),
