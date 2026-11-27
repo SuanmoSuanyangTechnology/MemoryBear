@@ -8,17 +8,12 @@ from collections import Counter, defaultdict
 from datetime import datetime
 from enum import Enum
 from functools import partial
-from io import BytesIO
 from pathlib import Path
-from tempfile import TemporaryDirectory
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
 from uuid import UUID
 
 from neo4j.time import DateTime as Neo4jDateTime
-from starlette.datastructures import Headers, UploadFile
 
-from src.config import memory_output_override
-from src.infrastructure.file_service import FileServiceError
 from src.common.errors import BizCode, LocalizedProfileError, ProfileError
 from src.common.datetime_utils import parse_iso_to_utc_naive, to_timestamp_ms
 from src.schemas.event_category_models import EVENT_CATEGORY_NAMES, EVENT_CATEGORY_NAME_TO_ID
@@ -1051,31 +1046,20 @@ class MemoryStorageService:
                     logger.info(
                         f"[PILOT_RUN_STREAM] Calling run_pilot_extraction with messages count: {len(messages)}"
                     )
-                    settings = get_settings()
-                    settings.ensure_memory_output_dir()
-                    with TemporaryDirectory(dir=settings.get_memory_output_path()) as output_dir:
-                        output_token = memory_output_override.set(Path(output_dir))
-                        try:
-                            await self._run_pilot_extraction(
-                                memory_config=memory_config,
-                                messages=messages,
-                                llm_client=llm_client,
-                                progress_callback=progress_callback,
-                                language=language,
-                                model_views=views,
-                                actor_id=actor_id,
-                                actor_kind=actor_kind,
-                            )
-                            result_path = Path(output_dir) / "extracted_result.json"
-                            result_bytes = result_path.read_bytes()
-                            extracted_result = json.loads(result_bytes)
-                        finally:
-                            memory_output_override.reset(output_token)
+                    await self._run_pilot_extraction(
+                        memory_config=memory_config,
+                        messages=messages,
+                        llm_client=llm_client,
+                        progress_callback=progress_callback,
+                        language=language,
+                        model_views=views,
+                        actor_id=actor_id,
+                        actor_kind=actor_kind,
+                    )
                     logger.info("[PILOT_RUN_STREAM] pipeline_main completed")
 
                     # 标记管线完成
                     await progress_queue.put(("__PIPELINE_COMPLETE__", "", None))
-                    return extracted_result, result_bytes
                 except Exception as e:
                     # 将异常放入队列
                     await progress_queue.put(("__PIPELINE_ERROR__", str(e), None))
@@ -1115,30 +1099,18 @@ class MemoryStorageService:
                     # 超时，继续等待（这允许检测客户端断开）
                     continue
 
-            extracted_result, result_bytes = await pipeline_task
+            await pipeline_task
+
+            result_path = Path(get_settings().get_memory_output_path("extracted_result.json"))
+            if not result_path.is_file():
+                raise FileNotFoundError(f"试运行完成，但未找到提取结果文件: {result_path}")
+            with result_path.open("r", encoding="utf-8") as result_file:
+                extracted_result = json.load(result_file)
             result_data = {
                 "config_id": cid,
                 "time_log": None,
                 "extracted_result": extracted_result,
             }
-            with BytesIO(result_bytes) as content:
-                try:
-                    stored = await self.runtime.file_service.upload(
-                        file=UploadFile(
-                            content,
-                            filename=f"pilot-run-{uuid.uuid4()}.json",
-                            headers=Headers({"content-type": "application/json"}),
-                        ),
-                        tenant_id=tenant_id,
-                        workspace_id=workspace_id,
-                        actor_id=actor_id,
-                        actor_kind=actor_kind,
-                    )
-                    result_data["result_file_id"] = stored["file_id"]
-                except FileServiceError:
-                    logger.warning("Pilot run result upload failed", exc_info=True)
-                    result_data["result_storage_error"] = {"code": "PILOT_RESULT_UPLOAD_FAILED"}
-
             yield format_sse_message("result", result_data)
 
             # 步骤 7: 发出完成事件
@@ -1817,14 +1789,22 @@ class MemoryStorageService:
                     attachment_storage=self.runtime.attachment_storage,
                     download_attachment=download_attachment,
                 )
-                if file.transfer_method == TransferMethod.LOCAL_FILE:
+                is_uploaded = file.transfer_method == TransferMethod.LOCAL_FILE
+                use_video_url = is_uploaded and file.type == FileType.VIDEO
+                processing_file = file
+                if use_video_url:
+                    processing_file = await media.resolve_uploaded_file_url(file, config.workspace_id)
+                    file.url = await media.get_file_url(file)
+                    file.name = processing_file.name
+                elif is_uploaded:
                     await self._load_trial_run_local_file(
                         file, config.workspace_id, config.tenant_id,
                         actor_id=actor_id, actor_kind=actor_kind,
                     )
                     file.url = await media.get_file_url(file)
                 parts = await media.process_files(
-                    [file], workspace_id=config.workspace_id, include_processing_errors=False
+                    [processing_file], workspace_id=config.workspace_id,
+                    include_processing_errors=False, use_resolved_url=use_video_url,
                 )
                 if not parts:
                     return None, {**failure, "code": "ATTACHMENT_PROCESSING_FAILED"}
