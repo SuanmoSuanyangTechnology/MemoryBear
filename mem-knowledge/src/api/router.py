@@ -4,6 +4,7 @@ from error_core.knowledge_upload import INTERNAL_UPLOAD_PREFIX
 from fastapi import APIRouter
 
 from .routes import upload_v2
+from .routes.chunk import public_retrieval_router
 from .routes.chunk import router as chunk_router
 from .routes.document import download_router as document_download_router
 from .routes.document import router as document_router
@@ -39,7 +40,8 @@ internal_v1_router.include_router(wiki_router)
 internal_v1_router.include_router(faq_import_router)
 internal_v1_router.include_router(wiki_faq_router)
 
-internal_upload_router = APIRouter(prefix=INTERNAL_UPLOAD_PREFIX)
-internal_upload_router.include_router(upload_v2.router)
+internal_v2_router = APIRouter(prefix=INTERNAL_UPLOAD_PREFIX)
+internal_v2_router.include_router(upload_v2.router)
+internal_v2_router.include_router(public_retrieval_router)
 
-__all__ = ["internal_upload_router", "internal_v1_router"]
+__all__ = ["internal_v1_router", "internal_v2_router"]

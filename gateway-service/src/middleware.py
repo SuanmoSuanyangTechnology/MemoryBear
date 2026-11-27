@@ -73,23 +73,9 @@ from .anonymous import (
 from .auth_strategy import AuthStrategy, load_strategy
 from .config import settings
 from .forward import TargetResolver
+from .knowledge_routes import public_knowledge_source
 
 logger = logging.getLogger(__name__)
-
-# KB 公开单文件下载例外（镜像 kb 白名单 /internal/v1/files/{uuid36}）：gateway 侧
-# 匹配外部路径 /api/files/{uuid36}（Forwarder.internal_path 映射到 kb 内部路径）。
-# 必须精确匹配整段路径：文件列表等其余 /api/files/* 若公开，攻击者可伪造通道 2
-# 身份头跨工作区拉取文件。公开仅限 GET。
-_KB_PUBLIC_FILE_DOWNLOAD_RE = re.compile(r"/api/files/[0-9a-fA-F-]{36}")
-# 公开放行注入的 X-KB-Source 取值 = kb KnowledgeRetrievalSource.MANAGER_API.value
-# （"in_api"）：对齐老单体 route_through_knowledge_service(source=MANAGER_API,
-# public=True) 的请求头语义——kb 路由层 principal=None + source=in_api 时走
-# get_public_file（按 UUID 公开下载），否则 400 KB_PRINCIPAL_INVALID。
-_KB_PUBLIC_DOWNLOAD_SOURCE = "in_api"
-
-
-def is_kb_public_file_download(path: str, method: str) -> bool:
-    return method == "GET" and _KB_PUBLIC_FILE_DOWNLOAD_RE.fullmatch(path) is not None
 
 
 # App public conversation-share exemption (mirrors the split public path
@@ -228,21 +214,17 @@ class GatewayMiddleware(BaseHTTPMiddleware):
             return await call_next(request)
         deps = self._deps_getter()  # 局部变量，避免并发 await 期间实例属性互覆
         # 先解析目标路由（aud 动态化 + 转发层取 route）；未命中即 None，走 stub 语义
-        request.state.target_route = deps.resolver.resolve(request.url.path)
+        route = deps.resolver.resolve(request.url.path)
+        request.state.target_route = route
         strategy = self._strategy or load_strategy(settings.auth_strategy_name, deps)
-        # KB public single-file download exemption (UUID-capability public read:
-        # anonymous download keyed by the file UUID, mirroring the monolith
-        # public=True proxy semantics). Applies in both strategies: anonymous
-        # requests (no credentials) skip authenticate and get the
-        # gateway-asserted source injected; requests carrying credentials always
-        # run the pipeline — a verified identity takes the kb principal path,
-        # a failing one rejects 401 (declared identity never falls back to
-        # anonymous download).
-        if is_kb_public_file_download(
-            request.url.path, request.method
-        ) and not _has_credentials(request):
-            self._public_download_headers(request)
-            return await call_next(request)
+        # 知识库公开入口只受理匿名 GET。声明凭据后沿用对应入口的鉴权。
+        if route is not None and route.service == "kb" and not (
+            "authorization" in request.headers or "x-api-key" in request.headers
+        ):
+            source = public_knowledge_source(request.url.path, request.method)
+            if source is not None:
+                self._public_knowledge_headers(request, source)
+                return await call_next(request)
         # App public conversation-share exemption: anonymous shared-link views
         # (no credentials) are forwarded with no identity injected; requests
         # carrying credentials always run the pipeline so a failing declared
@@ -306,7 +288,6 @@ class GatewayMiddleware(BaseHTTPMiddleware):
         # verbatim to the target service, which verifies it itself. The origin
         # pair is re-asserted and the forgeable identity namespace is stripped,
         # exactly like the public share-view exemption.
-        route = request.state.target_route
         if route is not None and route.auth_mode == "passthrough":
             self._passthrough_headers(request)
             return await call_next(request)
@@ -378,15 +359,10 @@ class GatewayMiddleware(BaseHTTPMiddleware):
         request.scope["headers"] = [(k.lower().encode(), v.encode()) for k, v in headers.items()]
 
     @staticmethod
-    def _public_download_headers(request: Request) -> None:
-        """Header cleanup for the anonymous public-download exemption: the same
-        sanitization set as terminated requests, then the gateway-asserted
-        X-KB-Source. Without it, forged channel-2 headers
-        (X-KB-Actor/Tenant/Workspace/Source) would be trusted by kb as the
-        monolith identity and allow cross-workspace file reads; downstream then
-        only sees a trusted one-hop source marker and no forgeable identity."""
+    def _public_knowledge_headers(request: Request, source: str) -> None:
+        """匿名知识库请求只携带 Gateway 断言的来源。"""
         headers = _sanitize_headers(request.headers)
-        headers["x-kb-source"] = _KB_PUBLIC_DOWNLOAD_SOURCE
+        headers["x-kb-source"] = source
         request.scope["headers"] = [
             (k.lower().encode(), v.encode()) for k, v in headers.items()
         ]
