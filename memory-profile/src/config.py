@@ -45,7 +45,7 @@ class ProfileSettings(BaseSettings):
 
     service_name: str = Field("memory-profile", validation_alias="PROFILE_SERVICE_NAME")
     host: str = Field("0.0.0.0", validation_alias="PROFILE_HOST")
-    port: int = Field(8082, validation_alias="PROFILE_PORT")
+    port: int = Field(8080, validation_alias="PROFILE_PORT")
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = Field(
         "INFO", validation_alias="PROFILE_LOG_LEVEL"
     )
