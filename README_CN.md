@@ -321,6 +321,26 @@ docker run -d --name elasticsearch \
   elasticsearch:8.15.0
 ```
 
+安装与 Elasticsearch 版本一致的 [IK Analysis](https://github.com/infinilabs/analysis-ik)
+插件，以便 MemoryBear 的全文检索使用 `ik_max_word` 分词器。
+
+```bash
+docker exec elasticsearch bin/elasticsearch-plugin install --batch \
+  https://get.infini.cloud/elasticsearch/analysis-ik/8.15.0
+docker restart elasticsearch
+```
+
+Elasticsearch 恢复后，验证 `ik_max_word` 能否对文本分词。响应中的 `tokens` 数组应非空。
+
+```bash
+curl -fsS http://localhost:9200/_analyze \
+  -H 'Content-Type: application/json' \
+  -d '{"analyzer":"ik_max_word","text":"数据库备份"}'
+```
+
+更换 Elasticsearch 版本时，请使用对应版本的插件。使用原始镜像重新创建容器后，
+请在执行检索前重新安装插件。
+
 #### 3.3 配置环境变量
 
 ```bash

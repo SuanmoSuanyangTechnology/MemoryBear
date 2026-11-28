@@ -318,6 +318,27 @@ docker run -d --name elasticsearch \
   elasticsearch:8.15.0
 ```
 
+Install the matching [IK Analysis](https://github.com/infinilabs/analysis-ik) plugin
+so Elasticsearch can run MemoryBear's full-text queries with `ik_max_word`.
+
+```bash
+docker exec elasticsearch bin/elasticsearch-plugin install --batch \
+  https://get.infini.cloud/elasticsearch/analysis-ik/8.15.0
+docker restart elasticsearch
+```
+
+Once Elasticsearch is back up, verify that it can analyze text with `ik_max_word`.
+The response should contain a non-empty `tokens` array.
+
+```bash
+curl -fsS http://localhost:9200/_analyze \
+  -H 'Content-Type: application/json' \
+  -d '{"analyzer":"ik_max_word","text":"数据库备份"}'
+```
+
+Use the matching plugin version when changing Elasticsearch versions. If you recreate
+the container from the stock image, reinstall the plugin before running searches.
+
 #### 3.3 Configure Environment Variables
 
 ```bash
